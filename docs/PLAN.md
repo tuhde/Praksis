@@ -156,6 +156,8 @@ The daemon evaluates the source query and sends the frontend a resolved descript
 
 ### Build and runtime
 - **Maven** with a multi-module build, on the latest LTS JDK.
+- **Maven group ID `it.uhde`**, root package **`it.uhde.praksis`**. Artifact IDs are `praksis-<part>` (e.g. `praksis-capability-api`). JPMS module names equal the root package of the module (e.g. `it.uhde.praksis.capability.api`).
+- The spike under `spikes/m0` still uses the placeholder `org.praksis.spike` and is not renamed.
 
 ### Approval policy for AI changes
 Approval is tiered by what a change does:
