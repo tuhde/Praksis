@@ -2,9 +2,11 @@
 package it.uhde.praksis.ruleset;
 
 import it.uhde.praksis.capability.CapabilityDescriptor;
+import it.uhde.praksis.capability.EffectClass;
 import it.uhde.praksis.capability.EventTypeDescriptor;
 import it.uhde.praksis.capability.FieldDescriptor;
 import it.uhde.praksis.capability.ValueType;
+import it.uhde.praksis.expression.Expression;
 import it.uhde.praksis.expression.ExpressionCompiler;
 import it.uhde.praksis.expression.ExpressionException;
 import it.uhde.praksis.expression.Scope;
@@ -30,9 +32,23 @@ public final class RulesetValidator {
     this.catalog = catalog;
   }
 
+  /** The outcome of {@link #compile}: the problems, and the compiled rules if there are none. */
+  public record Result(List<Problem> problems, List<CompiledRule> rules) {
+    public Result {
+      problems = List.copyOf(problems);
+      rules = List.copyOf(rules);
+    }
+  }
+
   /** Returns every problem found; empty if the ruleset is valid. */
   public List<Problem> validate(Ruleset ruleset) {
+    return compile(ruleset).problems();
+  }
+
+  /** Validates the ruleset and compiles its rules. The rules are empty if there are problems. */
+  public Result compile(Ruleset ruleset) {
     List<Problem> problems = new ArrayList<>();
+    List<CompiledRule> compiled = new ArrayList<>();
     if (ruleset.formatVersion() != Ruleset.SUPPORTED_FORMAT_VERSION) {
       problems.add(
           new Problem(
@@ -60,19 +76,25 @@ public final class RulesetValidator {
       if (!ruleIds.add(rule.id())) {
         problems.add(new Problem(where, "rule id declared twice"));
       }
-      rule(rule, where, params, problems);
+      compiled.add(rule(rule, where, params, problems));
     }
-    return problems;
+    return new Result(problems, problems.isEmpty() ? compiled : List.of());
   }
 
-  private void rule(Rule rule, String where, List<FieldDescriptor> params, List<Problem> out) {
+  private CompiledRule rule(
+      Rule rule, String where, List<FieldDescriptor> params, List<Problem> out) {
     Trigger.OnEvent trigger = (Trigger.OnEvent) rule.trigger();
     Optional<EventTypeDescriptor> eventType = catalog.eventType(trigger.type());
+    Optional<Expression> filter = Optional.empty();
+    List<CompiledRule.CompiledAction> actions = new ArrayList<>();
     if (eventType.isEmpty()) {
       out.add(new Problem(where + ", trigger", "unknown event type '" + trigger.type() + "'"));
     } else if (trigger.filter().isPresent()) {
       Scope scope = new Scope(eventType, params, Map.of());
-      check(trigger.filter().get(), scope, ValueType.BOOL, where + ", trigger filter", out);
+      filter =
+          Optional.ofNullable(
+              check(
+                  trigger.filter().get(), scope, ValueType.BOOL, where + ", trigger filter", out));
     }
 
     Set<String> used = new HashSet<>();
@@ -86,6 +108,7 @@ public final class RulesetValidator {
         break;
       }
       if (action instanceof Action.Stop) {
+        actions.add(new CompiledRule.CompiledAction.Stop());
         stopped = true;
         continue;
       }
@@ -102,7 +125,11 @@ public final class RulesetValidator {
       }
       used.add(call.capability());
       strongest = Math.max(strongest, cap.get().effect().ordinal());
-      args(call, cap.get(), new Scope(eventType, params, results), at, out);
+      actions.add(
+          new CompiledRule.CompiledAction.Call(
+              call.id(),
+              call.capability(),
+              args(call, cap.get(), new Scope(eventType, params, results), at, out)));
       results.put(call.id(), cap.get().results());
     }
 
@@ -125,13 +152,15 @@ public final class RulesetValidator {
               "declares effect '"
                   + rule.effect().id()
                   + "' but uses a capability with effect '"
-                  + it.uhde.praksis.capability.EffectClass.values()[strongest].id()
+                  + EffectClass.values()[strongest].id()
                   + "'"));
     }
+    return new CompiledRule(rule, filter, actions);
   }
 
-  private void args(
+  private Map<String, CompiledRule.CompiledArg> args(
       Action.Call call, CapabilityDescriptor cap, Scope scope, String at, List<Problem> out) {
+    Map<String, CompiledRule.CompiledArg> compiled = new LinkedHashMap<>();
     Map<String, FieldDescriptor> declared = new LinkedHashMap<>();
     cap.params().forEach(p -> declared.put(p.name(), p));
     for (var arg : call.args().entrySet()) {
@@ -143,11 +172,19 @@ public final class RulesetValidator {
       }
       switch (arg.getValue()) {
         case Arg.Literal l -> {
-          if (RulesetLoader.literal(field.type(), l.value()).isEmpty()) {
+          Optional<Object> value = RulesetLoader.literal(field.type(), l.value());
+          if (value.isEmpty()) {
             out.add(new Problem(argAt, "must be a " + field.type().id()));
+          } else {
+            compiled.put(arg.getKey(), new CompiledRule.CompiledArg.Value(value.get()));
           }
         }
-        case Arg.Expr e -> check(e.source(), scope, field.type(), argAt, out);
+        case Arg.Expr e -> {
+          Expression expression = check(e.source(), scope, field.type(), argAt, out);
+          if (expression != null) {
+            compiled.put(arg.getKey(), new CompiledRule.CompiledArg.Computed(expression));
+          }
+        }
       }
     }
     for (FieldDescriptor p : cap.params()) {
@@ -155,13 +192,16 @@ public final class RulesetValidator {
         out.add(new Problem(at, "missing required argument '" + p.name() + "'"));
       }
     }
+    return compiled;
   }
 
-  private void check(String source, Scope scope, ValueType expected, String at, List<Problem> out) {
+  private Expression check(
+      String source, Scope scope, ValueType expected, String at, List<Problem> out) {
     try {
-      compiler.compile(source, scope, expected);
+      return compiler.compile(source, scope, expected);
     } catch (ExpressionException e) {
       out.add(new Problem(at, firstLine(e.getMessage())));
+      return null;
     }
   }
 
