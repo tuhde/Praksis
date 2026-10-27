@@ -1,0 +1,40 @@
+// SPDX-License-Identifier: Apache-2.0
+package it.uhde.praksis.ruleset;
+
+import it.uhde.praksis.capability.CapabilityDescriptor;
+import it.uhde.praksis.capability.EventTypeDescriptor;
+import it.uhde.praksis.capability.ModuleDescriptor;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+/** The capabilities and event types of all installed modules, by name. */
+public final class ModuleCatalog {
+  private final Map<String, CapabilityDescriptor> capabilities = new HashMap<>();
+  private final Map<String, EventTypeDescriptor> eventTypes = new HashMap<>();
+
+  /** Builds the catalog. Fails if two modules declare the same capability or event type. */
+  public ModuleCatalog(List<ModuleDescriptor> modules) {
+    for (ModuleDescriptor module : modules) {
+      for (CapabilityDescriptor c : module.capabilities()) {
+        if (capabilities.putIfAbsent(c.name(), c) != null) {
+          throw new IllegalArgumentException("capability declared twice: " + c.name());
+        }
+      }
+      for (EventTypeDescriptor e : module.eventTypes()) {
+        if (eventTypes.putIfAbsent(e.type(), e) != null) {
+          throw new IllegalArgumentException("event type declared twice: " + e.type());
+        }
+      }
+    }
+  }
+
+  public Optional<CapabilityDescriptor> capability(String name) {
+    return Optional.ofNullable(capabilities.get(name));
+  }
+
+  public Optional<EventTypeDescriptor> eventType(String type) {
+    return Optional.ofNullable(eventTypes.get(type));
+  }
+}
