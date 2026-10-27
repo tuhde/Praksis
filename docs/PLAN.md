@@ -17,7 +17,7 @@ The goal is to replace the "one program per function" model of local software wi
    - Hosted in git repos, so versioned and auditable.
    - Cascadable: a public upstream ruleset plus a private local layer (e.g. "use the public mail processing ruleset plus one extra rule of mine").
 3. **Triggers**: user initiation, scheduler events, external events.
-4. **Backend (engine)**: runs the rulesets, ideally on the same machine, ideally with a GUI. Apache NiFi is a candidate.
+4. **Backend (engine)**: runs the rulesets, ideally on the same machine, ideally with a GUI. Apache NiFi was considered and rejected as the runtime (see Decisions).
 5. **Frontend**: desktop app for all major OSes, starting with Linux. JavaFX is preferred.
 6. **Local storage**: simple to maintain but flexible, with the same interface for local and external storage.
 7. **Configuration store**: configuration, access control, credential management.
@@ -60,6 +60,15 @@ The goal is to replace the "one program per function" model of local software wi
 - Rejected: a custom DSL (grammar and tooling cost, harder to layer, less reliable for an AI), embedded general-purpose scripting (not verifiable, code execution for public rulesets), and an existing rules engine's native format (ties the project to its execution model).
 - Still to define: how triggers (events, schedules, user actions) are expressed, and how rules reference event data and earlier results.
 
+### Engine
+- A **custom engine in Java, running as a daemon** (a separate local process), so scheduled and external events work with no window open. Frontends, including a CLI, connect through a local API.
+- **Apache Camel** is used inside modules where it saves work (connectors for IMAP, S3, WebDAV, files and more). It is not the engine.
+- The engine core stays **free of JavaFX and other UI dependencies**, so the runtime could be changed later.
+- Events are **persisted in SQLite**, so a crash does not lose them.
+- Packaging with a bundled runtime per OS (`jlink` and `jpackage`).
+- Rejected: Apache NiFi as the runtime (its flow-graph model does not map onto flat rule ordering, layering and per-target serialization, and it is heavy for a desktop), a Go or Rust engine (Java preferred, one language with the frontend), and existing workflow engines such as Node-RED, n8n, Temporal and Camunda (they impose their own models). NiFi may still be added later as a module for heavy data jobs.
+- Risks to check with a short spike before building on it: **cel-java** support for the CEL features the rules need, and the **JVM memory footprint and startup time** with `jlink`.
+
 ### Verification (rulesets are maintained by an AI)
 The verifier is deterministic code in the core. It is not an AI, and the AI maintaining rulesets cannot change it.
 1. **Static checks**: schema validity, unique rule IDs, resolvable patch targets, existing capabilities, credentials referenced by declared name only, no loops between rules that trigger each other.
@@ -79,14 +88,13 @@ Consequences for the design:
 1. **Approval policy** (proposed, not confirmed): changes always need human approval when they increase permissions, add destructive or external actions, or touch rules written by a human. Safe changes that pass all checks could merge automatically.
 2. **AI scope**: does the AI maintain public upstream rulesets, only the private layer, or both?
 3. **Trigger and data model**: how are triggers (events, schedules, user actions) expressed in TOML, and how do rules reference event data and earlier results?
-4. **Engine**: NiFi, a custom engine, or a hybrid?
-5. **Module system**: Java modules/ServiceLoader, process-isolated plugins, or something language-neutral?
-6. **Permission model**: how are capabilities and credentials granted to rulesets, and who approves them?
-7. **Scope of first version**: which single use case (e.g. mail processing) proves the concept?
+4. **Module system**: Java modules/ServiceLoader, or process-isolated plugins? How are Camel-based modules packaged and isolated?
+5. **Permission model**: how are capabilities and credentials granted to rulesets, and who approves them?
+6. **Scope of first version**: which single use case (e.g. mail processing) proves the concept?
 
 ## Proposed Next Steps
 
-1. Settle the open questions above, starting with the trigger and data model and the engine choice.
+1. Settle the open questions above, starting with the trigger and data model. Run a short spike first to check cel-java and the JVM footprint (see the Engine decision).
 2. Write a short architecture document: components, interfaces (module API, storage interface, trigger/event model) and the trust model.
 3. Build a thin vertical slice: engine core, one or two modules, a ruleset loader reading from git with one cascading layer, SQLite state, and a minimal CLI.
 4. Prove it with one real use case (mail processing is the working example).
