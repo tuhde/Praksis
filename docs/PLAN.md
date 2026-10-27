@@ -45,13 +45,13 @@ The goal is to replace the "one program per function" model of local software wi
 1. Settle the open questions above, starting with cascading semantics, the ruleset format and the engine choice.
 2. Write a short architecture document: components, interfaces (module API, storage interface, trigger/event model) and the trust model.
 3. Build a thin vertical slice: engine core, one or two modules, a ruleset loader reading from git with one cascading layer, SQLite state, and a minimal CLI.
-4. Prove it with one real use case (mail processing is the example Till gave).
+4. Prove it with one real use case (mail processing is the working example).
 5. Add the JavaFX frontend as a client of the engine, then the credential store and permission model.
 6. Extend to Windows and macOS.
 
 ## Name Suggestions
 
-The concept: a general core, behaviour defined by rules, built from layered modules. The working directory name "SoftwareNG" hints at "next generation".
+The concept: a general core, behaviour defined by rules, built from layered modules. The project started under the working title "SoftwareNG" ("next generation"). "Praksis" is the provisional name.
 
 | Name | Idea |
 |---|---|
@@ -63,11 +63,11 @@ The concept: a general core, behaviour defined by rules, built from layered modu
 | **Keystone** | The central piece that makes the whole structure work |
 | **Weft** | The crosswise threads that give the weave its pattern: rulesets over a fixed base of modules |
 
-Recommendation: **Praxis** or **Loom**. Both are short and easy to say, and their meaning matches the concept. Trademark, domain and existing-project conflicts are not checked yet and must be checked before choosing.
+Decision: **Praksis**, the Danish variant of Praxis, is the provisional name. Loom was rejected because of the Atlassian product and Java's Project Loom. Praxis was rejected because it is crowded (PraxisLIVE, several trademarks, a pending PRAXIS OS filing). Trademark, domain and existing-project checks for "Praksis" (DKPTO, EUIPO, USPTO, praksis.* domains) are still open.
 
 ## Verification
 
 Nothing is implemented yet, so there is nothing to test. The checks for this planning step are:
-- Till confirms the concept summary matches their intent and corrects it where it does not.
+- The concept summary is confirmed to match the intent and corrected where it does not.
 - The open questions are answered or deliberately deferred.
 - A name is chosen after a conflict check.
