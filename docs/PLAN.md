@@ -76,6 +76,16 @@ The goal is to replace the "one program per function" model of local software wi
 - Each capability's **name, typed parameters, effect classification and dry-run support** are declared as metadata, because the verifier depends on them.
 - JPMS gives encapsulation, not a sandbox. The working assumption is that **modules are trusted code** that the user installs deliberately. Rulesets are the untrusted part, and they can only reach modules through engine-checked capability calls. If untrusted third-party modules ever matter, process isolation can be added behind the same capability interface.
 
+### Permission model
+- **Default deny.** Grants live in a **local policy file outside the ruleset repos**, with **one grant set per layer**, so a private layer and its public upstream hold separate grants.
+- **Scoped capabilities.** A grant names a capability plus constraints on its arguments (e.g. `mail.move` only on account "work" and only to folders under `Archive/`). Modules declare in their metadata which parameters can be scoped.
+- **Credentials by local binding.** A rule uses a local name (e.g. `mail-account:work`). A local binding maps the name to the real account and secret and limits it to specific capabilities. Rulesets never contain or see secrets.
+- **Effective permissions** are the intersection of what the rules declare and what the user granted. The engine enforces this on every capability call.
+- **Destructive and external effects** require an explicit grant.
+- **Only the user can apply grants.** The AI can propose grants but never apply them. A ruleset update that needs more access produces a **permission diff** and needs a new grant first.
+- **Runtime prompting as a fallback.** When a rule needs something that is not granted, the engine does not block. It disables that rule, queues an approval request and notifies the user. The user answers in a frontend with allow once, allow always (which creates a scoped grant) or deny. The AI cannot answer prompts.
+- **Audit log** in SQLite of every capability call and every grant change. Grants can be revoked.
+
 ### Verification (rulesets are maintained by an AI)
 The verifier is deterministic code in the core. It is not an AI, and the AI maintaining rulesets cannot change it.
 1. **Static checks**: schema validity, unique rule IDs, resolvable patch targets, existing capabilities, credentials referenced by declared name only, no loops between rules that trigger each other.
@@ -92,11 +102,11 @@ Consequences for the design:
 
 ## Open Questions
 
-1. **Approval policy** (proposed, not confirmed): changes always need human approval when they increase permissions, add destructive or external actions, or touch rules written by a human. Safe changes that pass all checks could merge automatically.
+1. **Approval policy for AI changes**: changes that widen grants always need human approval (decided, see Permission model). Still open: do destructive or external actions, or edits to human-written rules, also always need approval when they stay inside existing grants?
 2. **AI scope**: does the AI maintain public upstream rulesets, only the private layer, or both?
 3. **Trigger and data model**: how are triggers (events, schedules, user actions) expressed in TOML, and how do rules reference event data and earlier results?
 4. **Module trust and metadata**: confirm that modules are always trusted, installed code (no open third-party marketplace for now). How is capability metadata declared: annotations, a descriptor file, or both?
-5. **Permission model**: how are capabilities and credentials granted to rulesets, and who approves them?
+5. **Runtime prompting details**: while a prompt is pending, is the triggering event held in the queue or skipped? Does a prompt time out? What scope can "allow always" create, and how does the user narrow it?
 6. **Scope of first version**: which single use case (e.g. mail processing) proves the concept?
 
 ## Proposed Next Steps
