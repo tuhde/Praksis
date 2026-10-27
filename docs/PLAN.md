@@ -58,7 +58,38 @@ The goal is to replace the "one program per function" model of local software wi
 - Each rule declares its **effect classification** and the **capabilities and credentials** it needs, so the verifier can check them and compute the permission diff.
 - Every ruleset carries a **format version**, so an engine can reject rulesets it cannot run.
 - Rejected: a custom DSL (grammar and tooling cost, harder to layer, less reliable for an AI), embedded general-purpose scripting (not verifiable, code execution for public rulesets), and an existing rules engine's native format (ties the project to its execution model).
-- Still to define: how triggers (events, schedules, user actions) are expressed, and how rules reference event data and earlier results.
+
+### Triggers and data model
+- **One typed event bus.** Everything is an event: schedule ticks, user commands and events from modules (e.g. `mail.received`). Rules subscribe by event type with an optional CEL filter.
+- **Event envelope** (CloudEvents-like): `id`, `type`, `source`, `time`, `target`, `key` (idempotency), `parent` and `depth` (for emitted events) and a `data` payload. The `target` drives the per-target serialization.
+- **Hybrid data model.** The envelope and the core fields of each event type are typed through the declaring module's metadata. A free-form `data` map holds module-specific extras. The verifier type-checks CEL expressions and action arguments against the typed parts.
+- **Triggers** live in a `[trigger]` section with one `kind`:
+  - `event`: `type` plus an optional CEL `filter`.
+  - `schedule`: `cron`, `timezone` and `catch_up = "skip" | "once"` (default `skip`) for runs missed while the daemon was down.
+  - `command`: a name, a title and typed parameters, so a frontend can generate forms.
+- **External event sources** (IMAP idle, file watcher, webhook endpoint via Camel) are provided by modules. Listening is itself a capability and needs a grant.
+- **Actions** are `[[action]]` tables with an `id`, a `capability` and `args`. Each argument is a literal or an explicit expression, `{ cel = "..." }`, so there is no string-templating ambiguity.
+- **CEL variables:** `event`, `results.<action_id>` (outputs of earlier actions in the same rule), `params` (ruleset parameters) and `now`.
+- **Ruleset parameters:** a ruleset declares named parameters with defaults, and a layer can set them without patching rules.
+- Rules communicate only through emitted events. There is no shared mutable state in the engine, and persistence goes through a storage capability. **No per-rule persistent state in the first version.**
+- Not chosen: separate trigger kinds with separate semantics, and state reconciliation (polling against a desired state) as the core model.
+
+Example rule:
+```toml
+id = "mail.archive-newsletters"
+effect = "local-write"
+needs = ["mail.move"]
+
+[trigger]
+kind = "event"
+type = "mail.received"
+filter = "event.data.headers['List-Id'] != ''"
+
+[[action]]
+id = "move"
+capability = "mail.move"
+args = { message = { cel = "event.data.message" }, folder = { cel = "params.newsletter_folder" } }
+```
 
 ### Engine
 - A **custom engine in Java, running as a daemon** (a separate local process), so scheduled and external events work with no window open. Frontends, including a CLI, connect through a local API.
@@ -104,14 +135,13 @@ Consequences for the design:
 
 1. **Approval policy for AI changes**: changes that widen grants always need human approval (decided, see Permission model). Still open: do destructive or external actions, or edits to human-written rules, also always need approval when they stay inside existing grants?
 2. **AI scope**: does the AI maintain public upstream rulesets, only the private layer, or both?
-3. **Trigger and data model**: how are triggers (events, schedules, user actions) expressed in TOML, and how do rules reference event data and earlier results?
-4. **Module trust and metadata**: confirm that modules are always trusted, installed code (no open third-party marketplace for now). How is capability metadata declared: annotations, a descriptor file, or both?
-5. **Runtime prompting details**: while a prompt is pending, is the triggering event held in the queue or skipped? Does a prompt time out? What scope can "allow always" create, and how does the user narrow it?
-6. **Scope of first version**: which single use case (e.g. mail processing) proves the concept?
+3. **Module trust and metadata**: confirm that modules are always trusted, installed code (no open third-party marketplace for now). How is capability metadata declared: annotations, a descriptor file, or both?
+4. **Runtime prompting details**: while a prompt is pending, is the triggering event held in the queue or skipped? Does a prompt time out? What scope can "allow always" create, and how does the user narrow it?
+5. **Scope of first version**: which single use case (e.g. mail processing) proves the concept?
 
 ## Proposed Next Steps
 
-1. Settle the open questions above, starting with the trigger and data model. Run a short spike first to check cel-java and the JVM footprint (see the Engine decision).
+1. Settle the open questions above, starting with the scope of the first version. Run a short spike first to check cel-java (including type-checking of custom event types) and the JVM footprint (see the Engine decision).
 2. Write a short architecture document: components, interfaces (module API, storage interface, trigger/event model) and the trust model.
 3. Build a thin vertical slice: engine core, one or two modules, a ruleset loader reading from git with one cascading layer, SQLite state, and a minimal CLI.
 4. Prove it with one real use case (mail processing is the working example).
