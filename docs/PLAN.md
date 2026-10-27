@@ -41,6 +41,16 @@ The goal is to replace the "one program per function" model of local software wi
 - **Permissions are not overridable by rulesets.** Grants for capabilities and credentials stay local.
 - Extension points that upstream authors declare may be added later as an optional feature.
 
+### Rule execution
+- **All matching rules fire**, ordered by layer position, then declaration order. There are no numeric priorities. Phases are deferred: plain ordering is enough for the first version.
+- `stop` is an explicit action, so first-match behavior is available where wanted.
+- **Conflicting effects** on the same target are an error. The verifier detects them statically where it can, and the engine catches them at runtime.
+- Rules may **emit events**, with a depth limit and loop detection. There is no fixpoint (forward) chaining.
+- Every event has an **idempotency key**, so reprocessing an event does nothing twice.
+- Events are processed **one at a time per target** and in parallel across different targets.
+- On failure the engine records it and continues with the other rules, unless the rule is marked as required. Retry and compensation are deferred.
+- The same event and the same ruleset always produce the same actions in the same order, which keeps replay and shadow mode meaningful.
+
 ### Verification (rulesets are maintained by an AI)
 The verifier is deterministic code in the core. It is not an AI, and the AI maintaining rulesets cannot change it.
 1. **Static checks**: schema validity, unique rule IDs, resolvable patch targets, existing capabilities, credentials referenced by declared name only, no loops between rules that trigger each other.
@@ -60,15 +70,14 @@ Consequences for the design:
 1. **Approval policy** (proposed, not confirmed): changes always need human approval when they increase permissions, add destructive or external actions, or touch rules written by a human. Safe changes that pass all checks could merge automatically.
 2. **AI scope**: does the AI maintain public upstream rulesets, only the private layer, or both?
 3. **Ruleset format**: declarative (YAML/JSON), a DSL, or a rules engine (e.g. Drools)? How expressive must conditions be?
-4. **Rule execution**: when several rules react to the same event, do all fire, does the first win, or do they chain? In what order?
-5. **Engine**: NiFi, a custom engine, or a hybrid?
-6. **Module system**: Java modules/ServiceLoader, process-isolated plugins, or something language-neutral?
-7. **Permission model**: how are capabilities and credentials granted to rulesets, and who approves them?
-8. **Scope of first version**: which single use case (e.g. mail processing) proves the concept?
+4. **Engine**: NiFi, a custom engine, or a hybrid?
+5. **Module system**: Java modules/ServiceLoader, process-isolated plugins, or something language-neutral?
+6. **Permission model**: how are capabilities and credentials granted to rulesets, and who approves them?
+7. **Scope of first version**: which single use case (e.g. mail processing) proves the concept?
 
 ## Proposed Next Steps
 
-1. Settle the open questions above, starting with rule execution, the ruleset format and the engine choice.
+1. Settle the open questions above, starting with the ruleset format and the engine choice.
 2. Write a short architecture document: components, interfaces (module API, storage interface, trigger/event model) and the trust model.
 3. Build a thin vertical slice: engine core, one or two modules, a ruleset loader reading from git with one cascading layer, SQLite state, and a minimal CLI.
 4. Prove it with one real use case (mail processing is the working example).
