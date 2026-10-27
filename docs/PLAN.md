@@ -51,6 +51,15 @@ The goal is to replace the "one program per function" model of local software wi
 - On failure the engine records it and continues with the other rules, unless the rule is marked as required. Retry and compensation are deferred.
 - The same event and the same ruleset always produce the same actions in the same order, which keeps replay and shadow mode meaningful.
 
+### Ruleset format
+- **TOML** files with a published schema, **one file per rule**, named by its stable ID. Actions are written as arrays of tables (`[[action]]`) to keep nesting manageable.
+- **Conditions and value expressions are written in CEL** (Common Expression Language): sandboxed, side-effect-free, always terminating, with an official Java implementation.
+- **Actions are structured calls** to named module capabilities with typed parameters, never free-form code.
+- Each rule declares its **effect classification** and the **capabilities and credentials** it needs, so the verifier can check them and compute the permission diff.
+- Every ruleset carries a **format version**, so an engine can reject rulesets it cannot run.
+- Rejected: a custom DSL (grammar and tooling cost, harder to layer, less reliable for an AI), embedded general-purpose scripting (not verifiable, code execution for public rulesets), and an existing rules engine's native format (ties the project to its execution model).
+- Still to define: how triggers (events, schedules, user actions) are expressed, and how rules reference event data and earlier results.
+
 ### Verification (rulesets are maintained by an AI)
 The verifier is deterministic code in the core. It is not an AI, and the AI maintaining rulesets cannot change it.
 1. **Static checks**: schema validity, unique rule IDs, resolvable patch targets, existing capabilities, credentials referenced by declared name only, no loops between rules that trigger each other.
@@ -69,7 +78,7 @@ Consequences for the design:
 
 1. **Approval policy** (proposed, not confirmed): changes always need human approval when they increase permissions, add destructive or external actions, or touch rules written by a human. Safe changes that pass all checks could merge automatically.
 2. **AI scope**: does the AI maintain public upstream rulesets, only the private layer, or both?
-3. **Ruleset format**: declarative (YAML/JSON), a DSL, or a rules engine (e.g. Drools)? How expressive must conditions be?
+3. **Trigger and data model**: how are triggers (events, schedules, user actions) expressed in TOML, and how do rules reference event data and earlier results?
 4. **Engine**: NiFi, a custom engine, or a hybrid?
 5. **Module system**: Java modules/ServiceLoader, process-isolated plugins, or something language-neutral?
 6. **Permission model**: how are capabilities and credentials granted to rulesets, and who approves them?
@@ -77,7 +86,7 @@ Consequences for the design:
 
 ## Proposed Next Steps
 
-1. Settle the open questions above, starting with the ruleset format and the engine choice.
+1. Settle the open questions above, starting with the trigger and data model and the engine choice.
 2. Write a short architecture document: components, interfaces (module API, storage interface, trigger/event model) and the trust model.
 3. Build a thin vertical slice: engine core, one or two modules, a ruleset loader reading from git with one cascading layer, SQLite state, and a minimal CLI.
 4. Prove it with one real use case (mail processing is the working example).
