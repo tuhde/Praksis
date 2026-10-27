@@ -32,6 +32,7 @@
     <module>praksis-expression</module>
     <module>praksis-expression-cel</module>
     <module>praksis-ruleset</module>
+    <module>praksis-store</module>
   </modules>
 
   <properties>
