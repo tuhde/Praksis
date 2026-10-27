@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package praksis.host;
 
 import java.lang.module.Configuration;

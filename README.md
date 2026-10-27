@@ -6,4 +6,6 @@ Modules provide **capabilities** (what the software is able to do). Git-hosted, 
 
 The project is in the idea-gathering phase and nothing is implemented yet. See [docs/PLAN.md](docs/PLAN.md) for the concept, open questions and proposed next steps.
 
-The project is intended to be open source. A license has not been chosen yet.
+## License
+
+Praksis is open source under the [Apache License 2.0](LICENSE). Source files carry an `SPDX-License-Identifier: Apache-2.0` header.

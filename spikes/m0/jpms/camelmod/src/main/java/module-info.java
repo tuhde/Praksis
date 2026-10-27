@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 module praksis.camelmod {
   requires praksis.api;
   requires camel.api;

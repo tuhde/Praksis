@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package spike;
 
 import com.google.protobuf.DescriptorProtos.DescriptorProto;

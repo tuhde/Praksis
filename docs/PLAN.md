@@ -177,6 +177,13 @@ Approval is tiered by what a change does:
 - The approval request itself **never expires**.
 - **Allow once** covers the single pending call. **Allow always** creates a grant scoped to exactly what was observed (the capability plus, for example, the specific account and folder). The user can narrow it. Widening beyond what was observed takes a deliberate edit, and there are no wildcard grants unless the user chooses one.
 
+### License
+- **Apache-2.0 for all code.** One license, a patent grant, and it matches the dependency ecosystem (Camel, cel-java and others). Modules and rulesets by other authors may use any license. The consequence is that proprietary forks are allowed.
+- Every source file carries `// SPDX-License-Identifier: Apache-2.0`. The repo has a `LICENSE` and a `NOTICE` file.
+- Contributions are accepted under the **DCO** (a `Signed-off-by` line), not a CLA. Relicensing later would need every contributor's consent.
+- Documentation may use CC-BY-4.0, and example rulesets published by the project may use CC0 or Apache-2.0. Not decided yet.
+- To do before a release: run a license scanner over the dependency tree, and have the license of AI-assisted code confirmed by a lawyer if there are commercial plans.
+
 ### Verification (rulesets are maintained by an AI)
 The verifier is deterministic code in the core. It is not an AI, and the AI maintaining rulesets cannot change it.
 1. **Static checks**: schema validity, unique rule IDs, resolvable patch targets, existing capabilities, credentials referenced by declared name only, no loops between rules that trigger each other.

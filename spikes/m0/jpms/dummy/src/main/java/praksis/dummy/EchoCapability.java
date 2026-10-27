@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 package praksis.dummy;
 
 import java.util.Map;
