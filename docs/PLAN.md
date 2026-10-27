@@ -69,6 +69,13 @@ The goal is to replace the "one program per function" model of local software wi
 - Rejected: Apache NiFi as the runtime (its flow-graph model does not map onto flat rule ordering, layering and per-target serialization, and it is heavy for a desktop), a Go or Rust engine (Java preferred, one language with the frontend), and existing workflow engines such as Node-RED, n8n, Temporal and Camunda (they impose their own models). NiFi may still be added later as a module for heavy data jobs.
 - Risks to check with a short spike before building on it: **cel-java** support for the CEL features the rules need, and the **JVM memory footprint and startup time** with `jlink`.
 
+### Module system
+- **JPMS** (the Java module system). A `capability-api` module holds the capability interfaces and metadata types. Modules implement them with `provides ... with`, and the engine finds them through `ServiceLoader`.
+- Modules are loaded from a modules directory at startup into **their own `ModuleLayer`**. There is no unload, so removing a module takes a restart.
+- If Camel causes JPMS problems (automatic modules, split packages), its jars are **encapsulated inside our own JPMS modules**, and only our own service interfaces expose the capability. Rulesets and the engine never see Camel types.
+- Each capability's **name, typed parameters, effect classification and dry-run support** are declared as metadata, because the verifier depends on them.
+- JPMS gives encapsulation, not a sandbox. The working assumption is that **modules are trusted code** that the user installs deliberately. Rulesets are the untrusted part, and they can only reach modules through engine-checked capability calls. If untrusted third-party modules ever matter, process isolation can be added behind the same capability interface.
+
 ### Verification (rulesets are maintained by an AI)
 The verifier is deterministic code in the core. It is not an AI, and the AI maintaining rulesets cannot change it.
 1. **Static checks**: schema validity, unique rule IDs, resolvable patch targets, existing capabilities, credentials referenced by declared name only, no loops between rules that trigger each other.
@@ -88,7 +95,7 @@ Consequences for the design:
 1. **Approval policy** (proposed, not confirmed): changes always need human approval when they increase permissions, add destructive or external actions, or touch rules written by a human. Safe changes that pass all checks could merge automatically.
 2. **AI scope**: does the AI maintain public upstream rulesets, only the private layer, or both?
 3. **Trigger and data model**: how are triggers (events, schedules, user actions) expressed in TOML, and how do rules reference event data and earlier results?
-4. **Module system**: Java modules/ServiceLoader, or process-isolated plugins? How are Camel-based modules packaged and isolated?
+4. **Module trust and metadata**: confirm that modules are always trusted, installed code (no open third-party marketplace for now). How is capability metadata declared: annotations, a descriptor file, or both?
 5. **Permission model**: how are capabilities and credentials granted to rulesets, and who approves them?
 6. **Scope of first version**: which single use case (e.g. mail processing) proves the concept?
 
