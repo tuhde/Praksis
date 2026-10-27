@@ -117,6 +117,46 @@ args = { message = { cel = "event.data.message" }, folder = { cel = "params.news
 - **Runtime prompting as a fallback.** When a rule needs something that is not granted, the engine does not block. It disables that rule, queues an approval request and notifies the user. The user answers in a frontend with allow once, allow always (which creates a scoped grant) or deny. The AI cannot answer prompts.
 - **Audit log** in SQLite of every capability call and every grant change. Grants can be revoked.
 
+### Frontend and views
+- **The frontend is a generic renderer with no functionality of its own.** It displays what the daemon describes and sends user actions back as API calls (commands, approval answers). It holds no credentials and no rules.
+- **FXML is not the source of UI descriptions.** FXML is JavaFX-specific and can reference controllers and scripts, which would bring code into the frontend and, for rulesets, execute untrusted code. The frontend may use bundled FXML only for its generic widget components, with no controllers beyond the generic ones.
+- **The daemon describes the UI** through the local API. Sources:
+  1. The engine's own screens: status, effective ruleset view, approval queue, grants, audit log.
+  2. Commands: rules with a `command` trigger declare a title and typed parameters, and the frontend generates the form from them.
+  3. Views declared by modules and rulesets.
+- **Ownership split.** Modules provide data (read-only capability queries) and the default presentation of their data types as descriptions, not code. Rulesets decide what happens and which screens exist: a **view** composes data from queries into a screen with columns, buttons and commands. The daemon serves the description and runs the queries under the ruleset's grants.
+- **View format.** A small vocabulary of our own in TOML, with a fixed catalog of components (table, list, detail, form, button, text). Values are literals or CEL expressions, the data source is a read-only capability call, and user actions are commands sent back to the daemon. These ideas are taken from A2UI, whose concepts match closely. A2UI (young, v0.8) and Adaptive Cards (SDKs for JavaScript, .NET, UWP, WinUI, Android and iOS, none for Java) were not adopted directly, because they are JSON-based and would not fit layering, CEL and the verifier without translation, and either way a JavaFX renderer would have to be written. The vocabulary stays simple enough to be translated to such formats later for other frontends.
+- Views take part in layering and are checked by the verifier. The UI schema is versioned, so an older frontend can report that it does not understand a newer view.
+
+Example view:
+```toml
+id = "view.newsletters"
+title = "Newsletters this week"
+
+[source]
+capability = "mail.list"
+args = { folder = { cel = "params.newsletter_folder" } }
+
+[[component]]
+type = "table"
+rows = { cel = "source.items" }
+columns = [
+  { title = "From", value = "item.from" },
+  { title = "Subject", value = "item.subject" },
+  { title = "Date", value = "item.date", format = "datetime" },
+]
+
+[[component.row_action]]
+label = "Open"
+command = "mail.open"
+args = { message = { cel = "item.id" } }
+```
+
+The daemon evaluates the source query and sends the frontend a resolved description. The frontend never runs CEL or queries anything itself.
+
+### Build and runtime
+- **Maven** with a multi-module build, on the latest LTS JDK.
+
 ### Verification (rulesets are maintained by an AI)
 The verifier is deterministic code in the core. It is not an AI, and the AI maintaining rulesets cannot change it.
 1. **Static checks**: schema validity, unique rule IDs, resolvable patch targets, existing capabilities, credentials referenced by declared name only, no loops between rules that trigger each other.
@@ -137,16 +177,22 @@ Consequences for the design:
 2. **AI scope**: does the AI maintain public upstream rulesets, only the private layer, or both?
 3. **Module trust and metadata**: confirm that modules are always trusted, installed code (no open third-party marketplace for now). How is capability metadata declared: annotations, a descriptor file, or both?
 4. **Runtime prompting details**: while a prompt is pending, is the triggering event held in the queue or skipped? Does a prompt time out? What scope can "allow always" create, and how does the user narrow it?
-5. **Scope of first version**: which single use case (e.g. mail processing) proves the concept?
+5. **View details**: the exact widget vocabulary, how a view refers to its data source and formats values, and how a module declares the default presentation of its data types. To be settled when the frontend milestone (M6) comes up.
 
-## Proposed Next Steps
+## Roadmap
 
-1. Settle the open questions above, starting with the scope of the first version. Run a short spike first to check cel-java (including type-checking of custom event types) and the JVM footprint (see the Engine decision).
-2. Write a short architecture document: components, interfaces (module API, storage interface, trigger/event model) and the trust model.
-3. Build a thin vertical slice: engine core, one or two modules, a ruleset loader reading from git with one cascading layer, SQLite state, and a minimal CLI.
-4. Prove it with one real use case (mail processing is the working example).
-5. Add the JavaFX frontend as a client of the engine, then the credential store and permission model.
-6. Extend to Windows and macOS.
+The first version is **M0 to M4**: headless (CLI only), mail processing as the only use case. The aim is to prove the new ideas (layered rulesets, permissions, verification) first. The GUI is a later client of the daemon.
+
+- **M0, spike (go/no-go):** in cel-java, evaluate a filter against a typed event and check how well custom types are checked. Load a dummy JPMS module into its own `ModuleLayer`. Load a Camel IMAP component inside a layer to see how much friction there is. Measure memory and startup time with `jlink`. The output is a short findings note.
+- **M1, walking skeleton:** `capability-api`, the daemon, the event bus with a SQLite queue, a loader for TOML rules, CEL evaluation, and one module with a `mail.received` event and a `mail.move` action (a local **Maildir** source first). The CLI starts the daemon, injects events and shows the log. Done when a mail dropped into the source is moved by a rule and a daemon restart does not process it twice. Real **IMAP via Camel** follows right after M1, unless the spike shows trouble.
+- **M2, layers:** load rulesets from git with JGit, pin upstreams in a lockfile, apply `add`, `replace`, `disable` and `patch` from a private layer, support ruleset parameters, and add an effective-view command. Done when a public mail ruleset plus one private rule behaves as expected and survives an upstream update.
+- **M3, permissions:** the local policy file, grants per layer, scoped capabilities, credential bindings, enforcement at the capability call, the audit log, and the disable-and-queue behavior with a CLI to answer requests. Done when an ungranted rule is disabled, reported and can be approved.
+- **M4, verifier:** static checks, permission diff, ruleset tests with mocked modules, dry-run, and replay with a behavioral diff. Shadow mode comes last. Done when the verifier rejects a deliberately broken or over-permissive change.
+- **M5, AI maintenance:** the AI works on git branches, the verifier report is produced, and the user approves.
+- **M6, JavaFX frontend:** a client of the local API for status, the effective view, the approval queue, commands and views (see the Frontend decision).
+- **M7, extensions:** schedules, more triggers and modules, then Windows and macOS.
+
+An architecture document (components, module API, storage interface, event model, trust model) is written alongside M0 and M1.
 
 ## Name Suggestions
 
