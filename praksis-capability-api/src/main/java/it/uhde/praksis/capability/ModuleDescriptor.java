@@ -12,18 +12,31 @@ import java.util.Objects;
  * @param jdkModules JDK modules the module needs, so the runtime image can include them
  * @param capabilities the capabilities the module provides
  * @param eventTypes the event types the module produces
+ * @param sources the names of the event sources the module provides
  */
 public record ModuleDescriptor(
     String name,
     String version,
     List<String> jdkModules,
     List<CapabilityDescriptor> capabilities,
-    List<EventTypeDescriptor> eventTypes) {
+    List<EventTypeDescriptor> eventTypes,
+    List<String> sources) {
   public ModuleDescriptor {
     Objects.requireNonNull(name, "name");
     Objects.requireNonNull(version, "version");
     jdkModules = List.copyOf(jdkModules);
     capabilities = List.copyOf(capabilities);
     eventTypes = List.copyOf(eventTypes);
+    sources = List.copyOf(sources);
+  }
+
+  /** A descriptor without event sources. */
+  public ModuleDescriptor(
+      String name,
+      String version,
+      List<String> jdkModules,
+      List<CapabilityDescriptor> capabilities,
+      List<EventTypeDescriptor> eventTypes) {
+    this(name, version, jdkModules, capabilities, eventTypes, List.of());
   }
 }

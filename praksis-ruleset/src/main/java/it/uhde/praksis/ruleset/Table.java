@@ -8,27 +8,27 @@ import java.util.Optional;
 import java.util.Set;
 
 /** A TOML table with typed getters that record problems instead of throwing. */
-final class Table {
+public final class Table {
   private final Map<String, Object> values;
   private final String location;
   private final List<Problem> problems;
 
-  Table(Map<String, Object> values, String location, List<Problem> problems) {
+  public Table(Map<String, Object> values, String location, List<Problem> problems) {
     this.values = values;
     this.location = location;
     this.problems = problems;
   }
 
-  String location() {
+  public String location() {
     return location;
   }
 
-  void problem(String message) {
+  public void problem(String message) {
     problems.add(new Problem(location, message));
   }
 
   /** Reports every key that is not in allowed, which catches typos. */
-  void onlyKeys(Set<String> allowed) {
+  public void onlyKeys(Set<String> allowed) {
     for (String key : values.keySet()) {
       if (!allowed.contains(key)) {
         problem("unknown key '" + key + "'");
@@ -36,19 +36,19 @@ final class Table {
     }
   }
 
-  boolean has(String key) {
+  public boolean has(String key) {
     return values.containsKey(key);
   }
 
-  Map<String, Object> rawEntries() {
+  public Map<String, Object> rawEntries() {
     return values;
   }
 
-  Optional<Object> raw(String key) {
+  public Optional<Object> raw(String key) {
     return Optional.ofNullable(values.get(key));
   }
 
-  Optional<String> string(String key, boolean required) {
+  public Optional<String> string(String key, boolean required) {
     Object v = values.get(key);
     if (v == null) {
       if (required) {
@@ -63,7 +63,7 @@ final class Table {
     return Optional.empty();
   }
 
-  boolean bool(String key, boolean defaultValue) {
+  public boolean bool(String key, boolean defaultValue) {
     Object v = values.get(key);
     if (v == null) {
       return defaultValue;
@@ -75,7 +75,7 @@ final class Table {
     return defaultValue;
   }
 
-  Optional<Table> table(String key, boolean required) {
+  public Optional<Table> table(String key, boolean required) {
     Object v = values.get(key);
     if (v == null) {
       if (required) {
@@ -91,7 +91,7 @@ final class Table {
   }
 
   /** The tables of an array of tables, e.g. {@code [[action]]}. */
-  List<Table> tables(String key) {
+  public List<Table> tables(String key) {
     Object v = values.get(key);
     List<Table> out = new ArrayList<>();
     if (v == null) {
@@ -113,7 +113,7 @@ final class Table {
     return out;
   }
 
-  List<String> strings(String key) {
+  public List<String> strings(String key) {
     Object v = values.get(key);
     List<String> out = new ArrayList<>();
     if (v == null) {
@@ -128,7 +128,7 @@ final class Table {
   }
 
   /** The tables inside this table, by key, e.g. every {@code [param.<name>]}. */
-  Map<String, Table> subTables() {
+  public Map<String, Table> subTables() {
     Map<String, Table> out = new java.util.LinkedHashMap<>();
     for (var e : values.entrySet()) {
       if (e.getValue() instanceof Map<?, ?> m) {
