@@ -186,7 +186,8 @@ Maven modules, all under group `it.uhde`, in one repo (the spike under `spikes/`
 |---|---|
 | `praksis-parent` | parent pom: versions, plugins, formatting, license headers |
 | `praksis-capability-api` | the API modules implement; the only thing modules depend on |
-| `praksis-expression` | our expression interface; the only place that knows cel-java and protobuf |
+| `praksis-expression` | our expression interface (compile, scope, bindings); knows no expression language |
+| `praksis-expression-cel` | the CEL implementation, shaded into one jar; the only place that knows cel-java and protobuf |
 | `praksis-ruleset` | rule model, TOML loader, static validation |
 | `praksis-store` | SQLite persistence; the only place that knows the SQLite driver |
 | `praksis-engine` | module loader, event bus, dispatcher, capability invocation |
@@ -196,9 +197,10 @@ Maven modules, all under group `it.uhde`, in one repo (the spike under `spikes/`
 | `modules/praksis-module-maildir` | first module: `mail.received` event, `mail.move` capability |
 | `praksis-dist` | jlink image and footprint check |
 
-- Dependency rules: modules depend only on `praksis-capability-api`. Only `praksis-expression` sees cel-java, and only modules see Camel. `praksis-ruleset` depends on `praksis-expression` and `praksis-capability-api`. `praksis-engine` depends on `praksis-ruleset`, `praksis-store`, `praksis-expression` and `praksis-capability-api`. The daemon and the CLI share only `praksis-protocol`.
+- Dependency rules: modules depend only on `praksis-capability-api`. Only `praksis-expression-cel` sees cel-java, and only modules see Camel. The engine finds the expression implementation through `ServiceLoader`. `praksis-ruleset` depends on `praksis-expression` and `praksis-capability-api`. `praksis-engine` depends on `praksis-ruleset`, `praksis-store`, `praksis-expression` and `praksis-capability-api`. The daemon and the CLI share only `praksis-protocol`.
 - Hooks built into M1 so later milestones need no refactoring: every capability call goes through an `AccessPolicy` interface (allow-all until M3), the audit log is a hook with a no-op implementation, and the dry-run flag is part of the capability context.
 - **Module descriptors** are written by hand as a `module.toml` inside each module in M1. The annotation processor that generates them is added before M4, and it targets the descriptor format defined in M1.
+- **cel-java is shaded.** Its jars share packages, so they cannot be separate JPMS modules, and automatic modules cannot go into a `jlink` image. `praksis-expression-cel` therefore shades cel-java, protobuf and guava into one jar (an automatic module) that the daemon loads in its own layer, like a module. Expressions see an event as `event.data` (the typed core fields from the descriptor) and `event.extras` (the free-form rest). List and map fields are untyped (`list<dyn>`, `map<string, dyn>`) until field descriptors get element types.
 - **Local API** between the CLI and the daemon: a Unix domain socket with JSON messages, not HTTP on localhost, so access is controlled by file permissions.
 - **Libraries:** Jackson (TOML and JSON), picocli (CLI), JUnit 5 with AssertJ (tests), the Xerial SQLite driver. Each is checked inside module layers when it is first introduced.
 - **Build conventions:** Java 25, the Maven wrapper (Maven 3.9.9), `-Xlint:all` with warnings as errors, Spotless with google-java-format for formatting and SPDX headers (`./mvnw spotless:apply` fixes violations, and the check runs at `verify`), and an enforcer rule for the Maven and Java versions. google-java-format is pinned to 1.36.0 because 1.37.0 fails under the current Spotless Maven plugin. Modules are added to the parent pom with the milestone that introduces them.
