@@ -157,6 +157,26 @@ The daemon evaluates the source query and sends the frontend a resolved descript
 ### Build and runtime
 - **Maven** with a multi-module build, on the latest LTS JDK.
 
+### Approval policy for AI changes
+Approval is tiered by what a change does:
+- **Always needs the user's approval:** widening grants, new or changed rules with a destructive or external effect class, and edits to rules written by the user (the engine tracks the author of each rule).
+- **Everything else** that passes the verifier can merge automatically, but it **runs in shadow mode first** and is promoted to live after a trial period if nothing unexpected shows up.
+- The policy is a local setting. The strict version above is the default.
+
+### AI scope
+- Each layer has an **`ai_maintained` setting**, on by default for the user's private layers and off for upstream layers.
+- For an upstream layer, the AI can prepare a change on a branch for the user to submit. It never pushes to a repo that is not the user's. Pushing to any remote always needs the user's action.
+
+### Module trust and metadata
+- Modules are **trusted code that the user installs deliberately**. There is no open third-party marketplace for now. A **local modules lockfile** records each module jar's hash, so a swapped jar is detected at startup.
+- Capability metadata (name, typed parameters, effect class, scopable parameters, dry-run support) is written as **annotations** in code. An **annotation processor in the Maven build generates a descriptor** (TOML or JSON) that ships inside the module. The verifier, the engine and the AI read the descriptor without running module code, and the build fails if annotations and descriptor disagree.
+
+### Runtime prompting
+- When a rule needs something that is not granted, **only that rule is disabled**. Other rules keep running, so nothing blocks and per-target ordering is preserved.
+- Events the rule would have matched are kept in a **missed list**. When the user answers, they choose to **replay the missed events in order** or discard them. Retention is limited, by default 7 days or a count cap, and configurable.
+- The approval request itself **never expires**.
+- **Allow once** covers the single pending call. **Allow always** creates a grant scoped to exactly what was observed (the capability plus, for example, the specific account and folder). The user can narrow it. Widening beyond what was observed takes a deliberate edit, and there are no wildcard grants unless the user chooses one.
+
 ### Verification (rulesets are maintained by an AI)
 The verifier is deterministic code in the core. It is not an AI, and the AI maintaining rulesets cannot change it.
 1. **Static checks**: schema validity, unique rule IDs, resolvable patch targets, existing capabilities, credentials referenced by declared name only, no loops between rules that trigger each other.
@@ -173,11 +193,7 @@ Consequences for the design:
 
 ## Open Questions
 
-1. **Approval policy for AI changes**: changes that widen grants always need human approval (decided, see Permission model). Still open: do destructive or external actions, or edits to human-written rules, also always need approval when they stay inside existing grants?
-2. **AI scope**: does the AI maintain public upstream rulesets, only the private layer, or both?
-3. **Module trust and metadata**: confirm that modules are always trusted, installed code (no open third-party marketplace for now). How is capability metadata declared: annotations, a descriptor file, or both?
-4. **Runtime prompting details**: while a prompt is pending, is the triggering event held in the queue or skipped? Does a prompt time out? What scope can "allow always" create, and how does the user narrow it?
-5. **View details**: the exact widget vocabulary, how a view refers to its data source and formats values, and how a module declares the default presentation of its data types. To be settled when the frontend milestone (M6) comes up.
+1. **View details**: the exact widget vocabulary, how a view refers to its data source and formats values, and how a module declares the default presentation of its data types. To be settled when the frontend milestone (M6) comes up.
 
 ## Roadmap
 
