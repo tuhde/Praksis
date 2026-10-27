@@ -179,6 +179,30 @@ Approval is tiered by what a change does:
 - The approval request itself **never expires**.
 - **Allow once** covers the single pending call. **Allow always** creates a grant scoped to exactly what was observed (the capability plus, for example, the specific account and folder). The user can narrow it. Widening beyond what was observed takes a deliberate edit, and there are no wildcard grants unless the user chooses one.
 
+### Code structure (M1)
+Maven modules, all under group `it.uhde`, in one repo (the spike under `spikes/` is not part of the build):
+
+| Module | Purpose |
+|---|---|
+| `praksis-parent` | parent pom: versions, plugins, formatting, license headers |
+| `praksis-capability-api` | the API modules implement; the only thing modules depend on |
+| `praksis-expression` | our expression interface; the only place that knows cel-java and protobuf |
+| `praksis-ruleset` | rule model, TOML loader, static validation |
+| `praksis-store` | SQLite persistence; the only place that knows the SQLite driver |
+| `praksis-engine` | module loader, event bus, dispatcher, capability invocation |
+| `praksis-protocol` | request and response records shared by the daemon and the CLI |
+| `praksis-daemon` | `main()`, lifecycle, local API server |
+| `praksis-cli` | the `praksis` command |
+| `modules/praksis-module-maildir` | first module: `mail.received` event, `mail.move` capability |
+| `praksis-dist` | jlink image and footprint check |
+
+- Dependency rules: modules depend only on `praksis-capability-api`. Only `praksis-expression` sees cel-java, and only modules see Camel. `praksis-ruleset` depends on `praksis-expression` and `praksis-capability-api`. `praksis-engine` depends on `praksis-ruleset`, `praksis-store`, `praksis-expression` and `praksis-capability-api`. The daemon and the CLI share only `praksis-protocol`.
+- Hooks built into M1 so later milestones need no refactoring: every capability call goes through an `AccessPolicy` interface (allow-all until M3), the audit log is a hook with a no-op implementation, and the dry-run flag is part of the capability context.
+- **Module descriptors** are written by hand as a `module.toml` inside each module in M1. The annotation processor that generates them is added before M4, and it targets the descriptor format defined in M1.
+- **Local API** between the CLI and the daemon: a Unix domain socket with JSON messages, not HTTP on localhost, so access is controlled by file permissions.
+- **Libraries:** Jackson (TOML and JSON), picocli (CLI), JUnit 5 with AssertJ (tests), the Xerial SQLite driver. Each is checked inside module layers when it is first introduced.
+- **Build conventions:** Java 25, the Maven wrapper (Maven 3.9.9), `-Xlint:all` with warnings as errors, Spotless with google-java-format for formatting and SPDX headers (`./mvnw spotless:apply` fixes violations, and the check runs at `verify`), and an enforcer rule for the Maven and Java versions. google-java-format is pinned to 1.36.0 because 1.37.0 fails under the current Spotless Maven plugin. Modules are added to the parent pom with the milestone that introduces them.
+
 ### License
 - **Apache-2.0 for all code.** One license, a patent grant, and it matches the dependency ecosystem (Camel, cel-java and others). Modules and rulesets by other authors may use any license. The consequence is that proprietary forks are allowed.
 - Every source file carries `// SPDX-License-Identifier: Apache-2.0`. The repo has a `LICENSE` and a `NOTICE` file.
