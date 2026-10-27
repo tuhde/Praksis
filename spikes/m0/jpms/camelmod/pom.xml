@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>org.praksis.spike</groupId>
+    <artifactId>m0-jpms</artifactId>
+    <version>0</version>
+  </parent>
+  <artifactId>m0-camelmod</artifactId>
+  <properties>
+    <camel.version>4.23.0</camel.version>
+  </properties>
+  <dependencies>
+    <dependency>
+      <groupId>org.praksis.spike</groupId>
+      <artifactId>m0-api</artifactId>
+      <version>0</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.camel</groupId>
+      <artifactId>camel-core-engine</artifactId>
+      <version>${camel.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.camel</groupId>
+      <artifactId>camel-file</artifactId>
+      <version>${camel.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.camel</groupId>
+      <artifactId>camel-mail</artifactId>
+      <version>${camel.version}</version>
+    </dependency>
+  </dependencies>
+</project>

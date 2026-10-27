@@ -98,7 +98,7 @@ args = { message = { cel = "event.data.message" }, folder = { cel = "params.news
 - Events are **persisted in SQLite**, so a crash does not lose them.
 - Packaging with a bundled runtime per OS (`jlink` and `jpackage`).
 - Rejected: Apache NiFi as the runtime (its flow-graph model does not map onto flat rule ordering, layering and per-target serialization, and it is heavy for a desktop), a Go or Rust engine (Java preferred, one language with the frontend), and existing workflow engines such as Node-RED, n8n, Temporal and Camunda (they impose their own models). NiFi may still be added later as a module for heavy data jobs.
-- Risks to check with a short spike before building on it: **cel-java** support for the CEL features the rules need, and the **JVM memory footprint and startup time** with `jlink`.
+- The risks were checked in the **M0 spike** (verdict: go, see `spikes/m0/FINDINGS.md`): cel-java type-checks events whose types are built at runtime as protobuf descriptors, and a `jlink` image with a Camel layer used about 100 MB of memory and 0.8 s for a short run. cel-java is still 0.x, so pin its version and keep it behind our own expression interface. The footprint of the real engine is to be re-measured at M1.
 
 ### Module system
 - **JPMS** (the Java module system). A `capability-api` module holds the capability interfaces and metadata types. Modules implement them with `provides ... with`, and the engine finds them through `ServiceLoader`.
@@ -169,7 +169,7 @@ Approval is tiered by what a change does:
 
 ### Module trust and metadata
 - Modules are **trusted code that the user installs deliberately**. There is no open third-party marketplace for now. A **local modules lockfile** records each module jar's hash, so a swapped jar is detected at startup.
-- Capability metadata (name, typed parameters, effect class, scopable parameters, dry-run support) is written as **annotations** in code. An **annotation processor in the Maven build generates a descriptor** (TOML or JSON) that ships inside the module. The verifier, the engine and the AI read the descriptor without running module code, and the build fails if annotations and descriptor disagree.
+- Capability metadata (name, typed parameters, effect class, scopable parameters, dry-run support, and the **JDK modules the module needs**, e.g. `java.sql`, which the runtime image must contain) is written as **annotations** in code. An **annotation processor in the Maven build generates a descriptor** (TOML or JSON) that ships inside the module. The verifier, the engine and the AI read the descriptor without running module code, and the build fails if annotations and descriptor disagree.
 
 ### Runtime prompting
 - When a rule needs something that is not granted, **only that rule is disabled**. Other rules keep running, so nothing blocks and per-target ordering is preserved.
@@ -199,7 +199,7 @@ Consequences for the design:
 
 The first version is **M0 to M4**: headless (CLI only), mail processing as the only use case. The aim is to prove the new ideas (layered rulesets, permissions, verification) first. The GUI is a later client of the daemon.
 
-- **M0, spike (go/no-go):** in cel-java, evaluate a filter against a typed event and check how well custom types are checked. Load a dummy JPMS module into its own `ModuleLayer`. Load a Camel IMAP component inside a layer to see how much friction there is. Measure memory and startup time with `jlink`. The output is a short findings note.
+- **M0, spike (go/no-go): done, verdict go.** cel-java type-checking of runtime-built event types, a dummy JPMS module in its own `ModuleLayer`, a Camel file component and IMAP endpoint inside a layer, and memory and startup with `jlink`. See `spikes/m0/FINDINGS.md`. Not covered yet: a real IMAP connection, layer unloading and Windows/macOS.
 - **M1, walking skeleton:** `capability-api`, the daemon, the event bus with a SQLite queue, a loader for TOML rules, CEL evaluation, and one module with a `mail.received` event and a `mail.move` action (a local **Maildir** source first). The CLI starts the daemon, injects events and shows the log. Done when a mail dropped into the source is moved by a rule and a daemon restart does not process it twice. Real **IMAP via Camel** follows right after M1, unless the spike shows trouble.
 - **M2, layers:** load rulesets from git with JGit, pin upstreams in a lockfile, apply `add`, `replace`, `disable` and `patch` from a private layer, support ruleset parameters, and add an effective-view command. Done when a public mail ruleset plus one private rule behaves as expected and survives an upstream update.
 - **M3, permissions:** the local policy file, grants per layer, scoped capabilities, credential bindings, enforcement at the capability call, the audit log, and the disable-and-queue behavior with a CLI to answer requests. Done when an ungranted rule is disabled, reported and can be approved.
