@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>it.uhde</groupId>
+    <artifactId>praksis-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>praksis-integration</artifactId>
+  <name>Praksis integration tests</name>
+  <description>Starts the real daemon and CLI as separate processes, kills the daemon with SIGKILL and checks what survives.</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>it.uhde</groupId>
+      <artifactId>praksis-daemon</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>it.uhde</groupId>
+      <artifactId>praksis-cli</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <!-- Not on the module path: the daemon loads these from the home directory. They bring no
+         dependencies (the CEL jar is shaded), so none of theirs may end up on the module path. -->
+    <dependency>
+      <groupId>it.uhde</groupId>
+      <artifactId>praksis-expression-cel</artifactId>
+      <version>${project.version}</version>
+      <scope>runtime</scope>
+      <exclusions>
+        <exclusion>
+          <groupId>*</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>it.uhde</groupId>
+      <artifactId>praksis-module-maildir</artifactId>
+      <version>${project.version}</version>
+      <scope>runtime</scope>
+      <exclusions>
+        <exclusion>
+          <groupId>*</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!-- The module path of the daemon and the CLI, and the two jars that live in the home. -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>module-path</id>
+            <phase>package</phase>
+            <goals>
+              <goal>copy-dependencies</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/mp</outputDirectory>
+              <includeScope>runtime</includeScope>
+              <excludeArtifactIds>praksis-expression-cel,praksis-module-maildir</excludeArtifactIds>
+            </configuration>
+          </execution>
+          <execution>
+            <id>extras</id>
+            <phase>package</phase>
+            <goals>
+              <goal>copy-dependencies</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/extras</outputDirectory>
+              <includeArtifactIds>praksis-expression-cel,praksis-module-maildir</includeArtifactIds>
+              <excludeTransitive>true</excludeTransitive>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <executions>
+          <execution>
+            <goals>
+              <goal>integration-test</goal>
+              <goal>verify</goal>
+            </goals>
+          </execution>
+        </executions>
+        <configuration>
+          <systemPropertyVariables>
+            <praksis.modulepath>${project.build.directory}/mp</praksis.modulepath>
+            <praksis.extras>${project.build.directory}/extras</praksis.extras>
+          </systemPropertyVariables>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
