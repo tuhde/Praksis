@@ -34,6 +34,15 @@ final class Repo {
     return git("rev-parse", "HEAD");
   }
 
+  /** Starts a branch from the current one and switches to it. */
+  void branch(String name) throws Exception {
+    git("checkout", "--quiet", "-b", name);
+  }
+
+  void checkout(String name) throws Exception {
+    git("checkout", "--quiet", name);
+  }
+
   private String git(String... args) throws Exception {
     List<String> command = new ArrayList<>(List.of("git", "-c", "commit.gpgsign=false"));
     command.addAll(List.of(args));
