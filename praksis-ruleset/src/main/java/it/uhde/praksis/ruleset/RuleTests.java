@@ -61,7 +61,7 @@ public final class RuleTests {
       t.problem("has no [[test]]");
     }
     for (Table e : entries) {
-      e.onlyKeys(Set.of("name", "event", "mock", "call"));
+      e.onlyKeys(Set.of("name", "event", "params", "mock", "call"));
       String testName = e.string("name", true).orElse("?");
       if (!names.add(testName)) {
         e.problem("test name '" + testName + "' is used twice");
@@ -81,6 +81,8 @@ public final class RuleTests {
           }
         }
       }
+      Map<String, Object> params = new LinkedHashMap<>();
+      e.table("params", false).ifPresent(m -> params.putAll(m.rawEntries()));
       Map<String, Map<String, Object>> mocks = new LinkedHashMap<>();
       e.table("mock", false)
           .ifPresent(
@@ -102,7 +104,14 @@ public final class RuleTests {
       }
       tests.add(
           new RuleTest(
-              rule, testName, where + ", test '" + testName + "'", type, data, mocks, calls));
+              rule,
+              testName,
+              where + ", test '" + testName + "'",
+              type,
+              data,
+              params,
+              mocks,
+              calls));
     }
   }
 

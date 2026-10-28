@@ -84,7 +84,7 @@ public final class RuleTestRunner {
    * Runs the tests of every layer.
    *
    * @param layers bottom to top
-   * @param params parameter values from the local configuration
+   * @param params parameter values that every test starts from (a test can set its own)
    */
   public Report run(List<LayerStack.Source> layers, Map<String, Object> params) {
     List<Result> results = new ArrayList<>();
@@ -113,7 +113,24 @@ public final class RuleTestRunner {
         continue;
       }
       for (RuleTest test : tests) {
-        results.add(run(layer.name(), effective, test));
+        LayerStack.Effective used = effective;
+        if (!test.params().isEmpty()) {
+          Map<String, Object> values = new java.util.HashMap<>(params);
+          values.putAll(test.params());
+          try {
+            used = LayerStack.resolve(layers.subList(0, i + 1), values);
+          } catch (RulesetException e) {
+            results.add(
+                new Result(
+                    layer.name(),
+                    test,
+                    false,
+                    "cannot set the parameters: " + e.problems().get(0).message(),
+                    Set.of()));
+            continue;
+          }
+        }
+        results.add(run(layer.name(), used, test));
       }
     }
     return new Report(results, problems);

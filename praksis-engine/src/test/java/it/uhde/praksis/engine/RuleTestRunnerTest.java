@@ -185,6 +185,48 @@ class RuleTestRunnerTest {
     assertThat(report.covered(Map.of("mail.lists", "top"))).containsExactly("mail.lists");
   }
 
+  @Test
+  void aTestCanSetParametersAndOtherwiseRunsWithTheDefaults() throws Exception {
+    write(
+        "base/ruleset.toml",
+        "format_version = 1\nname = \"base\"\n[param.box]\ntype = \"string\"\ndefault ="
+            + " \"Lists\"\n");
+    write(
+        "base/rules/mail.lists.toml",
+        LISTS.replace("folder = \"Lists\"", "folder = { cel = \"params.box\" }"));
+    write(
+        "base/tests/mail.lists.toml",
+        TESTS
+            + """
+
+            [[test]]
+            name = "another box"
+            [test.params]
+            box = "Elsewhere"
+            [test.event]
+            type = "mail.received"
+            data = { subject = "[list] hi", message = "m3" }
+            [[test.call]]
+            capability = "mail.move"
+            args = { folder = "Elsewhere" }
+
+            [[test]]
+            name = "a parameter nobody declared"
+            [test.params]
+            nope = "x"
+            [test.event]
+            type = "mail.received"
+            data = { subject = "x", message = "m4" }
+            """);
+
+    RuleTestRunner.Report report = run("base");
+
+    assertThat(report.results()).hasSize(4);
+    assertThat(report.results().subList(0, 3)).allMatch(RuleTestRunner.Result::passed);
+    assertThat(report.results().get(3).passed()).isFalse();
+    assertThat(report.results().get(3).message()).contains("cannot set the parameters");
+  }
+
   private String hashOf(String rule) throws Exception {
     write("hash/ruleset.toml", "format_version = 1\nname = \"h\"\n");
     write("hash/rules/mail.lists.toml", rule);

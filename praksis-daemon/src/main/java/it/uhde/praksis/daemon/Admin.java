@@ -392,7 +392,7 @@ final class Admin {
       throws DaemonException {
     RuleTestRunner.Report tests =
         new RuleTestRunner(modules.catalog(), Daemon.compiler(config))
-            .run(sources, config.params());
+            .run(sources, java.util.Map.of());
     List<Verifier.Finding> findings = new ArrayList<>();
     for (Problem p : tests.problems()) {
       findings.add(
@@ -441,7 +441,7 @@ final class Admin {
             config.enabledModules())) {
       report =
           new RuleTestRunner(modules.catalog(), Daemon.compiler(config))
-              .run(sources, config.params());
+              .run(sources, java.util.Map.of());
     } catch (ModuleLoadException ex) {
       err.println("cannot run the tests against the modules: " + ex.getMessage());
       return 1;

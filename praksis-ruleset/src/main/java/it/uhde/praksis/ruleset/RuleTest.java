@@ -24,13 +24,16 @@ import java.util.Objects;
  *
  * {@code [[test.call]]} lists, in order, the calls that the rule makes (only the arguments named
  * here are compared). No {@code call} means the rule makes none. {@code [test.mock."cap"]} gives
- * the results that a call of that capability returns, for rules that read {@code results}.
+ * the results that a call of that capability returns, for rules that read {@code results}. {@code
+ * [test.params]} sets parameter values for the test.
  *
  * @param rule the rule under test
  * @param name the name of the test, unique within the file
  * @param where the file, for messages
  * @param eventType the event type
  * @param eventData the event payload
+ * @param params parameter values for this test; the tests otherwise run with the defaults of the
+ *     layers, not with the values in the local configuration
  * @param mocks results by capability name
  * @param calls the calls the rule must make, in order
  */
@@ -40,12 +43,14 @@ public record RuleTest(
     String where,
     String eventType,
     Map<String, Object> eventData,
+    Map<String, Object> params,
     Map<String, Map<String, Object>> mocks,
     List<ExpectedCall> calls) {
   public RuleTest {
     Objects.requireNonNull(rule, "rule");
     Objects.requireNonNull(name, "name");
     eventData = Map.copyOf(eventData);
+    params = Map.copyOf(params);
     mocks = Map.copyOf(mocks);
     calls = List.copyOf(calls);
   }
