@@ -11,10 +11,16 @@ import java.util.List;
 /** A git repository made for a test, used as the upstream of a ruleset layer. */
 final class Repo {
   final Path dir;
+  private Path signingKey;
 
   Repo(Path dir) throws Exception {
     this.dir = Files.createDirectories(dir);
     git("init", "--quiet", "--initial-branch=main");
+  }
+
+  /** From now on commits are signed with this SSH key. */
+  void signWith(Path key) {
+    this.signingKey = key;
   }
 
   /** The address to put in {@code praksis.toml}. */
@@ -30,7 +36,20 @@ final class Repo {
       Files.writeString(file, filesAndContents[i + 1]);
     }
     git("add", "--all");
-    git("commit", "--quiet", "-m", message);
+    if (signingKey == null) {
+      git("commit", "--quiet", "-m", message);
+    } else {
+      git(
+          "-c",
+          "gpg.format=ssh",
+          "-c",
+          "user.signingkey=" + signingKey,
+          "commit",
+          "--quiet",
+          "-S",
+          "-m",
+          message);
+    }
     return git("rev-parse", "HEAD");
   }
 

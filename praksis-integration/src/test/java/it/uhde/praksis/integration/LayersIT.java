@@ -282,7 +282,7 @@ class LayersIT {
         assertThat(h.cli("layers", "update").exit()).isZero();
         assertThat(h.cli("effective").output())
             .containsPattern(
-                "last changed by Test <test@example.org> \\(ai\\) in [0-9a-f]{10}: Add the")
+                "last changed by Test <test@example.org> \\(ai, not signed\\) in [0-9a-f]{10}: Add the")
             .contains("| Mailing lists are noisy.")
             .contains("| They go to their own folder.")
             .doesNotContain("Praksis-Author");
@@ -304,13 +304,13 @@ class LayersIT {
                 "Lists"));
         assertThat(h.cli("layers", "update").exit()).isZero();
         assertThat(h.cli("effective").output())
-            .contains("(human)")
+            .contains("(unverified, not signed)")
             .contains("Lists: leave announcements in the inbox");
         daemon = h.startDaemon();
         String later = h.cli("audit", "-n", "50").output();
         h.stop(daemon);
         assertThat(later.split("RULE +mail\\.20-lists").length).isEqualTo(3);
-        assertThat(later).contains("\"author\":\"human\"").contains("\"author\":\"ai\"");
+        assertThat(later).contains("\"author\":\"unverified\"").contains("\"author\":\"ai\"");
 
         // a start without a change adds nothing
         daemon = h.startDaemon();

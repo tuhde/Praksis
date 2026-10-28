@@ -2,6 +2,7 @@
 package it.uhde.praksis.daemon;
 
 import it.uhde.praksis.git.GitSource;
+import it.uhde.praksis.ruleset.Trust;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -19,10 +20,15 @@ import java.util.Optional;
 record Provenance(String layer, String file, Optional<GitSource.Change> change) {
   /** How the commit says it was made. */
   enum Author {
-    /** A trailer {@code Praksis-Author: ai}, or a {@code Co-Authored-By} of an AI assistant. */
+    /**
+     * Not signed by the user, and a trailer {@code Praksis-Author: ai} or a {@code Co-Authored-By}
+     * of an AI assistant says so.
+     */
     AI,
-    /** A commit without such a mark. */
+    /** A commit with a good signature of one of the user's own keys. */
     HUMAN,
+    /** A commit that is neither signed by the user nor marked as AI: it may be anyone's. */
+    UNVERIFIED,
     /** No history: a directory layer, or a repository that is not at hand. */
     UNKNOWN;
 
@@ -31,9 +37,16 @@ record Provenance(String layer, String file, Optional<GitSource.Change> change) 
     }
   }
 
-  Author author() {
+  /**
+   * How the commit is to be taken. Only a good signature by one of the user's keys makes it the
+   * user's; the message and the author name prove nothing.
+   */
+  Author author(Trust trust) {
     if (change.isEmpty()) {
       return Author.UNKNOWN;
+    }
+    if (change.get().signed() && trust.isHuman(change.get().signer())) {
+      return Author.HUMAN;
     }
     for (String line : change.get().body().split("\\R")) {
       String l = line.strip().toLowerCase(java.util.Locale.ROOT);
@@ -43,7 +56,7 @@ record Provenance(String layer, String file, Optional<GitSource.Change> change) 
         return Author.AI;
       }
     }
-    return Author.HUMAN;
+    return Author.UNVERIFIED;
   }
 
   /** The message of the commit without its trailers: why the change was made. */
@@ -66,7 +79,7 @@ record Provenance(String layer, String file, Optional<GitSource.Change> change) 
   }
 
   /** One line: who, in which commit, and the subject. */
-  String describe() {
+  String describe(Trust trust) {
     if (change.isEmpty()) {
       return "(no history for layer '" + layer + "': a directory, or the commit is not at hand)";
     }
@@ -76,7 +89,8 @@ record Provenance(String layer, String file, Optional<GitSource.Change> change) 
         + " <"
         + c.authorEmail()
         + "> ("
-        + author().label()
+        + author(trust).label()
+        + (c.signed() ? ", signed by " + c.signer() : ", not signed")
         + ") in "
         + c.commit().substring(0, Math.min(10, c.commit().length()))
         + ": "

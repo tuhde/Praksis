@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test;
  * anything is merged or pinned.
  */
 class DoneCriterionIT {
-  private static String rule(String id, String filter, String folder) {
+  static String rule(String id, String filter, String folder) {
     return """
         id = "%s"
         effect = "local-write"
@@ -41,7 +41,7 @@ class DoneCriterionIT {
   }
 
   /** A test that fires the rule with this mail and expects a move to the folder, or nothing. */
-  private static String test(String name, String from, String listId, String folder) {
+  static String test(String name, String from, String listId, String folder) {
     return """
 
         [[test]]
@@ -62,7 +62,7 @@ class DoneCriterionIT {
                     + "\" }");
   }
 
-  private static String tests(String... tests) {
+  static String tests(String... tests) {
     return "format_version = 1\n" + String.join("\n", tests);
   }
 
@@ -77,7 +77,7 @@ class DoneCriterionIT {
       value = "event.data.list_id != '' && !event.data.list_id.contains('important')"
       """;
 
-  private static void deleteTree(Path dir) throws Exception {
+  static void deleteTree(Path dir) throws Exception {
     try (Stream<Path> files = Files.walk(dir)) {
       for (Path f : files.sorted(Comparator.reverseOrder()).toList()) {
         Files.delete(f);

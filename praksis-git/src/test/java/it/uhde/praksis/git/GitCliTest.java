@@ -222,4 +222,52 @@ class GitCliTest {
     assertThatThrownBy(() -> git.lastChange("mail", "main", "rules/x.toml"))
         .isInstanceOf(GitException.class);
   }
+
+  @Test
+  void tellsWhetherTheCommitIsSignedAndByWhichKey() throws Exception {
+    org.junit.jupiter.api.Assumptions.assumeTrue(
+        new ProcessBuilder("ssh-keygen", "-?").redirectErrorStream(true).start().waitFor() >= 0);
+    Path key = dir.resolve("key");
+    new ProcessBuilder("ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", key.toString())
+        .start()
+        .waitFor();
+    String pub = Files.readString(dir.resolve("key.pub")).strip();
+    Path allowed = dir.resolve("allowed_signers");
+    Files.writeString(allowed, "test@example.org " + pub + "\n");
+
+    commit("unsigned", "rules/x.toml", "one");
+    String unsigned = git.resolve("mail", url(), "main");
+    Files.writeString(upstream.resolve("rules/x.toml"), "two");
+    git(upstream, "add", "--all");
+    git(
+        upstream,
+        "-c",
+        "gpg.format=ssh",
+        "-c",
+        "user.signingkey=" + key,
+        "commit",
+        "--quiet",
+        "-S",
+        "-m",
+        "signed");
+    GitCli verifying =
+        new GitCli(
+            dir.resolve("cache2"),
+            "git",
+            Duration.ofMinutes(1),
+            List.of("gpg.ssh.allowedSignersFile=" + allowed));
+    String signed = verifying.resolve("mail", url(), "main");
+
+    var good = verifying.lastChange("mail", signed, "rules/x.toml").orElseThrow();
+    assertThat(good.signed()).isTrue();
+    assertThat(good.signer()).startsWith("SHA256:");
+    var none = verifying.lastChange("mail", unsigned, "rules/x.toml").orElseThrow();
+    assertThat(none.signed()).isFalse();
+    assertThat(none.signer()).isEmpty();
+    // the same commit with no list of signers is a signature that cannot be checked
+    var unknown = git.lastChange("mail", signed, "rules/x.toml");
+    assertThat(unknown).isEmpty(); // this copy has not fetched it
+    git.resolve("mail", url(), "main");
+    assertThat(git.lastChange("mail", signed, "rules/x.toml").orElseThrow().signed()).isFalse();
+  }
 }

@@ -51,6 +51,10 @@ public interface GitSource {
    * @param time when it was authored
    * @param subject the first line of the message
    * @param body the rest of the message, trailers included
+   * @param signature how git judges the signature: {@code G} good, {@code U} good but the key is
+   *     not trusted, {@code N} none, anything else is bad or unverifiable (see {@code %G?} in git
+   *     log)
+   * @param signer the fingerprint of the signing key, empty if there is none
    */
   record Change(
       String commit,
@@ -58,5 +62,12 @@ public interface GitSource {
       String authorEmail,
       java.time.Instant time,
       String subject,
-      String body) {}
+      String body,
+      String signature,
+      String signer) {
+    /** Whether git found the signature good (the key may be of unknown validity). */
+    public boolean signed() {
+      return signature.equals("G") || signature.equals("U");
+    }
+  }
 }

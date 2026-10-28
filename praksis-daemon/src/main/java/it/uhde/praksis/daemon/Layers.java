@@ -77,12 +77,19 @@ final class Layers {
     return LayerStack.resolve(sources(readLock()), config.params());
   }
 
+  /** The commit every git layer is pinned to, by layer name. */
+  Map<String, String> commits() throws DaemonException {
+    Map<String, String> out = new LinkedHashMap<>();
+    readLock().forEach((name, pin) -> out.put(name, pin.commit()));
+    return out;
+  }
+
   /**
    * Who wrote the current version of a rule: the last commit of the owner layer that changed the
    * file with which that layer added, replaced or patched it. Uses the local copy of the repository
    * only.
    */
-  Provenance provenance(LayerStack.Origin origin) {
+  Provenance provenance(LayerStack.Origin origin, Map<String, String> commits) {
     String last =
         origin.history().isEmpty() ? "" : origin.history().get(origin.history().size() - 1);
     String operation = last.contains(": ") ? last.substring(last.indexOf(": ") + 2) : "add";
@@ -94,18 +101,13 @@ final class Layers {
         };
     String file = directory + "/" + origin.ruleId() + ".toml";
     Optional<GitSource.Change> change = Optional.empty();
-    try {
-      LayerConfig layer =
-          config.layers().stream()
-              .filter(l -> l.name().equals(origin.owner()))
-              .findFirst()
-              .orElse(null);
-      Pin pin = layer == null || !layer.isGit() ? null : readLock().get(origin.owner());
-      if (pin != null) {
-        change = git.lastChange(origin.owner(), pin.commit(), file);
+    String commit = commits.get(origin.owner());
+    if (commit != null) {
+      try {
+        change = git.lastChange(origin.owner(), commit, file);
+      } catch (GitException e) {
+        // no history is not an error
       }
-    } catch (GitException | DaemonException e) {
-      // no history is not an error
     }
     return new Provenance(origin.owner(), file, change);
   }
@@ -379,8 +381,12 @@ final class Layers {
    *
    * @param sources the layers, bottom to top
    * @param effective the ruleset they give
+   * @param commits the commit of each layer that comes from git, to look up who wrote what
    */
-  record Candidate(List<LayerStack.Source> sources, LayerStack.Effective effective) {}
+  record Candidate(
+      List<LayerStack.Source> sources,
+      LayerStack.Effective effective,
+      Map<String, String> commits) {}
 
   /**
    * The ruleset that would run if the pins moved to the latest commits ({@code update}) and/or
@@ -398,28 +404,40 @@ final class Layers {
     }
     List<LayerStack.Source> sources = new ArrayList<>();
     Set<String> known = new LinkedHashSet<>();
+    Map<String, String> commits = new LinkedHashMap<>();
+    pins.forEach((name, pin) -> commits.put(name, pin.commit()));
     for (LayerStack.Source source : sources(pins)) {
       known.add(source.name());
       String replacement = replacements.get(source.name());
-      sources.add(replacement == null ? source : replace(source, replacement));
+      if (replacement == null) {
+        sources.add(source);
+        continue;
+      }
+      Replaced replaced = replace(source, replacement);
+      sources.add(replaced.source());
+      commits.remove(source.name());
+      replaced.commit().ifPresent(c -> commits.put(source.name(), c));
     }
     for (String name : replacements.keySet()) {
       if (!known.contains(name)) {
         throw new DaemonException("there is no layer named '" + name + "'");
       }
     }
-    return new Candidate(List.copyOf(sources), LayerStack.resolve(sources, config.params()));
+    return new Candidate(
+        List.copyOf(sources), LayerStack.resolve(sources, config.params()), commits);
   }
 
-  private LayerStack.Source replace(LayerStack.Source source, String replacement)
-      throws DaemonException {
+  /** A layer put in place of another: its files, and the commit if it came from git. */
+  private record Replaced(LayerStack.Source source, Optional<String> commit) {}
+
+  private Replaced replace(LayerStack.Source source, String replacement) throws DaemonException {
     if (!replacement.startsWith("@")) {
       Path directory = Path.of(replacement).toAbsolutePath();
       if (!Files.isDirectory(directory)) {
         throw new DaemonException(
             "layer '" + source.name() + "': " + replacement + " is not a directory");
       }
-      return new LayerStack.Source(source.name(), directory);
+      return new Replaced(new LayerStack.Source(source.name(), directory), Optional.empty());
     }
     LayerConfig layer =
         config.layers().stream()
@@ -438,7 +456,7 @@ final class Layers {
       String commit = git.resolve(layer.name(), layer.git().get(), ref);
       Path snapshot = config.snapshots().resolve(layer.name()).resolve(commit);
       git.export(layer.name(), layer.git().get(), commit, snapshot);
-      return new LayerStack.Source(layer.name(), snapshot);
+      return new Replaced(new LayerStack.Source(layer.name(), snapshot), Optional.of(commit));
     } catch (GitException e) {
       throw new DaemonException("layer '" + layer.name() + "': " + e.getMessage(), e);
     }

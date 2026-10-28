@@ -25,6 +25,7 @@ import it.uhde.praksis.ruleset.Policy;
 import it.uhde.praksis.ruleset.Problem;
 import it.uhde.praksis.ruleset.Ruleset;
 import it.uhde.praksis.ruleset.RulesetException;
+import it.uhde.praksis.ruleset.Trust;
 import it.uhde.praksis.ruleset.Verifier;
 import it.uhde.praksis.store.AuditEntry;
 import it.uhde.praksis.store.LogEntry;
@@ -115,7 +116,7 @@ public final class Daemon implements AutoCloseable {
       GrantPolicy access = accessPolicy(config, modules.catalog(), effective);
       store = Store.open(config.database());
       auditPolicy(config, store);
-      auditRules(effective, layers, compiler, modules.catalog(), store);
+      auditRules(effective, layers, compiler, modules.catalog(), store, Admin.trust(config));
       modules.useCredentials(new CredentialResolver(access::policy, store, clock)::forComponent);
       approvals = new Approvals(config, store, access, modules.catalog(), clock);
       Map<String, Capability> capabilities = modules.capabilities();
@@ -159,9 +160,11 @@ public final class Daemon implements AutoCloseable {
       Layers layers,
       ExpressionCompiler compiler,
       ModuleCatalog catalog,
-      Store store)
-      throws StoreException {
+      Store store,
+      Trust trust)
+      throws StoreException, DaemonException {
     Verifier.Report report = null;
+    Map<String, String> commits = layers.commits();
     for (LayerStack.Origin origin : effective.origins()) {
       var last = store.lastAuditForRule(AuditEntry.Kind.RULE, origin.ruleId());
       if (last.isPresent() && last.get().subject().equals(origin.hash())) {
@@ -170,12 +173,12 @@ public final class Daemon implements AutoCloseable {
       if (report == null) {
         report = new Verifier(compiler, catalog).verify(effective.ruleset());
       }
-      Provenance provenance = layers.provenance(origin);
+      Provenance provenance = layers.provenance(origin, commits);
       Map<String, Object> detail = new java.util.LinkedHashMap<>();
       detail.put("layer", origin.owner());
       detail.put("file", provenance.file());
       detail.put("history", String.join("; ", origin.history()));
-      detail.put("author", provenance.author().label());
+      detail.put("author", provenance.author(trust).label());
       provenance
           .change()
           .ifPresent(
@@ -184,6 +187,7 @@ public final class Daemon implements AutoCloseable {
                 detail.put("email", c.authorEmail());
                 detail.put("commit", c.commit());
                 detail.put("subject", c.subject());
+                detail.put("signed", c.signed() ? c.signer() : "no");
               });
       detail.put("reasoning", provenance.reasoning());
       detail.put(

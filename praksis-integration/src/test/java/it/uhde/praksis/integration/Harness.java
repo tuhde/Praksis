@@ -77,6 +77,11 @@ final class Harness implements AutoCloseable {
     Files.writeString(home.resolve("policy.toml"), policy.toString());
   }
 
+  /** The git settings of the processes: a file of the test instead of the user's own. */
+  Path gitConfig() {
+    return home.resolve("gitconfig");
+  }
+
   Path socket() {
     return home.resolve("praksis.sock");
   }
@@ -93,11 +98,12 @@ final class Harness implements AutoCloseable {
     List<String> command =
         java("it.uhde.praksis.daemon/it.uhde.praksis.daemon.Main", "--home", home.toString());
     command.add(1, "--enable-native-access=org.xerial.sqlitejdbc");
-    Process p =
+    ProcessBuilder builder =
         new ProcessBuilder(command)
             .redirectErrorStream(true)
-            .redirectOutput(ProcessBuilder.Redirect.appendTo(home.resolve("daemon.log").toFile()))
-            .start();
+            .redirectOutput(ProcessBuilder.Redirect.appendTo(home.resolve("daemon.log").toFile()));
+    builder.environment().put("GIT_CONFIG_GLOBAL", gitConfig().toString());
+    Process p = builder.start();
     processes.add(p);
     await(
         "the daemon to answer",
@@ -124,7 +130,9 @@ final class Harness implements AutoCloseable {
     List<String> command =
         java("it.uhde.praksis.cli/it.uhde.praksis.cli.Praksis", args[0], "--home", home.toString());
     command.addAll(List.of(args).subList(1, args.length));
-    Process p = new ProcessBuilder(command).redirectErrorStream(true).start();
+    ProcessBuilder builder = new ProcessBuilder(command).redirectErrorStream(true);
+    builder.environment().put("GIT_CONFIG_GLOBAL", gitConfig().toString());
+    Process p = builder.start();
     p.getOutputStream().close();
     String output = new String(p.getInputStream().readAllBytes());
     return new CliResult(p.waitFor(), output);

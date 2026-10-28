@@ -15,6 +15,7 @@ import it.uhde.praksis.ruleset.Problem;
 import it.uhde.praksis.ruleset.Ruleset;
 import it.uhde.praksis.ruleset.RulesetException;
 import it.uhde.praksis.ruleset.RulesetValidator;
+import it.uhde.praksis.ruleset.Trust;
 import it.uhde.praksis.ruleset.Verifier;
 import it.uhde.praksis.store.Store;
 import java.io.PrintWriter;
@@ -173,14 +174,16 @@ final class Admin {
       ex.problems().forEach(p -> err.println("  " + p));
       return 1;
     }
+    Trust trust = trust(config);
+    java.util.Map<String, String> commits = layers.commits();
     out.println("ruleset: " + e.ruleset().name() + " (" + e.ruleset().rules().size() + " rules)");
     out.println("rules, in the order they fire:");
     for (LayerStack.Origin o : e.origins()) {
       out.println("  " + o.ruleId());
       out.println("      " + o.hash());
       out.println("      " + String.join("; ", o.history()));
-      Provenance provenance = layers.provenance(o);
-      out.println("      " + provenance.describe());
+      Provenance provenance = layers.provenance(o, commits);
+      out.println("      " + provenance.describe(trust));
       provenance.reasoning().lines().limit(6).forEach(l -> out.println("        | " + l));
     }
     if (!e.disabled().isEmpty()) {
@@ -265,7 +268,7 @@ final class Admin {
       candidate =
           isCandidate
               ? layers.candidate(replacements, update)
-              : new Layers.Candidate(layers.sources(layers.readLock()), current);
+              : new Layers.Candidate(layers.sources(layers.readLock()), current, layers.commits());
     } catch (RulesetException ex) {
       err.println("The layers cannot be put together:");
       ex.problems().forEach(p -> err.println("  " + p));
@@ -274,6 +277,7 @@ final class Admin {
     LayerStack.Effective e = candidate.effective();
     Verifier.Report report;
     Replay.Report replayed = null;
+    Tiers.Verdict verdict = null;
     try (LoadedModules modules =
         ModuleLoader.load(
             config.modules(),
@@ -291,10 +295,23 @@ final class Admin {
             .check(modules.catalog(), config.layerNames())
             .forEach(p -> findings.add(policyFinding(p)));
         Permissions.Needs needs = Permissions.of(e, modules.catalog());
-        List<Permissions.Requirement> isNew =
+        Permissions.Diff diff =
             isCandidate
-                ? Permissions.diff(Permissions.of(current, modules.catalog()), needs).added()
-                : List.of();
+                ? Permissions.diff(Permissions.of(current, modules.catalog()), needs)
+                : new Permissions.Diff(List.of(), List.of());
+        List<Permissions.Requirement> isNew = diff.added();
+        if (isCandidate) {
+          java.util.Map<String, String> now = layers.commits();
+          verdict =
+              Tiers.decide(
+                  current,
+                  e,
+                  o -> layers.provenance(o, now),
+                  o -> layers.provenance(o, candidate.commits()),
+                  needs,
+                  diff,
+                  policy);
+        }
         for (Permissions.Requirement r : Permissions.uncovered(needs.requirements(), policy)) {
           findings.add(
               new Verifier.Finding(
@@ -328,6 +345,21 @@ final class Admin {
         report.warnings());
     for (Verifier.Finding f : report.findings()) {
       out.printf("  %-7s %-16s %s: %s%n", f.severity(), f.check(), f.where(), f.message());
+    }
+    if (verdict != null) {
+      out.println(
+          switch (verdict.tier()) {
+            case APPROVAL -> "This change needs your approval:";
+            case SHADOW -> "This change runs in shadow mode first (see: praksis shadow):";
+            case AUTOMATIC -> "This change needs nothing more:";
+          });
+      if (verdict.decisions().isEmpty()) {
+        out.println("  no rule is new, changed or removed");
+      }
+      for (Tiers.Decision d : verdict.decisions()) {
+        out.printf(
+            "  %-9s %s (%s): %s%n", d.tier(), d.rule(), d.change(), String.join("; ", d.reasons()));
+      }
     }
     if (replayed != null) {
       out.printf(
@@ -491,6 +523,15 @@ final class Admin {
         throw new DaemonException("cannot work out what the rules need: " + ex.getMessage(), ex);
       }
     };
+  }
+
+  /** Whose commits count as the user's own; nobody's if policy.toml cannot be read. */
+  static Trust trust(DaemonConfig config) {
+    try {
+      return Policy.load(config.policy()).trust();
+    } catch (RulesetException ex) {
+      return Trust.none();
+    }
   }
 
   /** Checks a ruleset against the loaded modules, as the daemon does when it starts. */

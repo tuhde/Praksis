@@ -25,8 +25,11 @@ import java.util.regex.Pattern;
  *
  * @param grants the grants, in file order
  * @param credentials the credential bindings
+ * @param trust whose commits count as the user's own
+ * @param approval which changes need the user
  */
-public record Policy(List<Grant> grants, List<CredentialBinding> credentials) {
+public record Policy(
+    List<Grant> grants, List<CredentialBinding> credentials, Trust trust, ApprovalRules approval) {
   private static final Pattern ID = Pattern.compile("[a-z0-9][a-z0-9._-]*");
   private static final TomlMapper MAPPER = new TomlMapper();
 
@@ -35,6 +38,13 @@ public record Policy(List<Grant> grants, List<CredentialBinding> credentials) {
   public Policy {
     grants = List.copyOf(grants);
     credentials = List.copyOf(credentials);
+    java.util.Objects.requireNonNull(trust, "trust");
+    java.util.Objects.requireNonNull(approval, "approval");
+  }
+
+  /** A policy with grants and bindings, and the strict rules for approval. */
+  public Policy(List<Grant> grants, List<CredentialBinding> credentials) {
+    this(grants, credentials, Trust.none(), ApprovalRules.strict());
   }
 
   /** A policy with grants only. */
@@ -65,7 +75,7 @@ public record Policy(List<Grant> grants, List<CredentialBinding> credentials) {
     } catch (IOException e) {
       throw new RulesetException(List.of(new Problem(where, "cannot read: " + e.getMessage())));
     }
-    t.onlyKeys(Set.of("format_version", "grant", "credential"));
+    t.onlyKeys(Set.of("format_version", "grant", "credential", "trust", "approval"));
     int version = RulesetLoader.formatVersion(t);
     if (version != 0 && version != 1) {
       t.problem("unsupported 'format_version' " + version);
@@ -83,10 +93,39 @@ public record Policy(List<Grant> grants, List<CredentialBinding> credentials) {
                 credential(e.getKey(), e.getValue()).ifPresent(credentials::add);
               }
             });
+    Trust trust =
+        t.table("trust", false)
+            .map(
+                tt -> {
+                  tt.onlyKeys(Set.of("human_keys"));
+                  List<String> keys = tt.strings("human_keys");
+                  if (keys.stream().anyMatch(String::isBlank)) {
+                    tt.problem("'human_keys' must not contain an empty key");
+                  }
+                  return new Trust(keys);
+                })
+            .orElse(Trust.none());
+    ApprovalRules approval =
+        t.table("approval", false)
+            .map(
+                a -> {
+                  a.onlyKeys(
+                      Set.of(
+                          "widening_access",
+                          "destructive_or_external",
+                          "user_rules",
+                          "shadow_first"));
+                  return new ApprovalRules(
+                      a.bool("widening_access", true),
+                      a.bool("destructive_or_external", true),
+                      a.bool("user_rules", true),
+                      a.bool("shadow_first", true));
+                })
+            .orElse(ApprovalRules.strict());
     if (!problems.isEmpty()) {
       throw new RulesetException(problems);
     }
-    return new Policy(grants, credentials);
+    return new Policy(grants, credentials, trust, approval);
   }
 
   private static Optional<Grant> grant(Table g, Set<String> ids) {

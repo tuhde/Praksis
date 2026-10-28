@@ -45,6 +45,7 @@ public final class GitCli implements GitSource {
   private final Path cache;
   private final String executable;
   private final Duration timeout;
+  private final List<String> settings;
 
   /**
    * @param cache the directory for the local copies
@@ -52,9 +53,18 @@ public final class GitCli implements GitSource {
    * @param timeout the longest any single git command may run
    */
   public GitCli(Path cache, String executable, Duration timeout) {
+    this(cache, executable, timeout, List.of());
+  }
+
+  /**
+   * @param settings git settings for every command, as {@code key=value}, e.g. {@code
+   *     gpg.ssh.allowedSignersFile=/path}; the settings of the user's own git apply as well
+   */
+  public GitCli(Path cache, String executable, Duration timeout, List<String> settings) {
     this.cache = cache;
     this.executable = executable;
     this.timeout = timeout;
+    this.settings = List.copyOf(settings);
   }
 
   public GitCli(Path cache) {
@@ -133,9 +143,16 @@ public final class GitCli implements GitSource {
       return Optional.empty();
     }
     String out =
-        run(repo, "log", "-1", "--format=%H%x00%an%x00%ae%x00%aI%x00%s%x00%b", commit, "--", path);
-    String[] f = out.split("\0", 6);
-    if (f.length < 6 || f[0].isBlank()) {
+        run(
+            repo,
+            "log",
+            "-1",
+            "--format=%H%x00%an%x00%ae%x00%aI%x00%s%x00%G?%x00%GF%x00%GK%x00%b",
+            commit,
+            "--",
+            path);
+    String[] f = out.split("\0", 9);
+    if (f.length < 9 || f[0].isBlank()) {
       return Optional.empty();
     }
     return Optional.of(
@@ -145,7 +162,9 @@ public final class GitCli implements GitSource {
             f[2],
             java.time.OffsetDateTime.parse(f[3]).toInstant(),
             f[4],
-            f[5].strip()));
+            f[8].strip(),
+            f[5].isBlank() ? "N" : f[5].strip(),
+            f[6].isBlank() ? f[7].strip() : f[6].strip()));
   }
 
   private Path repository(String name) throws GitException {
@@ -325,6 +344,10 @@ public final class GitCli implements GitSource {
   private ProcessBuilder process(Path dir, Path errors, String... args) {
     List<String> command = new ArrayList<>();
     command.add(executable);
+    for (String setting : settings) {
+      command.add("-c");
+      command.add(setting);
+    }
     command.addAll(List.of(args));
     ProcessBuilder pb = new ProcessBuilder(command);
     pb.directory(dir.toFile());

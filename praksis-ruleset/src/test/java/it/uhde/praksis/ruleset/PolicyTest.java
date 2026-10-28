@@ -250,4 +250,44 @@ class PolicyTest {
         .hasMessageContaining("'capabilities' must list the capabilities")
         .hasMessageContaining("unknown key 'colour'");
   }
+
+  @Test
+  void trustAndApprovalRulesAreReadAndStrictByDefault() throws Exception {
+    Path file = dir.resolve("policy.toml");
+    Files.writeString(file, "format_version = 1\n");
+    Policy plain = Policy.load(file);
+    assertThat(plain.trust().humanKeys()).isEmpty();
+    assertThat(plain.approval()).isEqualTo(ApprovalRules.strict());
+
+    Files.writeString(
+        file,
+        """
+        format_version = 1
+        [trust]
+        human_keys = ["D2C152E2F6E3A4A6", "SHA256:abcDEF"]
+        [approval]
+        shadow_first = false
+        """);
+    Policy set = Policy.load(file);
+    assertThat(set.trust().humanKeys()).containsExactly("D2C152E2F6E3A4A6", "SHA256:abcDEF");
+    assertThat(set.approval().shadowFirst()).isFalse();
+    assertThat(set.approval().widening()).isTrue();
+
+    Files.writeString(file, "format_version = 1\n[approval]\nnope = true\n");
+    assertThatThrownBy(() -> Policy.load(file)).isInstanceOf(RulesetException.class);
+  }
+
+  @Test
+  void aSignerIsTheUsersIfItsKeyIsListed() {
+    Trust trust = new Trust(List.of("D2C152E2F6E3A4A6", "SHA256:AbC", "short"));
+    assertThat(trust.isHuman("D2C152E2F6E3A4A6")).isTrue();
+    assertThat(trust.isHuman("00000000000000000000D2C152E2F6E3A4A6"))
+        .isTrue(); // fingerprint ends in the key id
+    assertThat(trust.isHuman("SHA256:AbC")).isTrue();
+    assertThat(trust.isHuman("sha256:abc")).isTrue();
+    assertThat(trust.isHuman("xxxSHA256:AbC")).isFalse();
+    assertThat(trust.isHuman("xxshort")).isFalse(); // too short to be matched by its end
+    assertThat(trust.isHuman("")).isFalse();
+    assertThat(Trust.none().isHuman("D2C152E2F6E3A4A6")).isFalse();
+  }
 }
