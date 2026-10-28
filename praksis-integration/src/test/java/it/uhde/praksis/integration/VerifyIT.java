@@ -11,6 +11,21 @@ class VerifyIT {
   @Test
   void aGoodSetupPassesAndMistakesAreReportedTogether() throws Exception {
     try (Harness h = new Harness()) {
+      Files.createDirectories(h.home.resolve("ruleset/tests"));
+      Files.writeString(
+          h.home.resolve("ruleset/tests/mail.archive.toml"),
+          """
+          format_version = 1
+
+          [[test]]
+          name = "mail is archived"
+          [test.event]
+          type = "mail.received"
+          data = { message = "m1" }
+          [[test.call]]
+          capability = "mail.move"
+          args = { folder = "Archive" }
+          """);
       Harness.CliResult good = h.cli("verify");
       assertThat(good.exit()).as(good.output()).isZero();
       assertThat(good.output()).contains("Ruleset mail (1 rules): 0 error(s), 0 warning(s)");
@@ -48,9 +63,11 @@ class VerifyIT {
       Harness.CliResult bad = h.cli("verify");
       assertThat(bad.exit()).isEqualTo(1);
       assertThat(bad.output())
-          .contains("3 error(s), 1 warning(s)")
+          .contains("4 error(s), 1 warning(s)")
           .containsPattern(
               "ERROR +unused-need +rules/mail\\.zz-extra\\.toml: 'needs' lists 'mail\\.move'")
+          .containsPattern(
+              "ERROR +coverage +rules/mail\\.zz-extra\\.toml: no test of layer 'ruleset'")
           .containsPattern("ERROR +policy +policy\\.toml: grant 'stray': no layer named 'nowhere'")
           .containsPattern(
               "ERROR +policy +policy\\.toml: grant 'stray': no capability named 'mail\\.copy'")
@@ -66,6 +83,14 @@ class VerifyIT {
           .containsPattern(
               "WARNING +access +mail\\.zz-extra: no grant covers ruleset: mail\\.move"
                   + " folder=\"Trash\"");
+
+      // a test that fails is an error too
+      Files.writeString(
+          h.home.resolve("ruleset/tests/mail.archive.toml"),
+          Files.readString(h.home.resolve("ruleset/tests/mail.archive.toml"))
+              .replace("\"Archive\"", "\"Elsewhere\""));
+      assertThat(h.cli("verify").output())
+          .containsPattern("ERROR +test +ruleset: tests/mail\\.archive\\.toml, 'mail is archived'");
 
       // an invalid ruleset is an error of the validator, with the file it is about
       Files.writeString(

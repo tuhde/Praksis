@@ -241,6 +241,7 @@ final class Admin {
       } catch (RulesetException ex) {
         ex.problems().forEach(p -> findings.add(policyFinding(p)));
       }
+      findings.addAll(testFindings(config, layers, e, modules));
       report = new Verifier.Report(findings);
     } catch (ModuleLoadException ex) {
       err.println("cannot check the ruleset against the modules: " + ex.getMessage());
@@ -253,6 +254,52 @@ final class Admin {
       out.printf("  %-7s %-16s %s: %s%n", f.severity(), f.check(), f.where(), f.message());
     }
     return report.ok() ? 0 : 1;
+  }
+
+  /**
+   * Runs the tests of the layers and reports the ones that fail or cannot be read ({@code test}),
+   * and every rule that no test of its owner layer makes fire ({@code coverage}): a rule that
+   * nothing tests is an error, which also means that a changed rule needs a changed or new test.
+   */
+  private static List<Verifier.Finding> testFindings(
+      DaemonConfig config, Layers layers, LayerStack.Effective e, LoadedModules modules)
+      throws DaemonException {
+    RuleTestRunner.Report tests =
+        new RuleTestRunner(modules.catalog(), Daemon.compiler(config))
+            .run(layers.sources(layers.readLock()), config.params());
+    List<Verifier.Finding> findings = new ArrayList<>();
+    for (Problem p : tests.problems()) {
+      findings.add(
+          new Verifier.Finding(Verifier.Severity.ERROR, "test", p.location(), p.message()));
+    }
+    for (RuleTestRunner.Result r : tests.results()) {
+      if (!r.passed()) {
+        findings.add(
+            new Verifier.Finding(
+                Verifier.Severity.ERROR,
+                "test",
+                r.layer() + ": tests/" + r.test().rule() + ".toml, '" + r.test().name() + "'",
+                r.message()));
+      }
+    }
+    java.util.Map<String, String> owners = new java.util.HashMap<>();
+    e.origins().forEach(o -> owners.put(o.ruleId(), o.owner()));
+    Set<String> covered = tests.covered(owners);
+    for (LayerStack.Origin o : e.origins()) {
+      if (!covered.contains(o.ruleId())) {
+        findings.add(
+            new Verifier.Finding(
+                Verifier.Severity.ERROR,
+                "coverage",
+                "rules/" + o.ruleId() + ".toml",
+                "no test of layer '"
+                    + o.owner()
+                    + "' makes this rule fire; add a test with a matching event to tests/"
+                    + o.ruleId()
+                    + ".toml in that layer"));
+      }
+    }
+    return findings;
   }
 
   /** Runs the tests of the layers with recording capabilities. */
