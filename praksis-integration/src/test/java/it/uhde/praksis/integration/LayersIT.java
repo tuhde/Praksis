@@ -253,6 +253,77 @@ class LayersIT {
   }
 
   @Test
+  void theHistoryOfARuleShowsWhoWroteItAndWhyAndTheAuditLogKeepsEveryVersion() throws Exception {
+    try (Harness h = new Harness()) {
+      Path repos = Files.createTempDirectory("pkr");
+      try {
+        Repo mail = new Repo(repos.resolve("mail"));
+        mail.commit(
+            "Add the lists rule\n\nMailing lists are noisy.\nThey go to their own folder.\n\n"
+                + "Praksis-Author: ai",
+            "ruleset.toml",
+            HEADER.formatted("praksis-mail"),
+            "rules/mail.20-lists.toml",
+            rule("mail.20-lists", "Lists", LISTS_FILTER, "Lists"));
+        Files.writeString(
+            h.home.resolve("praksis.toml"),
+            """
+            format_version = 1
+            [[layer]]
+            name = "mail"
+            git = "%s"
+            ref = "main"
+            [module.maildir]
+            root = "%s"
+            poll_interval_ms = 20
+            """
+                .formatted(mail.url(), h.mail));
+        h.grantMoves(java.util.Map.of("mail", java.util.List.of("Lists")));
+        assertThat(h.cli("layers", "update").exit()).isZero();
+        assertThat(h.cli("effective").output())
+            .containsPattern(
+                "last changed by Test <test@example.org> \\(ai\\) in [0-9a-f]{10}: Add the")
+            .contains("| Mailing lists are noisy.")
+            .contains("| They go to their own folder.")
+            .doesNotContain("Praksis-Author");
+
+        Process daemon = h.startDaemon();
+        String audit = h.cli("audit", "-n", "50").output();
+        h.stop(daemon);
+        assertThat(audit).containsPattern("RULE +mail\\.20-lists +sha256:[0-9a-f]+ ");
+        assertThat(audit).contains("\"author\":\"ai\"").contains("static checks: 0 error(s)");
+
+        // a later version by a person: the audit log gets a second line, the first stays
+        mail.commit(
+            "Lists: leave announcements in the inbox",
+            "rules/mail.20-lists.toml",
+            rule(
+                "mail.20-lists",
+                "Lists",
+                LISTS_FILTER + " && event.data.precedence != 'x'",
+                "Lists"));
+        assertThat(h.cli("layers", "update").exit()).isZero();
+        assertThat(h.cli("effective").output())
+            .contains("(human)")
+            .contains("Lists: leave announcements in the inbox");
+        daemon = h.startDaemon();
+        String later = h.cli("audit", "-n", "50").output();
+        h.stop(daemon);
+        assertThat(later.split("RULE +mail\\.20-lists").length).isEqualTo(3);
+        assertThat(later).contains("\"author\":\"human\"").contains("\"author\":\"ai\"");
+
+        // a start without a change adds nothing
+        daemon = h.startDaemon();
+        String again = h.cli("audit", "-n", "50").output();
+        h.stop(daemon);
+        assertThat(again.split("RULE +mail\\.20-lists").length).isEqualTo(3);
+      } finally {
+        deleteTree(repos);
+      }
+    }
+  }
+
+  @Test
   void anUpdateThatGivesARuleAccessNoGrantCoversIsRefusedUnlessAccepted() throws Exception {
     try (Harness h = new Harness()) {
       Path repos = Files.createTempDirectory("pkr");

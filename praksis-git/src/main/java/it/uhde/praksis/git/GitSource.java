@@ -27,4 +27,36 @@ public interface GitSource {
    * @param target the directory to create; it is created complete or not at all
    */
   void export(String name, String url, String commit, Path target) throws GitException;
+
+  /**
+   * Who last changed a file, and why, as far as the commit says. Uses only what is in the local
+   * copy; it never asks the server.
+   *
+   * @param commit the commit to look back from
+   * @param path a file in the repository, e.g. {@code rules/mail.10-spam.toml}
+   * @return the last commit up to {@code commit} that changed the file, or empty if there is none
+   *     or the local copy does not have the commit
+   */
+  default java.util.Optional<Change> lastChange(String name, String commit, String path)
+      throws GitException {
+    return java.util.Optional.empty();
+  }
+
+  /**
+   * A commit that changed a file.
+   *
+   * @param commit the full commit id
+   * @param authorName the author's name
+   * @param authorEmail the author's email address
+   * @param time when it was authored
+   * @param subject the first line of the message
+   * @param body the rest of the message, trailers included
+   */
+  record Change(
+      String commit,
+      String authorName,
+      String authorEmail,
+      java.time.Instant time,
+      String subject,
+      String body) {}
 }

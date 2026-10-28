@@ -180,10 +180,9 @@ final class Shadows {
     List<String> out = new ArrayList<>();
     for (JsonNode call : calls) {
       StringBuilder line = new StringBuilder(call.path("capability").asText());
-      call.path("args")
-          .properties()
-          .forEach(
-              e -> line.append(' ').append(e.getKey()).append('=').append(e.getValue().asText()));
+      java.util.TreeMap<String, String> args = new java.util.TreeMap<>();
+      call.path("args").properties().forEach(e -> args.put(e.getKey(), e.getValue().asText()));
+      args.forEach((k, v) -> line.append(' ').append(k).append('=').append(v));
       if (!call.path("allowed").asBoolean(true)) {
         line.append("   NOT ALLOWED: ").append(call.path("reason").asText());
       }

@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -31,6 +32,8 @@ import java.util.stream.Stream;
 public final class GitCli implements GitSource {
   private static final Pattern NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]*");
   private static final Pattern COMMIT = Pattern.compile("[0-9a-f]{40}|[0-9a-f]{64}");
+  private static final Pattern FILE =
+      Pattern.compile("(rules|replace|patch|disable)/[A-Za-z0-9][A-Za-z0-9._-]*\\.toml");
   private static final Pattern REF = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._/@^~+-]*");
   private static final Map<String, String> ENVIRONMENT =
       Map.of(
@@ -115,6 +118,34 @@ public final class GitCli implements GitSource {
     } catch (IOException e) {
       throw new GitException("cannot write " + target + ": " + e.getMessage(), e);
     }
+  }
+
+  @Override
+  public Optional<Change> lastChange(String name, String commit, String path) throws GitException {
+    if (!COMMIT.matcher(commit).matches()) {
+      throw new GitException("'" + commit + "' is not a full commit id");
+    }
+    if (!FILE.matcher(path).matches()) {
+      throw new GitException("'" + path + "' is not a rule file");
+    }
+    Path repo = repository(name);
+    if (!has(repo, commit)) {
+      return Optional.empty();
+    }
+    String out =
+        run(repo, "log", "-1", "--format=%H%x00%an%x00%ae%x00%aI%x00%s%x00%b", commit, "--", path);
+    String[] f = out.split("\0", 6);
+    if (f.length < 6 || f[0].isBlank()) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        new Change(
+            f[0].strip(),
+            f[1],
+            f[2],
+            java.time.OffsetDateTime.parse(f[3]).toInstant(),
+            f[4],
+            f[5].strip()));
   }
 
   private Path repository(String name) throws GitException {

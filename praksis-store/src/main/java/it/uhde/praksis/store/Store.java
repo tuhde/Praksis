@@ -530,6 +530,34 @@ public final class Store implements AutoCloseable {
         limit);
   }
 
+  /** The newest audit line of this kind about this rule, if there is one. */
+  public synchronized Optional<AuditEntry> lastAuditForRule(AuditEntry.Kind kind, String ruleId)
+      throws StoreException {
+    try (PreparedStatement s =
+        connection.prepareStatement(
+            "SELECT time, kind, rule_id, subject, allowed, detail, error FROM audit WHERE kind = ?"
+                + " AND rule_id = ? ORDER BY seq DESC LIMIT 1")) {
+      s.setString(1, kind.name());
+      s.setString(2, ruleId);
+      try (ResultSet r = s.executeQuery()) {
+        if (!r.next()) {
+          return Optional.empty();
+        }
+        return Optional.of(
+            new AuditEntry(
+                Instant.parse(r.getString(1)),
+                AuditEntry.Kind.valueOf(r.getString(2)),
+                Optional.ofNullable(r.getString(3)),
+                r.getString(4),
+                r.getInt(5) == 1,
+                r.getString(6),
+                Optional.ofNullable(r.getString(7))));
+      }
+    } catch (SQLException e) {
+      throw new StoreException("cannot read the audit log", e);
+    }
+  }
+
   /** The newest audit line of this kind, if there is one. */
   public synchronized Optional<AuditEntry> lastAudit(AuditEntry.Kind kind) throws StoreException {
     return readAudit(

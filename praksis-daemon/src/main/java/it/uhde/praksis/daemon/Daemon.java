@@ -25,6 +25,7 @@ import it.uhde.praksis.ruleset.Policy;
 import it.uhde.praksis.ruleset.Problem;
 import it.uhde.praksis.ruleset.Ruleset;
 import it.uhde.praksis.ruleset.RulesetException;
+import it.uhde.praksis.ruleset.Verifier;
 import it.uhde.praksis.store.AuditEntry;
 import it.uhde.praksis.store.LogEntry;
 import it.uhde.praksis.store.Store;
@@ -35,6 +36,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -107,12 +109,13 @@ public final class Daemon implements AutoCloseable {
               config.moduleSettings(),
               config.enabledModules());
       ExpressionCompiler compiler = compiler(config);
-      LayerStack.Effective effective =
-          new Layers(config, new GitCli(config.gitCache())).effective();
+      Layers layers = new Layers(config, new GitCli(config.gitCache()));
+      LayerStack.Effective effective = layers.effective();
       ruleset = effective.ruleset();
       GrantPolicy access = accessPolicy(config, modules.catalog(), effective);
       store = Store.open(config.database());
       auditPolicy(config, store);
+      auditRules(effective, layers, compiler, modules.catalog(), store);
       modules.useCredentials(new CredentialResolver(access::policy, store, clock)::forComponent);
       approvals = new Approvals(config, store, access, modules.catalog(), clock);
       Map<String, Capability> capabilities = modules.capabilities();
@@ -144,6 +147,56 @@ public final class Daemon implements AutoCloseable {
       throw new DaemonException(e.getMessage(), e);
     }
     LOG.log(System.Logger.Level.INFO, "praksis daemon started, home " + config.home());
+  }
+
+  /**
+   * Writes a {@code RULE} line to the audit log for every rule whose content differs from the last
+   * line about it: who wrote it, why, and how the static checks judged the ruleset it is part of. A
+   * change made in a layer shows up here at the next start, whoever made it.
+   */
+  static void auditRules(
+      LayerStack.Effective effective,
+      Layers layers,
+      ExpressionCompiler compiler,
+      ModuleCatalog catalog,
+      Store store)
+      throws StoreException {
+    Verifier.Report report = null;
+    for (LayerStack.Origin origin : effective.origins()) {
+      var last = store.lastAuditForRule(AuditEntry.Kind.RULE, origin.ruleId());
+      if (last.isPresent() && last.get().subject().equals(origin.hash())) {
+        continue;
+      }
+      if (report == null) {
+        report = new Verifier(compiler, catalog).verify(effective.ruleset());
+      }
+      Provenance provenance = layers.provenance(origin);
+      Map<String, Object> detail = new java.util.LinkedHashMap<>();
+      detail.put("layer", origin.owner());
+      detail.put("file", provenance.file());
+      detail.put("history", String.join("; ", origin.history()));
+      detail.put("author", provenance.author().label());
+      provenance
+          .change()
+          .ifPresent(
+              c -> {
+                detail.put("name", c.authorName());
+                detail.put("email", c.authorEmail());
+                detail.put("commit", c.commit());
+                detail.put("subject", c.subject());
+              });
+      detail.put("reasoning", provenance.reasoning());
+      detail.put(
+          "verified",
+          "static checks: " + report.errors() + " error(s), " + report.warnings() + " warning(s)");
+      store.audit(
+          AuditEntry.of(
+              Instant.now(),
+              AuditEntry.Kind.RULE,
+              Optional.of(origin.ruleId()),
+              origin.hash(),
+              detail));
+    }
   }
 
   /** The grants in {@code policy.toml}, checked against the modules and layers in use. */

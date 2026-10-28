@@ -20,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.Function;
@@ -74,6 +75,39 @@ final class Layers {
   /** The ruleset to run, from the pinned commits and the directories. */
   LayerStack.Effective effective() throws DaemonException, RulesetException {
     return LayerStack.resolve(sources(readLock()), config.params());
+  }
+
+  /**
+   * Who wrote the current version of a rule: the last commit of the owner layer that changed the
+   * file with which that layer added, replaced or patched it. Uses the local copy of the repository
+   * only.
+   */
+  Provenance provenance(LayerStack.Origin origin) {
+    String last =
+        origin.history().isEmpty() ? "" : origin.history().get(origin.history().size() - 1);
+    String operation = last.contains(": ") ? last.substring(last.indexOf(": ") + 2) : "add";
+    String directory =
+        switch (operation) {
+          case "replace" -> "replace";
+          case "patch" -> "patch";
+          default -> "rules";
+        };
+    String file = directory + "/" + origin.ruleId() + ".toml";
+    Optional<GitSource.Change> change = Optional.empty();
+    try {
+      LayerConfig layer =
+          config.layers().stream()
+              .filter(l -> l.name().equals(origin.owner()))
+              .findFirst()
+              .orElse(null);
+      Pin pin = layer == null || !layer.isGit() ? null : readLock().get(origin.owner());
+      if (pin != null) {
+        change = git.lastChange(origin.owner(), pin.commit(), file);
+      }
+    } catch (GitException | DaemonException e) {
+      // no history is not an error
+    }
+    return new Provenance(origin.owner(), file, change);
   }
 
   /** The directories of all layers, bottom to top, for the given pins. */

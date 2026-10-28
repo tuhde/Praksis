@@ -36,7 +36,12 @@ public record AuditEntry(
     /** A module asked for the secret of a credential binding, allowed or refused. */
     CREDENTIAL,
     /** The grants in {@code policy.toml} when the daemon started, if they differ from last time. */
-    POLICY
+    POLICY,
+    /**
+     * A version of a rule seen for the first time at a start: its hash as the subject, and who
+     * wrote it, why, and how it was verified.
+     */
+    RULE
   }
 
   /** The line for a capability call. */

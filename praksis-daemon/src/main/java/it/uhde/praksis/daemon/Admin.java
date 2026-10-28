@@ -179,6 +179,9 @@ final class Admin {
       out.println("  " + o.ruleId());
       out.println("      " + o.hash());
       out.println("      " + String.join("; ", o.history()));
+      Provenance provenance = layers.provenance(o);
+      out.println("      " + provenance.describe());
+      provenance.reasoning().lines().limit(6).forEach(l -> out.println("        | " + l));
     }
     if (!e.disabled().isEmpty()) {
       out.println("disabled:");

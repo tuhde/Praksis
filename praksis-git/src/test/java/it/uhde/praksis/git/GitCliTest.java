@@ -198,4 +198,28 @@ class GitCliTest {
         .isInstanceOf(GitException.class)
         .hasMessageContaining("is git installed?");
   }
+
+  @Test
+  void tellsWhoLastChangedAFileAndWhy() throws Exception {
+    commit("Add the rule", "ruleset.toml", "a", "rules/x.toml", "one");
+    String second =
+        commit(
+            "Narrow the filter\n\nToo many mails matched.\n\nPraksis-Author: ai",
+            "rules/x.toml",
+            "two");
+    commit("Unrelated", "rules/y.toml", "y");
+    String head = git.resolve("mail", url(), "main");
+
+    var change = git.lastChange("mail", head, "rules/x.toml").orElseThrow();
+
+    assertThat(change.commit()).isEqualTo(second);
+    assertThat(change.authorName()).isEqualTo("Test");
+    assertThat(change.authorEmail()).isEqualTo("test@example.org");
+    assertThat(change.subject()).isEqualTo("Narrow the filter");
+    assertThat(change.body()).contains("Too many mails matched.").contains("Praksis-Author: ai");
+    assertThat(git.lastChange("mail", head, "rules/none.toml")).isEmpty();
+    assertThatThrownBy(() -> git.lastChange("mail", head, "../x")).isInstanceOf(GitException.class);
+    assertThatThrownBy(() -> git.lastChange("mail", "main", "rules/x.toml"))
+        .isInstanceOf(GitException.class);
+  }
 }
