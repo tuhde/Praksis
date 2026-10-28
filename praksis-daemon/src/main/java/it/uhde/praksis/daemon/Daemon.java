@@ -6,24 +6,26 @@ import it.uhde.praksis.capability.CapabilityException;
 import it.uhde.praksis.capability.Event;
 import it.uhde.praksis.capability.ModuleDescriptor;
 import it.uhde.praksis.engine.AccessPolicy;
-import it.uhde.praksis.engine.AuditLog;
 import it.uhde.praksis.engine.Engine;
 import it.uhde.praksis.engine.GrantPolicy;
 import it.uhde.praksis.engine.LoadedModules;
 import it.uhde.praksis.engine.ModuleLoadException;
 import it.uhde.praksis.engine.ModuleLoader;
+import it.uhde.praksis.engine.StoreAuditLog;
 import it.uhde.praksis.expression.ExpressionCompiler;
 import it.uhde.praksis.expression.Expressions;
 import it.uhde.praksis.git.GitCli;
 import it.uhde.praksis.protocol.Client;
 import it.uhde.praksis.protocol.Request;
 import it.uhde.praksis.protocol.Response;
+import it.uhde.praksis.ruleset.Grant;
 import it.uhde.praksis.ruleset.LayerStack;
 import it.uhde.praksis.ruleset.ModuleCatalog;
 import it.uhde.praksis.ruleset.Policy;
 import it.uhde.praksis.ruleset.Problem;
 import it.uhde.praksis.ruleset.Ruleset;
 import it.uhde.praksis.ruleset.RulesetException;
+import it.uhde.praksis.store.AuditEntry;
 import it.uhde.praksis.store.LogEntry;
 import it.uhde.praksis.store.Store;
 import it.uhde.praksis.store.StoreException;
@@ -108,6 +110,7 @@ public final class Daemon implements AutoCloseable {
       ruleset = effective.ruleset();
       AccessPolicy access = accessPolicy(config, modules.catalog(), effective);
       store = Store.open(config.database());
+      auditPolicy(config, store);
       Map<String, Capability> capabilities = modules.capabilities();
       engine =
           new Engine(
@@ -116,7 +119,7 @@ public final class Daemon implements AutoCloseable {
               compiler,
               capabilities,
               store,
-              new Engine.Options(access, AuditLog.none(), clock, config.dryRun()));
+              new Engine.Options(access, new StoreAuditLog(store), clock, config.dryRun()));
       engine.recover();
       api = new ApiServer(config.socket(), this::handle, this::requestStop);
       api.start();
@@ -201,12 +204,76 @@ public final class Daemon implements AutoCloseable {
                 store.recentLog(Math.max(1, Math.min(l.limit(), MAX_LOG_LINES))).stream()
                     .map(Daemon::line)
                     .toList());
+        case Request.Audit a ->
+            new Response.AuditLines(
+                store
+                    .recentAudit(Math.max(1, Math.min(a.limit(), MAX_LOG_LINES)))
+                    .reversed()
+                    .stream()
+                    .map(Daemon::auditLine)
+                    .toList());
         case Request.Stop s -> new Response.Stopped();
       };
     } catch (Injection.Invalid e) {
       return new Response.Error(e.getMessage());
     } catch (StoreException e) {
       return new Response.Error("store: " + e.getMessage());
+    }
+  }
+
+  private static Response.AuditLines.Line auditLine(AuditEntry e) {
+    return new Response.AuditLines.Line(
+        e.time().toString(),
+        e.kind().name(),
+        e.ruleId().orElse(null),
+        e.subject(),
+        e.allowed(),
+        e.detail(),
+        e.error().orElse(null));
+  }
+
+  /**
+   * Writes the grants found in {@code policy.toml} to the audit log, unless they are the same as
+   * the last time. A change made outside the daemon shows up here at the next start.
+   */
+  static void auditPolicy(DaemonConfig config, Store store) throws DaemonException {
+    try {
+      String hash = "absent";
+      List<String> ids = List.of();
+      if (Files.exists(config.policy())) {
+        hash =
+            java.util.HexFormat.of()
+                .formatHex(
+                    java.security.MessageDigest.getInstance("SHA-256")
+                        .digest(Files.readAllBytes(config.policy())));
+        ids = Policy.load(config.policy()).grants().stream().map(Grant::id).toList();
+      }
+      String detail =
+          "{\"sha256\":\""
+              + hash
+              + "\",\"grants\":["
+              + String.join(",", ids.stream().map(i -> "\"" + i + "\"").toList())
+              + "]}";
+      if (store
+          .lastAudit(AuditEntry.Kind.POLICY)
+          .map(AuditEntry::detail)
+          .filter(detail::equals)
+          .isEmpty()) {
+        store.audit(
+            new AuditEntry(
+                Instant.now(),
+                AuditEntry.Kind.POLICY,
+                java.util.Optional.empty(),
+                "policy.toml",
+                true,
+                detail,
+                java.util.Optional.empty()));
+      }
+    } catch (StoreException
+        | IOException
+        | RulesetException
+        | java.security.NoSuchAlgorithmException e) {
+      throw new DaemonException("cannot audit the policy: " + e.getMessage(), e);
     }
   }
 

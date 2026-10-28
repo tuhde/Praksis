@@ -24,6 +24,7 @@ import it.uhde.praksis.store.Store;
 import it.uhde.praksis.store.StoreException;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -50,6 +51,12 @@ import java.util.concurrent.TimeUnit;
  * <p>Events are stored before they are handled and marked done afterwards, see {@link Store}.
  */
 public final class Engine implements EventSink, AutoCloseable {
+  /** How long the events that a disabled rule missed are kept. */
+  static final Duration MISSED_KEEP = Duration.ofDays(7);
+
+  /** How many missed events are kept per rule. */
+  static final int MISSED_CAP = 1000;
+
   /**
    * Settings with defaults.
    *
@@ -250,6 +257,7 @@ public final class Engine implements EventSink, AutoCloseable {
         }
         String why = disabled.get(ruleId);
         if (why != null) {
+          miss(ruleId, event);
           log(
               event,
               Optional.of(ruleId),
@@ -265,6 +273,7 @@ public final class Engine implements EventSink, AutoCloseable {
       } catch (Exception e) {
         if (e instanceof Denied d) {
           disabled.putIfAbsent(ruleId, d.reason);
+          miss(ruleId, event);
         }
         log(
             event,
@@ -288,6 +297,12 @@ public final class Engine implements EventSink, AutoCloseable {
       }
     }
     store.markDone(event.id());
+  }
+
+  /** Remembers that a rule did not handle this event, so it can be replayed once it may run. */
+  private void miss(String ruleId, Event event) throws StoreException {
+    Instant now = options.clock().instant();
+    store.addMissed(now, ruleId, event.id(), now.minus(MISSED_KEEP), MISSED_CAP);
   }
 
   /** Runs the actions of a matching rule. Returns true if the rule stopped the event. */

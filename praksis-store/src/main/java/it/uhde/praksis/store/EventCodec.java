@@ -26,6 +26,15 @@ final class EventCodec {
 
   private EventCodec() {}
 
+  /** A map of plain values as JSON, e.g. the arguments of a capability call. */
+  static String encodeMap(Map<String, Object> values) {
+    try {
+      return MAPPER.writeValueAsString(value(values));
+    } catch (JsonProcessingException ex) {
+      throw new IllegalStateException(ex);
+    }
+  }
+
   static String encode(Event e) {
     ObjectNode n = JSON.objectNode();
     n.put("id", e.id());

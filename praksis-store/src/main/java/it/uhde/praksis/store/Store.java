@@ -26,7 +26,7 @@ import java.util.Optional;
  * <p>All methods are safe to call from several threads.
  */
 public final class Store implements AutoCloseable {
-  private static final int SCHEMA_VERSION = 1;
+  private static final int SCHEMA_VERSION = 2;
 
   private final Connection connection;
 
@@ -88,7 +88,33 @@ public final class Store implements AutoCloseable {
               outcome TEXT NOT NULL,
               message TEXT NOT NULL
             )""");
-        s.execute("PRAGMA user_version = " + SCHEMA_VERSION);
+        s.execute("PRAGMA user_version = 1");
+      }
+    }
+    if (version < 2) {
+      try (Statement s = connection.createStatement()) {
+        s.execute(
+            """
+            CREATE TABLE audit (
+              seq INTEGER PRIMARY KEY AUTOINCREMENT,
+              time TEXT NOT NULL,
+              kind TEXT NOT NULL,
+              rule_id TEXT,
+              subject TEXT NOT NULL,
+              allowed INTEGER NOT NULL,
+              detail TEXT NOT NULL,
+              error TEXT
+            )""");
+        s.execute(
+            """
+            CREATE TABLE missed (
+              seq INTEGER PRIMARY KEY AUTOINCREMENT,
+              time TEXT NOT NULL,
+              rule_id TEXT NOT NULL,
+              event_id TEXT NOT NULL,
+              UNIQUE (rule_id, event_id)
+            )""");
+        s.execute("PRAGMA user_version = 2");
       }
     }
   }
@@ -179,6 +205,154 @@ public final class Store implements AutoCloseable {
       return out;
     } catch (SQLException e) {
       throw new StoreException("cannot read the run log", e);
+    }
+  }
+
+  /** The stored event with this id, whatever its state. */
+  public synchronized Optional<Event> event(String eventId) throws StoreException {
+    try (PreparedStatement s = connection.prepareStatement("SELECT json FROM event WHERE id = ?")) {
+      s.setString(1, eventId);
+      try (ResultSet r = s.executeQuery()) {
+        return r.next() ? Optional.of(EventCodec.decode(r.getString(1))) : Optional.empty();
+      }
+    } catch (SQLException e) {
+      throw new StoreException("cannot read event " + eventId, e);
+    }
+  }
+
+  /** Appends a line to the audit log. */
+  public synchronized void audit(AuditEntry entry) throws StoreException {
+    try (PreparedStatement s =
+        connection.prepareStatement(
+            "INSERT INTO audit (time, kind, rule_id, subject, allowed, detail, error)"
+                + " VALUES (?, ?, ?, ?, ?, ?, ?)")) {
+      s.setString(1, entry.time().toString());
+      s.setString(2, entry.kind().name());
+      s.setString(3, entry.ruleId().orElse(null));
+      s.setString(4, entry.subject());
+      s.setInt(5, entry.allowed() ? 1 : 0);
+      s.setString(6, entry.detail());
+      s.setString(7, entry.error().orElse(null));
+      s.executeUpdate();
+    } catch (SQLException e) {
+      throw new StoreException("cannot write the audit log", e);
+    }
+  }
+
+  /** The newest audit lines, returned oldest first. */
+  public synchronized List<AuditEntry> recentAudit(int limit) throws StoreException {
+    return readAudit(
+        "SELECT time, kind, rule_id, subject, allowed, detail, error FROM"
+            + " (SELECT * FROM audit ORDER BY seq DESC LIMIT ?) ORDER BY seq",
+        limit);
+  }
+
+  /** The newest audit line of this kind, if there is one. */
+  public synchronized Optional<AuditEntry> lastAudit(AuditEntry.Kind kind) throws StoreException {
+    return readAudit(
+            "SELECT time, kind, rule_id, subject, allowed, detail, error FROM audit"
+                + " WHERE kind = '"
+                + kind.name()
+                + "' ORDER BY seq DESC LIMIT ?",
+            1)
+        .stream()
+        .findFirst();
+  }
+
+  private List<AuditEntry> readAudit(String sql, int limit) throws StoreException {
+    List<AuditEntry> out = new ArrayList<>();
+    try (PreparedStatement s = connection.prepareStatement(sql)) {
+      s.setInt(1, limit);
+      try (ResultSet r = s.executeQuery()) {
+        while (r.next()) {
+          out.add(
+              new AuditEntry(
+                  Instant.parse(r.getString(1)),
+                  AuditEntry.Kind.valueOf(r.getString(2)),
+                  Optional.ofNullable(r.getString(3)),
+                  r.getString(4),
+                  r.getInt(5) == 1,
+                  r.getString(6),
+                  Optional.ofNullable(r.getString(7))));
+        }
+      }
+      return out;
+    } catch (SQLException e) {
+      throw new StoreException("cannot read the audit log", e);
+    }
+  }
+
+  /**
+   * Remembers that a rule did not handle an event because it was disabled. Remembering the same
+   * pair again changes nothing. Entries older than the cutoff go, and so do the oldest ones beyond
+   * {@code maxPerRule}.
+   */
+  public synchronized void addMissed(
+      Instant time, String ruleId, String eventId, Instant cutoff, int maxPerRule)
+      throws StoreException {
+    try {
+      try (PreparedStatement s =
+          connection.prepareStatement(
+              "INSERT OR IGNORE INTO missed (time, rule_id, event_id) VALUES (?, ?, ?)")) {
+        s.setString(1, time.toString());
+        s.setString(2, ruleId);
+        s.setString(3, eventId);
+        s.executeUpdate();
+      }
+      try (PreparedStatement s =
+          connection.prepareStatement(
+              "DELETE FROM missed WHERE rule_id = ? AND (time < ? OR seq <= (SELECT seq FROM"
+                  + " missed WHERE rule_id = ? ORDER BY seq DESC LIMIT 1 OFFSET ?))")) {
+        s.setString(1, ruleId);
+        s.setString(2, cutoff.toString());
+        s.setString(3, ruleId);
+        s.setInt(4, maxPerRule);
+        s.executeUpdate();
+      }
+    } catch (SQLException e) {
+      throw new StoreException("cannot remember the missed event " + eventId, e);
+    }
+  }
+
+  /** The ids of the events a rule missed, oldest first. */
+  public synchronized List<String> missed(String ruleId) throws StoreException {
+    List<String> out = new ArrayList<>();
+    try (PreparedStatement s =
+        connection.prepareStatement("SELECT event_id FROM missed WHERE rule_id = ? ORDER BY seq")) {
+      s.setString(1, ruleId);
+      try (ResultSet r = s.executeQuery()) {
+        while (r.next()) {
+          out.add(r.getString(1));
+        }
+      }
+      return out;
+    } catch (SQLException e) {
+      throw new StoreException("cannot read the missed events", e);
+    }
+  }
+
+  /** How many events each rule missed, for the rules that missed any. */
+  public synchronized java.util.Map<String, Integer> missedCounts() throws StoreException {
+    java.util.Map<String, Integer> out = new java.util.TreeMap<>();
+    try (Statement s = connection.createStatement();
+        ResultSet r = s.executeQuery("SELECT rule_id, COUNT(*) FROM missed GROUP BY rule_id")) {
+      while (r.next()) {
+        out.put(r.getString(1), r.getInt(2));
+      }
+      return out;
+    } catch (SQLException e) {
+      throw new StoreException("cannot count the missed events", e);
+    }
+  }
+
+  /** Forgets the events a rule missed, e.g. after they were replayed or discarded. */
+  public synchronized void clearMissed(String ruleId) throws StoreException {
+    try (PreparedStatement s =
+        connection.prepareStatement("DELETE FROM missed WHERE rule_id = ?")) {
+      s.setString(1, ruleId);
+      s.executeUpdate();
+    } catch (SQLException e) {
+      throw new StoreException("cannot clear the missed events of " + ruleId, e);
     }
   }
 

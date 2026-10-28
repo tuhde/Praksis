@@ -181,6 +181,48 @@ class DaemonTest {
     assertThat(mail.resolve("new/1700000000.M1P2.host")).exists();
     assertThat(mail.resolve("new/1700000001.M1P2.host")).exists();
     assertThat(mail.resolve(".Archive")).doesNotExist();
+
+    // the audit log has the denied call with its arguments, and the (absent) policy at start
+    assertThat(ask(new Request.Audit(10)))
+        .isInstanceOfSatisfying(
+            Response.AuditLines.class,
+            a -> {
+              assertThat(a.lines())
+                  .anySatisfy(
+                      l -> {
+                        assertThat(l.kind()).isEqualTo("CALL");
+                        assertThat(l.ruleId()).isEqualTo("mail.archive");
+                        assertThat(l.subject()).isEqualTo("mail.move");
+                        assertThat(l.allowed()).isFalse();
+                        assertThat(l.detail()).contains("\"folder\":\"Archive\"");
+                        assertThat(l.error()).contains("no grant");
+                      });
+              assertThat(a.lines())
+                  .anySatisfy(
+                      l -> {
+                        assertThat(l.kind()).isEqualTo("POLICY");
+                        assertThat(l.detail()).isEqualTo("{\"sha256\":\"absent\",\"grants\":[]}");
+                      });
+            });
+  }
+
+  @Test
+  void theGrantsAreAuditedAtStartOnlyWhenTheyChanged() throws Exception {
+    start().close();
+    start().close();
+    write(
+        "policy.toml",
+        Files.readString(home.resolve("policy.toml")) + "\n# a comment changes the hash\n");
+    Daemon daemon = start();
+    assertThat(ask(new Request.Audit(10)))
+        .isInstanceOfSatisfying(
+            Response.AuditLines.class,
+            a ->
+                assertThat(a.lines())
+                    .filteredOn(l -> l.kind().equals("POLICY"))
+                    .hasSize(2)
+                    .allSatisfy(l -> assertThat(l.detail()).contains("\"grants\":[\"archive\"]")));
+    daemon.close();
   }
 
   @Test

@@ -31,6 +31,14 @@ class CliIT {
       assertThat(log.exit()).isZero();
       assertThat(log.output()).contains("mail.archive/move").contains("OK");
 
+      Harness.CliResult audit = h.cli("audit", "-n", "5");
+      assertThat(audit.exit()).as(audit.output()).isZero();
+      assertThat(audit.output())
+          .containsPattern(
+              "CALL +mail\\.archive +allowed +mail\\.move \\{.*\"folder\":\"Archive\".*\\}")
+          .containsPattern(
+              "POLICY .*policy\\.toml \\{\"sha256\":\"[0-9a-f]{64}\",\"grants\":\\[\"ruleset-moves\"\\]\\}");
+
       Harness.CliResult bad = h.cli("inject", "mail.received", "--data", "{\"size\":\"big\"}");
       assertThat(bad.exit()).isEqualTo(1);
       assertThat(bad.output())

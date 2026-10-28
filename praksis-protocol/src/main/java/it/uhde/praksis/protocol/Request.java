@@ -11,6 +11,7 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.Status.class, name = "status"),
   @JsonSubTypes.Type(value = Request.Inject.class, name = "inject"),
   @JsonSubTypes.Type(value = Request.Log.class, name = "log"),
+  @JsonSubTypes.Type(value = Request.Audit.class, name = "audit"),
   @JsonSubTypes.Type(value = Request.Stop.class, name = "stop")
 })
 public sealed interface Request {
@@ -39,6 +40,13 @@ public sealed interface Request {
    * @param limit the maximum number of lines, newest first
    */
   record Log(int limit) implements Request {}
+
+  /**
+   * Asks for the latest lines of the audit log. Answered with {@link Response.AuditLines}.
+   *
+   * @param limit the maximum number of lines, newest first
+   */
+  record Audit(int limit) implements Request {}
 
   /**
    * Asks the daemon to finish what it is doing and exit. Answered with {@link Response.Stopped}.

@@ -34,7 +34,8 @@ import picocli.CommandLine.Spec;
       Praksis.Modules.class,
       Praksis.Layers.class,
       Praksis.Effective.class,
-      Praksis.LogCommand.class
+      Praksis.LogCommand.class,
+      Praksis.AuditCommand.class
     })
 public final class Praksis {
   static final int EXIT_FAILED = 1;
@@ -239,6 +240,42 @@ public final class Praksis {
               .printf(
                   "%s  %s  %s  %-7s %s%n",
                   line.time(), line.eventId(), where, line.outcome(), line.message());
+        }
+        return 0;
+      }
+      return exitCodeFor(response);
+    }
+  }
+
+  @Command(
+      name = "audit",
+      description =
+          "Shows the latest lines of the audit log: every capability call with its arguments and"
+              + " whether it was allowed, and the grants found at start. Newest first.")
+  static final class AuditCommand extends Base {
+    @Option(
+        names = {"-n", "--lines"},
+        defaultValue = "20",
+        description = "How many lines.")
+    int lines;
+
+    @Override
+    public Integer call() {
+      Response response = send(new Request.Audit(lines));
+      if (response instanceof Response.AuditLines l) {
+        for (Response.AuditLines.Line line : l.lines()) {
+          String verdict =
+              line.kind().equals("CALL") ? (line.allowed() ? "allowed" : "DENIED") : "";
+          out()
+              .printf(
+                  "%s  %-6s %-14s %-8s %s %s%s%n",
+                  line.time(),
+                  line.kind(),
+                  line.ruleId() == null ? "-" : line.ruleId(),
+                  verdict,
+                  line.subject(),
+                  line.detail(),
+                  line.error() == null ? "" : "  [" + line.error() + "]");
         }
         return 0;
       }

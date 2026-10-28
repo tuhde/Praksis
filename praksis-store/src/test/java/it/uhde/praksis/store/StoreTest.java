@@ -105,4 +105,106 @@ class StoreTest {
       assertThat(store.recentLog(10).get(0).actionId()).isEmpty();
     }
   }
+
+  private static final Instant T0 = Instant.parse("2026-01-01T00:00:00Z");
+
+  @Test
+  void auditLinesKeepTheirArgumentsAndOrder() throws Exception {
+    try (Store store = Store.open(dir.resolve("praksis.db"))) {
+      store.audit(
+          AuditEntry.call(
+              T0,
+              "mail.10-spam",
+              "mail.move",
+              Map.of("folder", "Spam", "n", 3L),
+              true,
+              Optional.empty()));
+      store.audit(
+          AuditEntry.call(
+              T0.plusSeconds(1),
+              "mail.10-spam",
+              "mail.move",
+              Map.of("folder", "Trash"),
+              false,
+              Optional.of("no grant")));
+      store.audit(
+          new AuditEntry(
+              T0.plusSeconds(2),
+              AuditEntry.Kind.POLICY,
+              Optional.empty(),
+              "policy.toml",
+              true,
+              "{\"sha256\":\"x\"}",
+              Optional.empty()));
+
+      List<AuditEntry> all = store.recentAudit(10);
+      assertThat(all)
+          .extracting(AuditEntry::subject)
+          .containsExactly("mail.move", "mail.move", "policy.toml");
+      assertThat(all.get(0).detail()).contains("\"folder\":\"Spam\"").contains("\"n\":3");
+      assertThat(all.get(1).allowed()).isFalse();
+      assertThat(all.get(1).error()).contains("no grant");
+      assertThat(store.recentAudit(1))
+          .extracting(AuditEntry::kind)
+          .containsExactly(AuditEntry.Kind.POLICY);
+      assertThat(store.lastAudit(AuditEntry.Kind.CALL).orElseThrow().allowed()).isFalse();
+      assertThat(store.lastAudit(AuditEntry.Kind.GRANT)).isEmpty();
+    }
+  }
+
+  @Test
+  void missedEventsAreRememberedOncePerRuleAndTrimmed() throws Exception {
+    try (Store store = Store.open(dir.resolve("praksis.db"))) {
+      Instant cutoff = T0.minusSeconds(1);
+      store.addMissed(T0, "a", "e1", cutoff, 3);
+      store.addMissed(T0.plusSeconds(1), "a", "e2", cutoff, 3);
+      store.addMissed(T0.plusSeconds(2), "a", "e2", cutoff, 3); // same pair again
+      store.addMissed(T0.plusSeconds(2), "b", "e2", cutoff, 3);
+      assertThat(store.missed("a")).containsExactly("e1", "e2");
+      assertThat(store.missedCounts()).containsExactly(Map.entry("a", 2), Map.entry("b", 1));
+
+      // the cap keeps the newest
+      store.addMissed(T0.plusSeconds(3), "a", "e3", cutoff, 3);
+      store.addMissed(T0.plusSeconds(4), "a", "e4", cutoff, 3);
+      assertThat(store.missed("a")).containsExactly("e2", "e3", "e4");
+
+      // the age limit drops what is older than the cutoff, for that rule only
+      store.addMissed(T0.plusSeconds(5), "a", "e5", T0.plusSeconds(3), 10);
+      assertThat(store.missed("a")).containsExactly("e3", "e4", "e5");
+      assertThat(store.missed("b")).containsExactly("e2");
+
+      store.clearMissed("a");
+      assertThat(store.missed("a")).isEmpty();
+      assertThat(store.missedCounts()).containsExactly(Map.entry("b", 1));
+    }
+  }
+
+  @Test
+  void aStoredEventCanBeFoundById() throws Exception {
+    try (Store store = Store.open(dir.resolve("praksis.db"))) {
+      store.append(event("e1", Optional.empty(), Map.of("subject", "hi")));
+      store.markDone("e1");
+      assertThat(store.event("e1").orElseThrow().data()).containsEntry("subject", "hi");
+      assertThat(store.event("nope")).isEmpty();
+    }
+  }
+
+  @Test
+  void aDatabaseOfTheFirstVersionGainsTheNewTables() throws Exception {
+    Path file = dir.resolve("praksis.db");
+    try (Store store = Store.open(file)) {
+      store.append(event("e1", Optional.empty(), Map.of()));
+    }
+    try (var c = java.sql.DriverManager.getConnection("jdbc:sqlite:" + file);
+        var s = c.createStatement()) {
+      s.execute("DROP TABLE audit");
+      s.execute("DROP TABLE missed");
+      s.execute("PRAGMA user_version = 1");
+    }
+    try (Store store = Store.open(file)) {
+      assertThat(store.pending()).hasSize(1);
+      assertThat(store.recentAudit(5)).isEmpty();
+      assertThat(store.missedCounts()).isEmpty();
+    }
+  }
 }

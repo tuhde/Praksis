@@ -11,10 +11,38 @@ import java.util.List;
   @JsonSubTypes.Type(value = Response.StatusReport.class, name = "status"),
   @JsonSubTypes.Type(value = Response.Injected.class, name = "injected"),
   @JsonSubTypes.Type(value = Response.LogLines.class, name = "log"),
+  @JsonSubTypes.Type(value = Response.AuditLines.class, name = "audit"),
   @JsonSubTypes.Type(value = Response.Stopped.class, name = "stopped"),
   @JsonSubTypes.Type(value = Response.Error.class, name = "error")
 })
 public sealed interface Response {
+  /**
+   * The latest lines of the audit log, newest first.
+   *
+   * @param lines the lines
+   */
+  record AuditLines(List<Line> lines) implements Response {
+    /**
+     * One audited step.
+     *
+     * @param time when it was decided, ISO-8601
+     * @param kind {@code CALL}, {@code GRANT} or {@code POLICY}
+     * @param ruleId the rule that made a call, or null
+     * @param subject the capability, grant id or file
+     * @param allowed whether a call was let through
+     * @param detail JSON: the arguments of a call or what changed
+     * @param error what went wrong, or null
+     */
+    public record Line(
+        String time,
+        String kind,
+        String ruleId,
+        String subject,
+        boolean allowed,
+        String detail,
+        String error) {}
+  }
+
   /**
    * How the daemon is doing.
    *

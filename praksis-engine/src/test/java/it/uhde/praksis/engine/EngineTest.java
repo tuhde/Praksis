@@ -306,6 +306,37 @@ class EngineTest {
   }
 
   @Test
+  void eventsADisabledRuleMissedAreRememberedAndCallsAreAudited() throws Exception {
+    rule("a", "", call("x", "test.record", "'one'"));
+    rule("b", "", call("x", "test.slow", "'two'"));
+    Engine.Options options =
+        new Engine.Options(
+            (r, c, a) ->
+                r.equals("a")
+                    ? AccessPolicy.Decision.deny("no grant")
+                    : AccessPolicy.Decision.allow(),
+            new StoreAuditLog(store),
+            Engine.Options.defaults().clock(),
+            false);
+    Event first = event("t", "m1");
+    Event second = event("t", "m2");
+    try (Engine engine = engine(options)) {
+      run(engine, first);
+      run(engine, second);
+    }
+    assertThat(store.missed("a")).containsExactly(first.id(), second.id());
+    assertThat(store.missed("b")).isEmpty();
+    assertThat(store.event(first.id())).isPresent();
+
+    var audit = store.recentAudit(10);
+    assertThat(audit)
+        .extracting(e -> e.ruleId().orElse("") + " " + e.subject() + " " + e.allowed())
+        .containsExactly("a test.record false", "b test.slow true", "b test.slow true");
+    assertThat(audit.get(0).error()).contains("no grant");
+    assertThat(audit.get(1).detail()).isEqualTo("{\"value\":\"two\"}");
+  }
+
+  @Test
   void aDisabledRequiredRuleEndsTheEvent() throws Exception {
     rule("a", "required = true\n", call("x", "test.record", "'one'"));
     rule("b", "", call("x", "test.slow", "'two'"));
