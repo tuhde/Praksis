@@ -41,7 +41,7 @@ public final class MailMove implements Capability {
     if (settings == null) {
       throw new CapabilityException("mail.move is not configured", false);
     }
-    Path source = Path.of((String) args.get("path")).toAbsolutePath().normalize();
+    Path source = Path.of((String) args.get("message")).toAbsolutePath().normalize();
     checkInsideRoot(source);
     Path targetFolder = settings.folderDir((String) args.get("folder"));
     String name = source.getFileName().toString();
@@ -52,7 +52,7 @@ public final class MailMove implements Capability {
       if (!Files.exists(source)) {
         Optional<Path> already = find(targetFolder, unique);
         if (already.isPresent()) {
-          return Map.of("path", already.get().toString());
+          return Map.of("message", already.get().toString());
         }
         throw new CapabilityException("mail not found: " + source, false);
       }
@@ -62,7 +62,7 @@ public final class MailMove implements Capability {
         }
         Files.move(source, target);
       }
-      return Map.of("path", target.toString());
+      return Map.of("message", target.toString());
     } catch (IOException e) {
       throw new CapabilityException("cannot move " + source + ": " + e.getMessage(), true, e);
     }

@@ -57,14 +57,14 @@ class MailMoveTest {
 
   private Map<String, Object> call(Path path, String folder, boolean dryRun)
       throws CapabilityException {
-    return move.invoke(context(dryRun), Map.of("path", path.toString(), "folder", folder));
+    return move.invoke(context(dryRun), Map.of("message", path.toString(), "folder", folder));
   }
 
   @Test
   void movesANewMailIntoTheCurDirectoryOfAnotherFolder() throws Exception {
     Path file = mail("new", "1700000000.M1P2.host");
     Path expected = root.resolve(".Archive/cur/1700000000.M1P2.host:2,");
-    assertThat(call(file, "Archive", false)).containsEntry("path", expected.toString());
+    assertThat(call(file, "Archive", false)).containsEntry("message", expected.toString());
     assertThat(file).doesNotExist();
     assertThat(expected).exists();
     assertThat(root.resolve(".Archive/new")).isDirectory();
@@ -98,14 +98,14 @@ class MailMoveTest {
     Map<String, Object> result = call(file, "Archive", true);
     assertThat(file).exists();
     assertThat(root.resolve(".Archive")).doesNotExist();
-    assertThat(result.get("path").toString()).endsWith(".Archive/cur/1700000000.M1P2.host:2,");
+    assertThat(result.get("message").toString()).endsWith(".Archive/cur/1700000000.M1P2.host:2,");
   }
 
   @Test
   void movesBetweenFoldersAndBackToTheInbox() throws Exception {
     Path file = mail("new", "m1");
-    Path inArchive = Path.of((String) call(file, "Archive", false).get("path"));
-    Path back = Path.of((String) call(inArchive, "INBOX", false).get("path"));
+    Path inArchive = Path.of((String) call(file, "Archive", false).get("message"));
+    Path back = Path.of((String) call(inArchive, "INBOX", false).get("message"));
     assertThat(back).isEqualTo(root.resolve("cur/m1:2,"));
     assertThat(back).exists();
   }

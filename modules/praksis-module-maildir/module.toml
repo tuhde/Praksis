@@ -10,16 +10,15 @@ name = "mail.move"
 effect = "local-write"
 dry_run = true
 params = [
-  { name = "path", type = "string", required = true, scopable = false },
+  { name = "message", type = "string", required = true, scopable = false },
   { name = "folder", type = "string", required = true, scopable = true },
 ]
-results = [{ name = "path", type = "string", required = true }]
+results = [{ name = "message", type = "string", required = true }]
 
 [[event]]
 type = "mail.received"
 fields = [
-  { name = "path", type = "string", required = true },
-  { name = "filename", type = "string", required = true },
+  { name = "message", type = "string", required = true },
   { name = "folder", type = "string", required = true },
   { name = "size", type = "int", required = true },
   { name = "from", type = "string" },

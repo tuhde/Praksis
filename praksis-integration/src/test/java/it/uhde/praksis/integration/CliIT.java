@@ -34,15 +34,11 @@ class CliIT {
       Harness.CliResult bad = h.cli("inject", "mail.received", "--data", "{\"size\":\"big\"}");
       assertThat(bad.exit()).isEqualTo(1);
       assertThat(bad.output())
-          .contains("missing required field 'path'")
+          .contains("missing required field 'message'")
           .contains("field 'size': must be of type int");
 
       // an injected event for a mail that does not exist fails visibly in the log
-      String data =
-          "{\"path\":\""
-              + h.mail
-              + "/new/nothing\",\"filename\":\"nothing\","
-              + "\"folder\":\"INBOX\",\"size\":1}";
+      String data = "{\"message\":\"" + h.mail + "/new/nothing\",\"folder\":\"INBOX\",\"size\":1}";
       assertThat(h.cli("inject", "mail.received", "--key", "k1", "--data", data).output())
           .contains("accepted");
       assertThat(h.cli("inject", "mail.received", "--key", "k1", "--data", data).output())

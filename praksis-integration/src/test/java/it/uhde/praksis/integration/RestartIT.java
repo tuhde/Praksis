@@ -102,10 +102,8 @@ class RestartIT {
                 Optional.empty(),
                 0,
                 Map.of(
-                    "path",
+                    "message",
                     h.mail.resolve("new").resolve(name).toString(),
-                    "filename",
-                    name,
                     "folder",
                     "INBOX",
                     "size",

@@ -92,7 +92,12 @@ public final class Daemon implements AutoCloseable {
     }
     refuseIfRunning();
     try {
-      modules = ModuleLoader.load(config.modules(), config.lockfile(), config.moduleSettings());
+      modules =
+          ModuleLoader.load(
+              config.modules(),
+              config.lockfile(),
+              config.moduleSettings(),
+              config.enabledModules());
       ExpressionCompiler compiler = compiler(config);
       ruleset = new Layers(config, new GitCli(config.gitCache())).effective().ruleset();
       store = Store.open(config.database());

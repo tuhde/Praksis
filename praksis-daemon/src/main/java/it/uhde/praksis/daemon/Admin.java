@@ -169,7 +169,11 @@ final class Admin {
   static Function<Ruleset, List<Problem>> validatorFor(DaemonConfig config) {
     return ruleset -> {
       try (LoadedModules modules =
-          ModuleLoader.load(config.modules(), config.lockfile(), config.moduleSettings())) {
+          ModuleLoader.load(
+              config.modules(),
+              config.lockfile(),
+              config.moduleSettings(),
+              config.enabledModules())) {
         ExpressionCompiler compiler = Daemon.compiler(config);
         return new ArrayList<>(new RulesetValidator(compiler, modules.catalog()).validate(ruleset));
       } catch (ModuleLoadException | DaemonException ex) {

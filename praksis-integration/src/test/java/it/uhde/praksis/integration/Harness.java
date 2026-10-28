@@ -29,7 +29,7 @@ final class Harness implements AutoCloseable {
       [[action]]
       id = "move"
       capability = "mail.move"
-      args = { path = { cel = "event.data.path" }, folder = "Archive" }
+      args = { message = { cel = "event.data.message" }, folder = "Archive" }
       """;
 
   /** The jlink image from praksis-dist: the daemon and the CLI run exactly as shipped. */

@@ -72,8 +72,7 @@ class MaildirSourceTest {
     assertThat(e.key()).contains("maildir:1700000000.M1P2.host");
     assertThat(e.depth()).isZero();
     assertThat(e.data())
-        .containsEntry("path", root.resolve("new/1700000000.M1P2.host").toString())
-        .containsEntry("filename", "1700000000.M1P2.host")
+        .containsEntry("message", root.resolve("new/1700000000.M1P2.host").toString())
         .containsEntry("folder", "INBOX")
         .containsEntry("from", "Anna <anna@example.org>")
         .containsEntry("to", "me@example.org")
@@ -100,7 +99,9 @@ class MaildirSourceTest {
     } finally {
       source.stop();
     }
-    assertThat(events).extracting(e -> e.data().get("filename")).containsExactly("a", "b");
+    assertThat(events)
+        .extracting(e -> Path.of((String) e.data().get("message")).getFileName().toString())
+        .containsExactly("a", "b");
   }
 
   @Test

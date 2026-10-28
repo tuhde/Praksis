@@ -31,7 +31,7 @@ class LayersIT {
         [[action]]
         id = "move"
         capability = "mail.move"
-        args = { path = { cel = "event.data.path" }, folder = "%s" }
+        args = { message = { cel = "event.data.message" }, folder = "%s" }
 
         [[action]]
         stop = true

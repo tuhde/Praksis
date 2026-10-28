@@ -131,8 +131,7 @@ public final class MaildirSource implements EventSource {
     String unique = MailMove.uniquePart(name);
     Map<String, String> headers = Headers.read(file);
     Map<String, Object> data = new HashMap<>();
-    data.put("path", file.toString());
-    data.put("filename", name);
+    data.put("message", file.toString());
     data.put("folder", "INBOX");
     data.put("size", Files.size(file));
     HEADER_FIELDS.forEach((field, header) -> data.put(field, headers.getOrDefault(header, "")));

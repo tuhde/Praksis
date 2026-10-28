@@ -242,4 +242,30 @@ class ModuleLoaderTest {
   private static Path codeSource(Class<?> type) throws URISyntaxException {
     return Path.of(type.getProtectionDomain().getCodeSource().getLocation().toURI());
   }
+
+  @Test
+  void onlyEnabledModulesAreLoadedSoCompetingOnesCanBeInstalledTogether() throws Exception {
+    setUp();
+    install("testmod", MODULE_TOML);
+    install("other", MODULE_TOML.replace("name = \"testmod\"", "name = \"other\""));
+    ModuleLoader.lock(modules, lockfile);
+
+    assertThatThrownBy(() -> ModuleLoader.load(modules, lockfile, Map.of()))
+        .hasMessageContaining("capability 'test.echo' is provided by two modules");
+
+    try (LoadedModules loaded =
+        ModuleLoader.load(modules, lockfile, Map.of(), java.util.Set.of("other"))) {
+      assertThat(loaded.descriptors()).extracting(d -> d.name()).containsExactly("other");
+      assertThat(loaded.capabilities()).containsOnlyKeys("test.echo");
+    }
+    // a disabled module is not even checked against the lockfile
+    Files.writeString(modules.resolve("testmod").resolve("extra.txt"), "changed");
+    try (LoadedModules loaded =
+        ModuleLoader.load(modules, lockfile, Map.of(), java.util.Set.of("other"))) {
+      assertThat(loaded.descriptors()).hasSize(1);
+    }
+    assertThatThrownBy(
+            () -> ModuleLoader.load(modules, lockfile, Map.of(), java.util.Set.of("nope")))
+        .hasMessageContaining("module 'nope' is enabled but not in");
+  }
 }

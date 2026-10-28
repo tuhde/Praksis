@@ -27,6 +27,7 @@ import java.util.Set;
  * ruleset    = "ruleset"       # directory with ruleset.toml and rules/
  * modules    = "modules"       # directory with one subdirectory per module; if it is not set
  *                              # and the home has none, the one that ships with the runtime image
+ * enabled_modules = ["maildir"]  # load only these; without it every module in the directory
  * lockfile   = "modules.lock"
  * database   = "praksis.db"
  * expression = "lib/expression"  # directory with the CEL jar; else the one that ships with the
@@ -59,6 +60,7 @@ import java.util.Set;
  * @param moduleSettings the settings per module name
  * @param layers the ruleset layers, bottom to top; empty means the single directory {@code ruleset}
  * @param params values for ruleset parameters, which win over the defaults in the layers
+ * @param enabledModules the modules to load; empty means every module in the directory
  */
 public record DaemonConfig(
     Path home,
@@ -70,7 +72,8 @@ public record DaemonConfig(
     boolean dryRun,
     Map<String, Map<String, Object>> moduleSettings,
     List<LayerConfig> layers,
-    Map<String, Object> params) {
+    Map<String, Object> params,
+    java.util.Set<String> enabledModules) {
   private static final String FILE = "praksis.toml";
   private static final Set<String> KEYS =
       Set.of(
@@ -83,7 +86,8 @@ public record DaemonConfig(
           "dry_run",
           "module",
           "layer",
-          "param");
+          "param",
+          "enabled_modules");
 
   /** The file that pins the commit of every git layer. */
   public Path rulesetLock() {
@@ -160,6 +164,7 @@ public record DaemonConfig(
                 }
               });
     }
+    java.util.Set<String> enabled = new java.util.LinkedHashSet<>(table.strings("enabled_modules"));
     if (!layers.isEmpty() && table.has("ruleset")) {
       table.problem("'ruleset' and [[layer]] cannot be used together; make it a layer with path");
     }
@@ -173,7 +178,17 @@ public record DaemonConfig(
               + String.join("\n  ", problems.stream().map(Problem::toString).toList()));
     }
     return new DaemonConfig(
-        dir, ruleset, modules, lockfile, database, expression, dryRun, settings, layers, params);
+        dir,
+        ruleset,
+        modules,
+        lockfile,
+        database,
+        expression,
+        dryRun,
+        settings,
+        layers,
+        params,
+        enabled);
   }
 
   /** The directory of what ships with the runtime image, if this is one: {@code lib/praksis}. */

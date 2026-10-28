@@ -50,7 +50,25 @@ public final class ModuleLoader {
   public static LoadedModules load(
       Path modulesDir, Path lockfile, Map<String, Map<String, Object>> settings)
       throws ModuleLoadException {
+    return load(modulesDir, lockfile, settings, Set.of());
+  }
+
+  /**
+   * Loads the enabled modules in the directory.
+   *
+   * @param enabled the names of the modules to load; empty means all. The others are not read
+   *     beyond their name, checked against the lockfile or started: two modules that provide the
+   *     same capability, e.g. two mail backends, can be installed side by side and one enabled.
+   * @throws ModuleLoadException as the other overload, and if an enabled module is not there
+   */
+  public static LoadedModules load(
+      Path modulesDir,
+      Path lockfile,
+      Map<String, Map<String, Object>> settings,
+      Set<String> enabled)
+      throws ModuleLoadException {
     Lockfile locked = Lockfile.read(lockfile);
+    Set<String> found = new HashSet<>();
     List<ModuleDescriptor> descriptors = new ArrayList<>();
     Map<String, Capability> capabilities = new HashMap<>();
     List<EventSource> sources = new ArrayList<>();
@@ -59,6 +77,10 @@ public final class ModuleLoader {
       ModuleDescriptorReader.Result read = ModuleDescriptorReader.read(dir.resolve("module.toml"));
       ModuleDescriptor descriptor = read.descriptor();
       String name = descriptor.name();
+      found.add(name);
+      if (!enabled.isEmpty() && !enabled.contains(name)) {
+        continue;
+      }
       String expected = locked.hashOf(name);
       if (expected == null) {
         throw new ModuleLoadException(
@@ -127,6 +149,11 @@ public final class ModuleLoader {
       }
       descriptors.add(descriptor);
       sources.addAll(mySources);
+    }
+    for (String name : enabled) {
+      if (!found.contains(name)) {
+        throw new ModuleLoadException("module '" + name + "' is enabled but not in " + modulesDir);
+      }
     }
     try {
       new ModuleCatalog(descriptors);

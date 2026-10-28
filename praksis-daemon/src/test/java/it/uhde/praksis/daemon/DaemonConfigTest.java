@@ -24,6 +24,14 @@ class DaemonConfigTest {
     assertThat(c.expression()).isEmpty();
     assertThat(c.dryRun()).isFalse();
     assertThat(c.moduleSettings()).isEmpty();
+    assertThat(c.enabledModules()).isEmpty();
+  }
+
+  @Test
+  void readsTheEnabledModules() throws Exception {
+    Files.writeString(
+        home.resolve("praksis.toml"), "format_version = 1\nenabled_modules = [\"imap\"]\n");
+    assertThat(DaemonConfig.load(home).enabledModules()).containsExactly("imap");
   }
 
   @Test

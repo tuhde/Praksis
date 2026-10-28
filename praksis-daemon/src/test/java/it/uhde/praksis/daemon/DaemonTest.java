@@ -37,7 +37,7 @@ class DaemonTest {
       [[action]]
       id = "move"
       capability = "mail.move"
-      args = { path = { cel = "event.data.path" }, folder = "Archive" }
+      args = { message = { cel = "event.data.message" }, folder = "Archive" }
       """;
 
   @TempDir Path home;
@@ -164,12 +164,12 @@ class DaemonTest {
               Response.Error.class,
               e ->
                   assertThat(e.message())
-                      .contains("missing required field 'path'")
+                      .contains("missing required field 'message'")
                       .contains("field 'size': must be of type int")
                       .contains("unknown field 'x'"));
 
       Map<String, Object> data =
-          Map.of("path", mail + "/new/gone", "filename", "gone", "folder", "INBOX", "size", 1);
+          Map.of("message", mail + "/new/gone", "folder", "INBOX", "size", 1);
       Response first = ask(new Request.Inject("mail.received", "t", "k1", data));
       assertThat(first)
           .isInstanceOfSatisfying(Response.Injected.class, i -> assertThat(i.accepted()).isTrue());
