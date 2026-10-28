@@ -56,7 +56,9 @@ class MaildirSourceTest {
     mail(
         "1700000000.M1P2.host",
         "From: Anna <anna@example.org>\nTo: me@example.org\n"
-            + "Subject: =?UTF-8?B?R3LDvMOfZQ==?=\nMessage-ID: <abc@example.org>\n\nHello\n");
+            + "Subject: =?UTF-8?B?R3LDvMOfZQ==?=\nMessage-ID: <abc@example.org>\n"
+            + "Cc: bob@example.org\nDate: Tue, 27 Oct 2026 10:00:00 +0100\n"
+            + "List-Id: <news.lists.example.org>\nPrecedence: bulk\nX-Spam-Flag: YES\n\nHello\n");
     MaildirSource source = source();
     try {
       await(() -> events.size() == 1);
@@ -77,6 +79,11 @@ class MaildirSourceTest {
         .containsEntry("to", "me@example.org")
         .containsEntry("subject", "Grüße")
         .containsEntry("message_id", "<abc@example.org>")
+        .containsEntry("cc", "bob@example.org")
+        .containsEntry("date", "Tue, 27 Oct 2026 10:00:00 +0100")
+        .containsEntry("list_id", "<news.lists.example.org>")
+        .containsEntry("precedence", "bulk")
+        .containsEntry("x_spam_flag", "YES")
         .containsEntry("size", Files.size(root.resolve("new/1700000000.M1P2.host")));
   }
 

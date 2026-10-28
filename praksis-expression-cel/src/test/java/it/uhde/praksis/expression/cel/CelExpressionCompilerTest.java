@@ -36,7 +36,9 @@ class CelExpressionCompilerTest {
   private static final Scope MAIL_SCOPE =
       new Scope(
           Optional.of(MAIL),
-          List.of(new FieldDescriptor("newsletter_folder", ValueType.STRING, true, false)),
+          List.of(
+              new FieldDescriptor("newsletter_folder", ValueType.STRING, true, false),
+              new FieldDescriptor("senders", ValueType.LIST, true, false)),
           Map.of(
               "find",
               List.of(
@@ -62,7 +64,7 @@ class CelExpressionCompilerTest {
                 "priority", "low"));
     return new Bindings(
         Optional.of(event),
-        Map.of("newsletter_folder", "News"),
+        Map.of("newsletter_folder", "News", "senders", List.of("hello", "zzz")),
         Map.of("find", Map.of("folder", "Inbox", "count", 3L)),
         NOW);
   }
@@ -93,6 +95,15 @@ class CelExpressionCompilerTest {
     assertThat(eval("results.find.count > 2")).isEqualTo(true);
     assertThat(eval("now")).isEqualTo(NOW);
     assertThat(eval("event.time == now")).isEqualTo(true);
+  }
+
+  @Test
+  void theStandardMacrosWork() throws Exception {
+    assertThat(eval("params.senders.exists(s, event.data.subject.contains(s))")).isEqualTo(true);
+    assertThat(eval("params.senders.all(s, event.data.subject.contains(s))")).isEqualTo(false);
+    assertThat(eval("params.senders.filter(s, s.startsWith('h'))")).isEqualTo(List.of("hello"));
+    assertThat(eval("params.senders.map(s, s.size())")).isEqualTo(List.of(5L, 3L));
+    assertThat(eval("has(event.data.headers.x)")).isEqualTo(false);
   }
 
   @Test

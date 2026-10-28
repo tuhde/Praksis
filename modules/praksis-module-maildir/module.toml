@@ -26,4 +26,9 @@ fields = [
   { name = "to", type = "string" },
   { name = "subject", type = "string" },
   { name = "message_id", type = "string" },
+  { name = "cc", type = "string" },
+  { name = "date", type = "string" },
+  { name = "list_id", type = "string" },
+  { name = "precedence", type = "string" },
+  { name = "x_spam_flag", type = "string" },
 ]

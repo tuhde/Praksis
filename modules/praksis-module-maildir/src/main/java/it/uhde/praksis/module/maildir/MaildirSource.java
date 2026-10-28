@@ -8,6 +8,7 @@ import it.uhde.praksis.capability.EventSource;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -28,6 +29,19 @@ import java.util.stream.Stream;
  */
 public final class MaildirSource implements EventSource {
   private static final System.Logger LOG = System.getLogger(MaildirSource.class.getName());
+
+  /** Event field to mail header (lower case). A header the mail does not have gives "". */
+  private static final Map<String, String> HEADER_FIELDS =
+      Map.of(
+          "from", "from",
+          "to", "to",
+          "cc", "cc",
+          "subject", "subject",
+          "message_id", "message-id",
+          "date", "date",
+          "list_id", "list-id",
+          "precedence", "precedence",
+          "x_spam_flag", "x-spam-flag");
 
   private Settings settings;
   private ScheduledExecutorService poller;
@@ -116,6 +130,12 @@ public final class MaildirSource implements EventSource {
     String name = file.getFileName().toString();
     String unique = MailMove.uniquePart(name);
     Map<String, String> headers = Headers.read(file);
+    Map<String, Object> data = new HashMap<>();
+    data.put("path", file.toString());
+    data.put("filename", name);
+    data.put("folder", "INBOX");
+    data.put("size", Files.size(file));
+    HEADER_FIELDS.forEach((field, header) -> data.put(field, headers.getOrDefault(header, "")));
     return new Event(
         UUID.randomUUID().toString(),
         "mail.received",
@@ -125,14 +145,6 @@ public final class MaildirSource implements EventSource {
         Optional.of("maildir:" + unique),
         Optional.empty(),
         0,
-        Map.of(
-            "path", file.toString(),
-            "filename", name,
-            "folder", "INBOX",
-            "size", Files.size(file),
-            "from", headers.getOrDefault("from", ""),
-            "to", headers.getOrDefault("to", ""),
-            "subject", headers.getOrDefault("subject", ""),
-            "message_id", headers.getOrDefault("message-id", "")));
+        data);
   }
 }
