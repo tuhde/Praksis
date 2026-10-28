@@ -4,6 +4,7 @@ package it.uhde.praksis.daemon;
 import it.uhde.praksis.engine.LoadedModules;
 import it.uhde.praksis.engine.ModuleLoadException;
 import it.uhde.praksis.engine.ModuleLoader;
+import it.uhde.praksis.engine.RuleTestRunner;
 import it.uhde.praksis.expression.ExpressionCompiler;
 import it.uhde.praksis.git.GitSource;
 import it.uhde.praksis.ruleset.LayerStack;
@@ -31,6 +32,7 @@ import java.util.function.Function;
  *                                        and gives no rule access that no grant covers
  * effective                              the ruleset that would run, and where each rule comes from
  * verify                                 the static checks on that ruleset and on policy.toml
+ * test                                   run the tests (tests/*.toml) of every layer
  * </pre>
  */
 final class Admin {
@@ -82,12 +84,15 @@ final class Admin {
       if (args.equals(List.of("verify"))) {
         return verify(config, layers, out, err);
       }
+      if (args.equals(List.of("test"))) {
+        return test(config, layers, out, err);
+      }
     } catch (DaemonException e) {
       err.println(e.getMessage());
       return 1;
     }
     err.println(
-        "usage: layers status | layers update [--dry-run] [--accept-new-access] [name...] | effective | verify");
+        "usage: layers status | layers update [--dry-run] [--accept-new-access] [name...] | effective | verify | test");
     return 2;
   }
 
@@ -247,6 +252,43 @@ final class Admin {
     for (Verifier.Finding f : report.findings()) {
       out.printf("  %-7s %-16s %s: %s%n", f.severity(), f.check(), f.where(), f.message());
     }
+    return report.ok() ? 0 : 1;
+  }
+
+  /** Runs the tests of the layers with recording capabilities. */
+  private static int test(DaemonConfig config, Layers layers, PrintWriter out, PrintWriter err)
+      throws DaemonException {
+    List<LayerStack.Source> sources = layers.sources(layers.readLock());
+    RuleTestRunner.Report report;
+    try (LoadedModules modules =
+        ModuleLoader.load(
+            config.modules(),
+            config.lockfile(),
+            config.moduleSettings(),
+            config.enabledModules())) {
+      report =
+          new RuleTestRunner(modules.catalog(), Daemon.compiler(config))
+              .run(sources, config.params());
+    } catch (ModuleLoadException ex) {
+      err.println("cannot run the tests against the modules: " + ex.getMessage());
+      return 1;
+    }
+    long passed = report.results().stream().filter(RuleTestRunner.Result::passed).count();
+    out.printf(
+        "Tests: %d run, %d passed, %d failed%s%n",
+        report.results().size(),
+        passed,
+        report.results().size() - passed,
+        report.problems().isEmpty() ? "" : ", " + report.problems().size() + " unreadable");
+    for (RuleTestRunner.Result r : report.results()) {
+      out.printf(
+          "  %-4s %s  %s: %s%n",
+          r.passed() ? "ok" : "FAIL", r.layer(), r.test().rule(), r.test().name());
+      if (!r.passed()) {
+        out.println("         " + r.message().replace("\n", "\n         "));
+      }
+    }
+    report.problems().forEach(p -> out.println("  ERROR " + p));
     return report.ok() ? 0 : 1;
   }
 

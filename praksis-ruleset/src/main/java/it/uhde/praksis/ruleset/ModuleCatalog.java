@@ -37,6 +37,11 @@ public final class ModuleCatalog {
     return sources.contains(name);
   }
 
+  /** Every capability of the installed modules. */
+  public java.util.Collection<CapabilityDescriptor> capabilities() {
+    return java.util.List.copyOf(capabilities.values());
+  }
+
   public Optional<CapabilityDescriptor> capability(String name) {
     return Optional.ofNullable(capabilities.get(name));
   }

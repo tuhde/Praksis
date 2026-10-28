@@ -35,6 +35,7 @@ import picocli.CommandLine.Spec;
       Praksis.Layers.class,
       Praksis.Effective.class,
       Praksis.Verify.class,
+      Praksis.RunTests.class,
       Praksis.LogCommand.class,
       Praksis.AuditCommand.class,
       Praksis.Approvals.class,
@@ -563,6 +564,19 @@ public final class Praksis {
     @Override
     public Integer call() throws InterruptedException {
       return runDaemonCommand("--admin", "verify");
+    }
+  }
+
+  @Command(
+      name = "test",
+      description =
+          "Runs the tests in the tests/ directory of every layer on the real engine, with the"
+              + " capabilities replaced by recorders. The tests of a layer run against the ruleset"
+              + " up to that layer. Exit code 1 if a test fails or cannot be read.")
+  static final class RunTests extends Base {
+    @Override
+    public Integer call() throws InterruptedException {
+      return runDaemonCommand("--admin", "test");
     }
   }
 
