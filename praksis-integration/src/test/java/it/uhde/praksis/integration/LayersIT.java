@@ -253,6 +253,66 @@ class LayersIT {
   }
 
   @Test
+  void anUpdateThatGivesARuleAccessNoGrantCoversIsRefusedUnlessAccepted() throws Exception {
+    try (Harness h = new Harness()) {
+      Path repos = Files.createTempDirectory("pkr");
+      try {
+        Repo mail = new Repo(repos.resolve("mail"));
+        mail.commit(
+            "first",
+            "ruleset.toml",
+            HEADER.formatted("praksis-mail"),
+            "rules/mail.10-spam.toml",
+            rule("mail.10-spam", "Spam", SPAM_FILTER, "Spam"));
+        Files.writeString(
+            h.home.resolve("praksis.toml"),
+            """
+            format_version = 1
+            [[layer]]
+            name = "mail"
+            git = "%s"
+            ref = "main"
+            [module.maildir]
+            root = "%s"
+            poll_interval_ms = 20
+            """
+                .formatted(mail.url(), h.mail));
+        h.grantMoves(java.util.Map.of("mail", java.util.List.of("Spam")));
+        assertThat(h.cli("layers", "update").exit()).isZero();
+        String pinned = lockfile(h);
+
+        // upstream starts to move mail to a folder that no grant names
+        mail.commit(
+            "second",
+            "rules/mail.20-trash.toml",
+            rule("mail.20-trash", "Trash", "event.data.list_id != ''", "Trash"));
+        Harness.CliResult refused = h.cli("layers", "update");
+        assertThat(refused.exit()).isEqualTo(1);
+        assertThat(refused.output())
+            .contains("+ mail: mail.move folder=\"Trash\"   NOT GRANTED")
+            .contains("Not updated")
+            .contains("The pins are unchanged.");
+        assertThat(lockfile(h)).isEqualTo(pinned);
+
+        // the user adds the grant; now it goes through and says what changed
+        h.grantMoves(java.util.Map.of("mail", java.util.List.of("Spam", "Trash")));
+        Harness.CliResult granted = h.cli("layers", "update", "--dry-run");
+        assertThat(granted.exit()).as(granted.output()).isZero();
+        assertThat(granted.output()).contains("+ mail: mail.move folder=\"Trash\"   granted");
+
+        // or the user accepts it without a grant: the pins move, the calls are still denied
+        h.grantMoves(java.util.Map.of("mail", java.util.List.of("Spam")));
+        Harness.CliResult accepted = h.cli("layers", "update", "--accept-new-access");
+        assertThat(accepted.exit()).as(accepted.output()).isZero();
+        assertThat(accepted.output()).contains("NOT GRANTED").contains("The pins were written");
+        assertThat(lockfile(h)).isNotEqualTo(pinned);
+      } finally {
+        deleteTree(repos);
+      }
+    }
+  }
+
+  @Test
   void aPrivatePatchIsGovernedByTheGrantsOfThePrivateLayerNotTheUpstreamOne() throws Exception {
     try (Harness h = new Harness()) {
       Path repos = Files.createTempDirectory("pkr");

@@ -7,6 +7,7 @@ import it.uhde.praksis.engine.ModuleLoader;
 import it.uhde.praksis.expression.ExpressionCompiler;
 import it.uhde.praksis.git.GitSource;
 import it.uhde.praksis.ruleset.LayerStack;
+import it.uhde.praksis.ruleset.Permissions;
 import it.uhde.praksis.ruleset.Policy;
 import it.uhde.praksis.ruleset.Problem;
 import it.uhde.praksis.ruleset.Ruleset;
@@ -25,7 +26,9 @@ import java.util.function.Function;
  *
  * <pre>
  * layers status                          which commit each layer is pinned to
- * layers update [--dry-run] [name...]    move pins to the latest commit, if the result is valid
+ * layers update [--dry-run] [--accept-new-access] [name...]
+ *                                        move pins to the latest commit, if the result is valid
+ *                                        and gives no rule access that no grant covers
  * effective                              the ruleset that would run, and where each rule comes from
  * verify                                 the static checks on that ruleset and on policy.toml
  * </pre>
@@ -41,6 +44,18 @@ final class Admin {
       List<String> args,
       PrintWriter out,
       PrintWriter err) {
+    return run(config, git, validator, Layers.AccessCheck.NONE, args, out, err);
+  }
+
+  /** As above, with the check of the access that rulesets need against the grants. */
+  static int run(
+      DaemonConfig config,
+      GitSource git,
+      Function<Ruleset, List<Problem>> validator,
+      Layers.AccessCheck access,
+      List<String> args,
+      PrintWriter out,
+      PrintWriter err) {
     Layers layers = new Layers(config, git);
     try {
       if (args.equals(List.of("layers", "status"))) {
@@ -48,15 +63,18 @@ final class Admin {
       }
       if (args.size() >= 2 && args.get(0).equals("layers") && args.get(1).equals("update")) {
         boolean dryRun = false;
+        boolean acceptNewAccess = false;
         Set<String> names = new LinkedHashSet<>();
         for (String a : args.subList(2, args.size())) {
           if (a.equals("--dry-run")) {
             dryRun = true;
+          } else if (a.equals("--accept-new-access")) {
+            acceptNewAccess = true;
           } else {
             names.add(a);
           }
         }
-        return update(layers, names, dryRun, validator, out, err);
+        return update(layers, names, dryRun, acceptNewAccess, validator, access, out, err);
       }
       if (args.equals(List.of("effective"))) {
         return effective(config, layers, out, err);
@@ -68,7 +86,8 @@ final class Admin {
       err.println(e.getMessage());
       return 1;
     }
-    err.println("usage: layers status | layers update [--dry-run] [name...] | effective | verify");
+    err.println(
+        "usage: layers status | layers update [--dry-run] [--accept-new-access] [name...] | effective | verify");
     return 2;
   }
 
@@ -111,11 +130,17 @@ final class Admin {
       Layers layers,
       Set<String> names,
       boolean dryRun,
+      boolean acceptNewAccess,
       Function<Ruleset, List<Problem>> validator,
+      Layers.AccessCheck access,
       PrintWriter out,
       PrintWriter err)
       throws DaemonException {
-    Layers.Update result = layers.update(names, dryRun, validator);
+    Layers.Update result = layers.update(names, dryRun, acceptNewAccess, validator, access);
+    if (result.refused()) {
+      result.report().forEach(err::println);
+      return 1;
+    }
     if (!result.problems().isEmpty()) {
       err.println("Not updated: the ruleset that would result has problems.");
       result.problems().forEach(p -> err.println("  " + p));
@@ -199,6 +224,15 @@ final class Admin {
         policy
             .check(modules.catalog(), config.layerNames())
             .forEach(p -> findings.add(policyFinding(p)));
+        Permissions.Needs needs = Permissions.of(e, modules.catalog());
+        for (Permissions.Requirement r : Permissions.uncovered(needs.requirements(), policy)) {
+          findings.add(
+              new Verifier.Finding(
+                  Verifier.Severity.WARNING,
+                  "access",
+                  String.join(", ", needs.rules().get(r)),
+                  "no grant covers " + r.describe()));
+        }
       } catch (RulesetException ex) {
         ex.problems().forEach(p -> findings.add(policyFinding(p)));
       }
@@ -218,6 +252,27 @@ final class Admin {
 
   private static Verifier.Finding policyFinding(Problem p) {
     return new Verifier.Finding(Verifier.Severity.ERROR, "policy", p.location(), p.message());
+  }
+
+  /**
+   * Works out the access a ruleset needs and which of it the grants in policy.toml do not cover.
+   */
+  static Layers.AccessCheck accessFor(DaemonConfig config) {
+    return effective -> {
+      try (LoadedModules modules =
+          ModuleLoader.load(
+              config.modules(),
+              config.lockfile(),
+              config.moduleSettings(),
+              config.enabledModules())) {
+        Permissions.Needs needs = Permissions.of(effective, modules.catalog());
+        List<Permissions.Requirement> uncovered =
+            Permissions.uncovered(needs.requirements(), Policy.load(config.policy()));
+        return new Layers.Access(needs, uncovered);
+      } catch (ModuleLoadException | RulesetException ex) {
+        throw new DaemonException("cannot work out what the rules need: " + ex.getMessage(), ex);
+      }
+    };
   }
 
   /** Checks a ruleset against the loaded modules, as the daemon does when it starts. */

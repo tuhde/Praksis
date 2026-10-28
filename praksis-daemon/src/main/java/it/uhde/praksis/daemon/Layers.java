@@ -6,6 +6,7 @@ import com.fasterxml.jackson.dataformat.toml.TomlMapper;
 import it.uhde.praksis.git.GitException;
 import it.uhde.praksis.git.GitSource;
 import it.uhde.praksis.ruleset.LayerStack;
+import it.uhde.praksis.ruleset.Permissions;
 import it.uhde.praksis.ruleset.Problem;
 import it.uhde.praksis.ruleset.Ruleset;
 import it.uhde.praksis.ruleset.RulesetException;
@@ -41,8 +42,26 @@ final class Layers {
    * @param applied whether the pins were written
    * @param report what changed, line by line
    * @param problems why nothing was changed, if that is so
+   * @param refused whether the update was stopped because it gives rules access that no grant
+   *     covers; the report then holds the permission diff
    */
-  record Update(boolean applied, List<String> report, List<Problem> problems) {}
+  record Update(boolean applied, List<String> report, List<Problem> problems, boolean refused) {
+    Update(boolean applied, List<String> report, List<Problem> problems) {
+      this(applied, report, problems, false);
+    }
+  }
+
+  /** What a ruleset needs to be allowed to do, and what of that no grant covers. */
+  record Access(Permissions.Needs needs, List<Permissions.Requirement> uncovered) {}
+
+  /** Works out the access of a ruleset against the grants in the home directory. */
+  @FunctionalInterface
+  interface AccessCheck {
+    Access of(LayerStack.Effective effective) throws DaemonException;
+
+    /** A check that finds nothing needed, for callers that have no modules or policy at hand. */
+    AccessCheck NONE = e -> new Access(new Permissions.Needs(Map.of()), List.of());
+  }
 
   private final DaemonConfig config;
   private final GitSource git;
@@ -184,9 +203,16 @@ final class Layers {
    *
    * @param names the layers to move; empty means all git layers
    * @param dryRun whether to only report what would happen
+   * @param acceptNewAccess whether to go on although rules get access that no grant covers
    * @param validator checks the combined ruleset against the modules; returns the problems
+   * @param access works out what the rulesets need and which of that is not granted
    */
-  Update update(Set<String> names, boolean dryRun, Function<Ruleset, List<Problem>> validator)
+  Update update(
+      Set<String> names,
+      boolean dryRun,
+      boolean acceptNewAccess,
+      Function<Ruleset, List<Problem>> validator,
+      AccessCheck access)
       throws DaemonException {
     Set<String> gitLayers = new LinkedHashSet<>();
     config.layers().stream().filter(LayerConfig::isGit).forEach(l -> gitLayers.add(l.name()));
@@ -240,6 +266,37 @@ final class Layers {
     }
 
     List<String> report = new ArrayList<>();
+    List<String> accessLines = new ArrayList<>();
+    boolean refused = false;
+    if (before != null) {
+      Access needed = access.of(after);
+      Permissions.Diff diff = Permissions.diff(access.of(before).needs(), needed.needs());
+      List<Permissions.Requirement> ungranted = needed.uncovered();
+      List<Permissions.Requirement> newlyUngranted =
+          diff.added().stream().filter(ungranted::contains).toList();
+      if (!diff.isEmpty()) {
+        accessLines.add("Permissions the rules need, compared with now:");
+        diff.added()
+            .forEach(
+                r ->
+                    accessLines.add(
+                        "  + "
+                            + r.describe()
+                            + (newlyUngranted.contains(r) ? "   NOT GRANTED" : "   granted")));
+        diff.removed().forEach(r -> accessLines.add("  - " + r.describe()));
+      }
+      refused = !newlyUngranted.isEmpty() && !acceptNewAccess;
+      if (refused) {
+        accessLines.add(
+            "Not updated: "
+                + newlyUngranted.size()
+                + " new kind(s) of access are not covered by a grant. Add grants for them, or run"
+                + " the update again with --accept-new-access (the rules then run, but each call"
+                + " is denied until it is granted).");
+        accessLines.add("The pins are unchanged.");
+        return new Update(false, accessLines, List.of(), true);
+      }
+    }
     for (var e : next.entrySet()) {
       Pin was = old.get(e.getKey());
       Pin now = e.getValue();
@@ -260,6 +317,7 @@ final class Layers {
       }
     }
     report.addAll(ruleChanges(before, after));
+    report.addAll(accessLines);
     report.add("The new ruleset is valid (" + after.ruleset().rules().size() + " rules).");
     if (dryRun) {
       report.add("Dry run: the pins were not changed.");

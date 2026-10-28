@@ -42,7 +42,13 @@ public final class Main {
         PrintWriter err = new PrintWriter(System.err, true);
         int exit =
             Admin.run(
-                config, new GitCli(config.gitCache()), Admin.validatorFor(config), admin, out, err);
+                config,
+                new GitCli(config.gitCache()),
+                Admin.validatorFor(config),
+                Admin.accessFor(config),
+                admin,
+                out,
+                err);
         System.exit(exit);
       } catch (DaemonException e) {
         System.err.println("praksis: " + e.getMessage());

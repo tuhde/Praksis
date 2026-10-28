@@ -519,10 +519,18 @@ public final class Praksis {
         name = "update",
         description =
             "Moves layers to the latest commit of their branch or tag, but only if the ruleset"
-                + " that results is valid. Otherwise the pins stay as they are.")
+                + " that results is valid and gives no rule access that no grant covers. Otherwise"
+                + " the pins stay as they are.")
     static final class UpdateCommand extends Base {
       @Option(names = "--dry-run", description = "Only show what would change.")
       boolean dryRun;
+
+      @Option(
+          names = "--accept-new-access",
+          description =
+              "Move the pins although rules get access that no grant covers (their calls are"
+                  + " denied until granted).")
+      boolean acceptNewAccess;
 
       @CommandLine.Parameters(
           paramLabel = "<layer>",
@@ -535,6 +543,9 @@ public final class Praksis {
             new java.util.ArrayList<>(java.util.List.of("--admin", "layers", "update"));
         if (dryRun) {
           args.add("--dry-run");
+        }
+        if (acceptNewAccess) {
+          args.add("--accept-new-access");
         }
         args.addAll(names);
         return runDaemonCommand(args.toArray(String[]::new));

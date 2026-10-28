@@ -4,8 +4,18 @@ package it.uhde.praksis.daemon;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import it.uhde.praksis.capability.CapabilityDescriptor;
+import it.uhde.praksis.capability.EffectClass;
+import it.uhde.praksis.capability.FieldDescriptor;
+import it.uhde.praksis.capability.ModuleDescriptor;
+import it.uhde.praksis.capability.ValueType;
 import it.uhde.praksis.git.GitException;
 import it.uhde.praksis.git.GitSource;
+import it.uhde.praksis.ruleset.ArgMatcher;
+import it.uhde.praksis.ruleset.Grant;
+import it.uhde.praksis.ruleset.ModuleCatalog;
+import it.uhde.praksis.ruleset.Permissions;
+import it.uhde.praksis.ruleset.Policy;
 import it.uhde.praksis.ruleset.Problem;
 import it.uhde.praksis.ruleset.Ruleset;
 import java.io.IOException;
@@ -16,6 +26,7 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
@@ -214,6 +225,57 @@ class AdminTest {
     return new Result(exit, out.toString(), err.toString());
   }
 
+  private static final ModuleCatalog CATALOG =
+      new ModuleCatalog(
+          List.of(
+              new ModuleDescriptor(
+                  "mail",
+                  "0.1.0",
+                  List.of(),
+                  List.of(
+                      new CapabilityDescriptor(
+                          "mail.move",
+                          EffectClass.LOCAL_WRITE,
+                          true,
+                          List.of(
+                              new FieldDescriptor("path", ValueType.STRING, true, false),
+                              new FieldDescriptor("folder", ValueType.STRING, true, true)),
+                          List.of())),
+                  List.of(),
+                  List.of())));
+
+  /** Rules of layer mail may move to Lists and Spam; the layer mine has no grants. */
+  private static Layers.AccessCheck granted(String... folders) {
+    Policy policy =
+        new Policy(
+            List.of(
+                new Grant(
+                    "mail-moves",
+                    "mail",
+                    "mail.move",
+                    Map.of("folder", new ArgMatcher.OneOf(List.of((Object[]) folders))),
+                    Optional.empty())));
+    return effective -> {
+      Permissions.Needs needs = Permissions.of(effective, CATALOG);
+      return new Layers.Access(needs, Permissions.uncovered(needs.requirements(), policy));
+    };
+  }
+
+  private Result adminWithAccess(Layers.AccessCheck access, String... args) throws Exception {
+    StringWriter out = new StringWriter();
+    StringWriter err = new StringWriter();
+    int exit =
+        Admin.run(
+            DaemonConfig.load(home),
+            git,
+            r -> List.of(),
+            access,
+            List.of(args),
+            new PrintWriter(out, true),
+            new PrintWriter(err, true));
+    return new Result(exit, out.toString(), err.toString());
+  }
+
   private Result admin(String... args) throws Exception {
     return admin(r -> List.of(), args);
   }
@@ -321,6 +383,44 @@ class AdminTest {
         .contains("unknown capability 'mail.move'")
         .contains("The pins are unchanged.");
     assertThat(lock()).isEqualTo(before);
+  }
+
+  @Test
+  void anUpdateThatGivesARuleAccessNoGrantCoversIsRefusedWithThePermissionDiff() throws Exception {
+    assertThat(adminWithAccess(granted("Lists", "Spam"), "layers", "update").exit()).isZero();
+    String before = lock();
+    publish(MAIL_URL, mailTree("2", ARCHIVE, SPAM.replace("\"Spam\"", "\"Trash\"")));
+
+    Result r = adminWithAccess(granted("Lists", "Spam"), "layers", "update");
+    assertThat(r.exit()).isEqualTo(1);
+    assertThat(r.err())
+        .contains("+ mail: mail.move folder=\"Trash\"   NOT GRANTED")
+        .contains("- mail: mail.move folder=\"Spam\"")
+        .contains("Not updated: 1 new kind(s) of access are not covered by a grant")
+        .contains("The pins are unchanged.");
+    assertThat(lock()).isEqualTo(before);
+
+    // a grant for it, and the update goes through
+    Result ok = adminWithAccess(granted("Lists", "Trash"), "layers", "update");
+    assertThat(ok.exit()).as(ok.err()).isZero();
+    assertThat(ok.out()).contains("+ mail: mail.move folder=\"Trash\"   granted");
+    assertThat(lock()).isNotEqualTo(before);
+  }
+
+  @Test
+  void theFlagAcceptsNewAccessAndANewPinWithoutAnyChangeInAccessNeedsNoGrant() throws Exception {
+    assertThat(adminWithAccess(granted(), "layers", "update").exit()).isZero(); // nothing before
+    String before = lock();
+    publish(MAIL_URL, mailTree("2", ARCHIVE, SPAM.replace("\"Spam\"", "\"Trash\"")));
+
+    Result r = adminWithAccess(granted(), "layers", "update", "--accept-new-access");
+    assertThat(r.exit()).as(r.err()).isZero();
+    assertThat(r.out()).contains("NOT GRANTED").contains("The pins were written");
+    assertThat(lock()).isNotEqualTo(before);
+
+    // nothing new, so nothing to refuse although nothing is granted
+    publish(MAIL_URL, mailTree("3", ARCHIVE, SPAM.replace("\"Spam\"", "\"Trash\"")));
+    assertThat(adminWithAccess(granted(), "layers", "update").exit()).isZero();
   }
 
   @Test

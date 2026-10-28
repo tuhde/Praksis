@@ -57,6 +57,16 @@ class VerifyIT {
           .containsPattern(
               "WARNING +shadowed +rules/mail\\.zz-extra\\.toml: can only fire if 'mail\\.archive'");
 
+      // a rule that may do what no grant covers is a warning that names the access
+      Files.writeString(
+          h.home.resolve("ruleset/rules/mail.zz-extra.toml"),
+          Harness.RULE.replace("mail.archive", "mail.zz-extra").replace("Archive", "Trash"));
+      Harness.CliResult ungranted = h.cli("verify");
+      assertThat(ungranted.output())
+          .containsPattern(
+              "WARNING +access +mail\\.zz-extra: no grant covers ruleset: mail\\.move"
+                  + " folder=\"Trash\"");
+
       // an invalid ruleset is an error of the validator, with the file it is about
       Files.writeString(
           h.home.resolve("ruleset/rules/mail.zz-extra.toml"),

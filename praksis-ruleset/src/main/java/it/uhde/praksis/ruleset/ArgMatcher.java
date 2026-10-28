@@ -73,7 +73,7 @@ public sealed interface ArgMatcher {
     return a.equals(b);
   }
 
-  private static String show(Object value) {
+  static String show(Object value) {
     return value instanceof String s
         ? "\"" + s.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
         : String.valueOf(value);
