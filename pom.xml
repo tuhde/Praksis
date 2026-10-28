@@ -33,6 +33,7 @@
     <module>praksis-expression-cel</module>
     <module>praksis-ruleset</module>
     <module>praksis-store</module>
+    <module>praksis-git</module>
     <module>praksis-engine</module>
     <module>praksis-protocol</module>
     <module>praksis-daemon</module>
