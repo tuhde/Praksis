@@ -34,6 +34,7 @@ import picocli.CommandLine.Spec;
       Praksis.Modules.class,
       Praksis.Layers.class,
       Praksis.Effective.class,
+      Praksis.Verify.class,
       Praksis.LogCommand.class,
       Praksis.AuditCommand.class,
       Praksis.Approvals.class,
@@ -538,6 +539,19 @@ public final class Praksis {
         args.addAll(names);
         return runDaemonCommand(args.toArray(String[]::new));
       }
+    }
+  }
+
+  @Command(
+      name = "verify",
+      description =
+          "Runs the static checks on the ruleset that would run and on policy.toml: it must be"
+              + " valid, rules may only ask for what they call, and grants must name layers and"
+              + " capabilities that exist. Exit code 1 if there are errors.")
+  static final class Verify extends Base {
+    @Override
+    public Integer call() throws InterruptedException {
+      return runDaemonCommand("--admin", "verify");
     }
   }
 

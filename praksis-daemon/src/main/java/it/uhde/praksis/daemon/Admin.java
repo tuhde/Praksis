@@ -7,10 +7,12 @@ import it.uhde.praksis.engine.ModuleLoader;
 import it.uhde.praksis.expression.ExpressionCompiler;
 import it.uhde.praksis.git.GitSource;
 import it.uhde.praksis.ruleset.LayerStack;
+import it.uhde.praksis.ruleset.Policy;
 import it.uhde.praksis.ruleset.Problem;
 import it.uhde.praksis.ruleset.Ruleset;
 import it.uhde.praksis.ruleset.RulesetException;
 import it.uhde.praksis.ruleset.RulesetValidator;
+import it.uhde.praksis.ruleset.Verifier;
 import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -25,6 +27,7 @@ import java.util.function.Function;
  * layers status                          which commit each layer is pinned to
  * layers update [--dry-run] [name...]    move pins to the latest commit, if the result is valid
  * effective                              the ruleset that would run, and where each rule comes from
+ * verify                                 the static checks on that ruleset and on policy.toml
  * </pre>
  */
 final class Admin {
@@ -58,11 +61,14 @@ final class Admin {
       if (args.equals(List.of("effective"))) {
         return effective(config, layers, out, err);
       }
+      if (args.equals(List.of("verify"))) {
+        return verify(config, layers, out, err);
+      }
     } catch (DaemonException e) {
       err.println(e.getMessage());
       return 1;
     }
-    err.println("usage: layers status | layers update [--dry-run] [name...] | effective");
+    err.println("usage: layers status | layers update [--dry-run] [name...] | effective | verify");
     return 2;
   }
 
@@ -163,6 +169,55 @@ final class Admin {
                           + p.defaultValue().map(String::valueOf).orElse("(no value)")));
     }
     return 0;
+  }
+
+  /** Runs the static checks on the ruleset that would run, and on policy.toml. */
+  private static int verify(DaemonConfig config, Layers layers, PrintWriter out, PrintWriter err)
+      throws DaemonException {
+    LayerStack.Effective e;
+    try {
+      e = layers.effective();
+    } catch (RulesetException ex) {
+      err.println("The layers cannot be put together:");
+      ex.problems().forEach(p -> err.println("  " + p));
+      return 1;
+    }
+    Verifier.Report report;
+    try (LoadedModules modules =
+        ModuleLoader.load(
+            config.modules(),
+            config.lockfile(),
+            config.moduleSettings(),
+            config.enabledModules())) {
+      List<Verifier.Finding> findings =
+          new ArrayList<>(
+              new Verifier(Daemon.compiler(config), modules.catalog())
+                  .verify(e.ruleset())
+                  .findings());
+      try {
+        Policy policy = Policy.load(config.policy());
+        policy
+            .check(modules.catalog(), config.layerNames())
+            .forEach(p -> findings.add(policyFinding(p)));
+      } catch (RulesetException ex) {
+        ex.problems().forEach(p -> findings.add(policyFinding(p)));
+      }
+      report = new Verifier.Report(findings);
+    } catch (ModuleLoadException ex) {
+      err.println("cannot check the ruleset against the modules: " + ex.getMessage());
+      return 1;
+    }
+    out.printf(
+        "Ruleset %s (%d rules): %d error(s), %d warning(s)%n",
+        e.ruleset().name(), e.ruleset().rules().size(), report.errors(), report.warnings());
+    for (Verifier.Finding f : report.findings()) {
+      out.printf("  %-7s %-16s %s: %s%n", f.severity(), f.check(), f.where(), f.message());
+    }
+    return report.ok() ? 0 : 1;
+  }
+
+  private static Verifier.Finding policyFinding(Problem p) {
+    return new Verifier.Finding(Verifier.Severity.ERROR, "policy", p.location(), p.message());
   }
 
   /** Checks a ruleset against the loaded modules, as the daemon does when it starts. */
