@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>it.uhde</groupId>
+    <artifactId>praksis-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>praksis-dist</artifactId>
+  <packaging>pom</packaging>
+  <name>Praksis distribution</name>
+  <description>Builds the runtime image: a jlink image with the daemon and the CLI, plus the modules and the expression layer that are loaded from disk.</description>
+
+  <properties>
+    <image.dir>${project.build.directory}/praksis</image.dir>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>it.uhde</groupId>
+      <artifactId>praksis-daemon</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>it.uhde</groupId>
+      <artifactId>praksis-cli</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <!-- Loaded from disk by the daemon, not part of the image's module graph. They bring no
+         dependencies: the CEL jar is shaded, and the Maildir module needs only the API. -->
+    <dependency>
+      <groupId>it.uhde</groupId>
+      <artifactId>praksis-expression-cel</artifactId>
+      <version>${project.version}</version>
+      <scope>runtime</scope>
+      <exclusions>
+        <exclusion>
+          <groupId>*</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>it.uhde</groupId>
+      <artifactId>praksis-module-maildir</artifactId>
+      <version>${project.version}</version>
+      <scope>runtime</scope>
+      <exclusions>
+        <exclusion>
+          <groupId>*</groupId>
+          <artifactId>*</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>module-path</id>
+            <phase>package</phase>
+            <goals>
+              <goal>copy-dependencies</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/mp</outputDirectory>
+              <includeScope>runtime</includeScope>
+              <excludeArtifactIds>praksis-expression-cel,praksis-module-maildir</excludeArtifactIds>
+            </configuration>
+          </execution>
+          <execution>
+            <id>loaded-from-disk</id>
+            <phase>package</phase>
+            <goals>
+              <goal>copy-dependencies</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/disk</outputDirectory>
+              <includeArtifactIds>praksis-expression-cel,praksis-module-maildir</includeArtifactIds>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-antrun-plugin</artifactId>
+        <version>${maven-antrun-plugin.version}</version>
+        <executions>
+          <execution>
+            <id>image</id>
+            <phase>package</phase>
+            <goals>
+              <goal>run</goal>
+            </goals>
+            <configuration>
+              <target>
+                <delete dir="${image.dir}"/>
+                <!-- java.logging and jdk.unsupported: used by the shaded CEL layer (guava,
+                     protobuf), which the module graph cannot see. -->
+                <exec executable="${java.home}/bin/jlink" failonerror="true">
+                  <arg value="--module-path"/>
+                  <arg value="${project.build.directory}/mp"/>
+                  <arg value="--add-modules"/>
+                  <arg value="it.uhde.praksis.daemon,it.uhde.praksis.cli,java.logging,jdk.unsupported"/>
+                  <arg value="--launcher"/>
+                  <arg value="praksis=it.uhde.praksis.cli/it.uhde.praksis.cli.Praksis"/>
+                  <arg value="--strip-debug"/>
+                  <arg value="--no-header-files"/>
+                  <arg value="--no-man-pages"/>
+                  <arg value="--compress"/>
+                  <arg value="zip-6"/>
+                  <arg value="--generate-cds-archive"/>
+                  <arg value="--output"/>
+                  <arg value="${image.dir}"/>
+                </exec>
+                <mkdir dir="${image.dir}/lib/praksis/expression"/>
+                <copy todir="${image.dir}/lib/praksis/expression">
+                  <fileset dir="${project.build.directory}/disk" includes="praksis-expression-cel-*.jar"/>
+                </copy>
+                <mkdir dir="${image.dir}/lib/praksis/modules/maildir"/>
+                <copy todir="${image.dir}/lib/praksis/modules/maildir">
+                  <fileset dir="${project.build.directory}/disk" includes="praksis-module-maildir-*.jar"/>
+                  <fileset dir="${project.basedir}/../modules/praksis-module-maildir" includes="module.toml"/>
+                </copy>
+                <copy file="${project.basedir}/../LICENSE" todir="${image.dir}"/>
+                <copy file="${project.basedir}/../NOTICE" todir="${image.dir}"/>
+              </target>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

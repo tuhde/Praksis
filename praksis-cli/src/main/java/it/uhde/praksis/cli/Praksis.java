@@ -13,7 +13,6 @@ import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.ParentCommand;
 import picocli.CommandLine.ScopeType;
 import picocli.CommandLine.Spec;
 
@@ -32,6 +31,7 @@ import picocli.CommandLine.Spec;
       Praksis.Stop.class,
       Praksis.Status.class,
       Praksis.Inject.class,
+      Praksis.Modules.class,
       Praksis.LogCommand.class
     })
 public final class Praksis {
@@ -70,8 +70,11 @@ public final class Praksis {
 
   /** What every subcommand shares: it knows the home and prints to the right streams. */
   abstract static class Base implements Callable<Integer> {
-    @ParentCommand Praksis parent;
     @Spec CommandSpec spec;
+
+    Praksis parent() {
+      return (Praksis) spec.root().userObject();
+    }
 
     PrintWriter out() {
       return spec.commandLine().getOut();
@@ -83,7 +86,7 @@ public final class Praksis {
 
     /** Sends one request. Returns null, after saying why, if the daemon cannot be reached. */
     Response send(Request request) {
-      Path socket = parent.socket();
+      Path socket = parent().socket();
       try (Client client = Client.connect(socket)) {
         return client.send(request);
       } catch (IOException e) {
@@ -99,7 +102,7 @@ public final class Praksis {
 
     /** True if the daemon was reached, false if not. */
     boolean running() {
-      try (Client client = Client.connect(parent.socket())) {
+      try (Client client = Client.connect(parent().socket())) {
         return client.send(new Request.Status()) instanceof Response.StatusReport;
       } catch (IOException e) {
         return false;
@@ -108,7 +111,7 @@ public final class Praksis {
 
     int exitCodeFor(Response response) {
       if (response == null) {
-        return Files.exists(parent.socket()) ? EXIT_FAILED : EXIT_NOT_RUNNING;
+        return Files.exists(parent().socket()) ? EXIT_FAILED : EXIT_NOT_RUNNING;
       }
       if (response instanceof Response.Error e) {
         err().println("Error: " + e.message());
@@ -218,6 +221,37 @@ public final class Praksis {
     }
   }
 
+  @Command(
+      name = "modules",
+      description = "Manages the modules.",
+      subcommands = Praksis.Modules.Lock.class)
+  static final class Modules {
+    @Command(
+        name = "lock",
+        description =
+            "Accepts the modules as they are now: records their hashes in modules.lock. The"
+                + " daemon loads only modules that match.")
+    static final class Lock extends Base {
+      @Override
+      public Integer call() throws InterruptedException {
+        try {
+          Process p =
+              new ProcessBuilder(DaemonCommand.buildWith(parent().home(), "--lock-modules"))
+                  .redirectErrorStream(true)
+                  .start();
+          p.getOutputStream().close();
+          String output = new String(p.getInputStream().readAllBytes());
+          int exit = p.waitFor();
+          (exit == 0 ? out() : err()).print(output);
+          return exit == 0 ? 0 : EXIT_FAILED;
+        } catch (IOException e) {
+          err().println("Cannot run the module locker: " + e.getMessage());
+          return EXIT_FAILED;
+        }
+      }
+    }
+  }
+
   @Command(name = "start", description = "Starts the daemon in the background.")
   static final class Start extends Base {
     @Option(
@@ -232,7 +266,7 @@ public final class Praksis {
         out().println("The daemon is already running.");
         return 0;
       }
-      Path home = parent.home();
+      Path home = parent().home();
       Path logFile = home.resolve("praksis.log");
       Process process;
       try {

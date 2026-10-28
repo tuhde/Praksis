@@ -1,24 +1,44 @@
 // SPDX-License-Identifier: Apache-2.0
 package it.uhde.praksis.daemon;
 
+import it.uhde.praksis.engine.ModuleLoadException;
+import it.uhde.praksis.engine.ModuleLoader;
 import java.nio.file.Path;
 
-/** Starts the daemon: {@code java -m it.uhde.praksis.daemon [--home <dir>]}. */
+/**
+ * Starts the daemon: {@code java -m it.uhde.praksis.daemon [--home <dir>]}. With {@code
+ * --lock-modules} it instead accepts the modules as they are now by writing the lockfile.
+ */
 public final class Main {
   private Main() {}
 
   public static void main(String[] args) throws InterruptedException {
     String home = System.getenv("PRAKSIS_HOME");
+    boolean lock = false;
     for (int i = 0; i < args.length; i++) {
       if (args[i].equals("--home") && i + 1 < args.length) {
         home = args[++i];
+      } else if (args[i].equals("--lock-modules")) {
+        lock = true;
       } else {
-        System.err.println("usage: praksis-daemon [--home <dir>]");
+        System.err.println("usage: praksis-daemon [--home <dir>] [--lock-modules]");
         System.exit(2);
       }
     }
     if (home == null) {
       home = Path.of(System.getProperty("user.home"), ".praksis").toString();
+    }
+    if (lock) {
+      try {
+        DaemonConfig config = DaemonConfig.load(Path.of(home));
+        ModuleLoader.lock(config.modules(), config.lockfile());
+        System.out.println(
+            "Locked the modules in " + config.modules() + " in " + config.lockfile());
+        return;
+      } catch (DaemonException | ModuleLoadException e) {
+        System.err.println("praksis: " + e.getMessage());
+        System.exit(1);
+      }
     }
     Daemon daemon;
     try {

@@ -25,10 +25,12 @@ import java.util.Set;
  * <pre>
  * format_version = 1
  * ruleset    = "ruleset"       # directory with ruleset.toml and rules/
- * modules    = "modules"       # directory with one subdirectory per module
+ * modules    = "modules"       # directory with one subdirectory per module; if it is not set
+ *                              # and the home has none, the one that ships with the runtime image
  * lockfile   = "modules.lock"
  * database   = "praksis.db"
- * expression = "lib/expression"  # directory with the CEL jar; without it the class path is used
+ * expression = "lib/expression"  # directory with the CEL jar; else the one that ships with the
+ *                              # runtime image; else the class path is used
  * dry_run    = false
  *
  * [module.maildir]             # settings handed to the module with this name
@@ -96,11 +98,14 @@ public record DaemonConfig(
       table.problem("'format_version' must be 1");
     }
     Path ruleset = path(table, dir, "ruleset", "ruleset");
-    Path modules = path(table, dir, "modules", "modules");
+    Path modules = installable(table, dir, "modules");
     Path lockfile = path(table, dir, "lockfile", "modules.lock");
     Path database = path(table, dir, "database", "praksis.db");
     Optional<Path> expression =
-        table.string("expression", false).map(s -> dir.resolve(s).normalize());
+        table
+            .string("expression", false)
+            .map(s -> dir.resolve(s).normalize())
+            .or(() -> installed("expression"));
     boolean dryRun = table.bool("dry_run", false);
     Map<String, Map<String, Object>> settings = new LinkedHashMap<>();
     table
@@ -119,6 +124,24 @@ public record DaemonConfig(
     }
     return new DaemonConfig(
         dir, ruleset, modules, lockfile, database, expression, dryRun, settings);
+  }
+
+  /** The directory of what ships with the runtime image, if this is one: {@code lib/praksis}. */
+  private static Optional<Path> installed(String name) {
+    Path dir = Path.of(System.getProperty("java.home"), "lib", "praksis", name);
+    return Files.isDirectory(dir) ? Optional.of(dir) : Optional.empty();
+  }
+
+  /**
+   * A directory that can be set in the file, else is {@code <home>/<name>} if that exists, else the
+   * one that ships with the runtime image, else {@code <home>/<name>}.
+   */
+  private static Path installable(Table table, Path home, String name) {
+    if (table.has(name)) {
+      return path(table, home, name, name);
+    }
+    Path local = home.resolve(name);
+    return Files.isDirectory(local) ? local : installed(name).orElse(local);
   }
 
   private static Path path(Table table, Path home, String key, String fallback) {

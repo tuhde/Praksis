@@ -15,6 +15,13 @@ final class DaemonCommand {
     return build(home, System.getProperty("java.home"), System.getProperty("jdk.module.path"));
   }
 
+  /** The same, with extra arguments for the daemon's main class. */
+  static List<String> buildWith(Path home, String... extra) {
+    List<String> command = build(home);
+    command.addAll(List.of(extra));
+    return command;
+  }
+
   /**
    * @param modulePath the module path of this process, or null if it runs from a runtime image that
    *     contains the daemon

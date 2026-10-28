@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 package it.uhde.praksis.integration;
 
-import it.uhde.praksis.engine.ModuleLoader;
+import static org.assertj.core.api.Assertions.assertThat;
+
 import it.uhde.praksis.protocol.Client;
 import it.uhde.praksis.protocol.Request;
 import it.uhde.praksis.protocol.Response;
 import java.io.IOException;
-import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -14,10 +14,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Stream;
 
-/**
- * A Praksis home directory with the real modules installed, and real daemon and CLI processes run
- * from the built jars.
- */
+/** A Praksis home directory, and real daemon and CLI processes run from the runtime image. */
 final class Harness implements AutoCloseable {
   static final String RULE =
       """
@@ -35,8 +32,10 @@ final class Harness implements AutoCloseable {
       args = { path = { cel = "event.data.path" }, folder = "Archive" }
       """;
 
-  private final Path modulePath = Path.of(System.getProperty("praksis.modulepath"));
-  private final Path extras = Path.of(System.getProperty("praksis.extras"));
+  /** The jlink image from praksis-dist: the daemon and the CLI run exactly as shipped. */
+  private final Path image =
+      Path.of(System.getProperty("praksis.image")).toAbsolutePath().normalize();
+
   private final List<Process> processes = new ArrayList<>();
 
   /** Short, because Unix socket paths are. */
@@ -50,26 +49,11 @@ final class Harness implements AutoCloseable {
     for (String d : new String[] {"new", "cur", "tmp"}) {
       Files.createDirectories(mail.resolve(d));
     }
-    Path moduleDir = Files.createDirectories(home.resolve("modules/maildir"));
-    Files.copy(
-        Path.of("../modules/praksis-module-maildir/module.toml"), moduleDir.resolve("module.toml"));
-    Path expressionDir = Files.createDirectories(home.resolve("lib/expression"));
-    try (DirectoryStream<Path> jars = Files.newDirectoryStream(extras, "*.jar")) {
-      for (Path jar : jars) {
-        String name = jar.getFileName().toString();
-        if (name.startsWith("praksis-module-maildir")) {
-          Files.copy(jar, moduleDir.resolve(name));
-        } else if (name.startsWith("praksis-expression-cel")) {
-          Files.copy(jar, expressionDir.resolve(name));
-        }
-      }
-    }
-    ModuleLoader.lock(home.resolve("modules"), home.resolve("modules.lock"));
+    // modules and the expression layer come from the image; the lockfile is made by the CLI
+    assertThat(cli("modules", "lock").exit()).isZero();
     Files.writeString(
         home.resolve("praksis.toml"),
-        "format_version = 1\nexpression = 'lib/expression'\n[module.maildir]\nroot = '"
-            + mail
-            + "'\npoll_interval_ms = 20\n");
+        "format_version = 1\n[module.maildir]\nroot = '" + mail + "'\npoll_interval_ms = 20\n");
     Files.createDirectories(home.resolve("ruleset/rules"));
     Files.writeString(
         home.resolve("ruleset/ruleset.toml"), "format_version = 1\nname = \"mail\"\n");
@@ -80,23 +64,20 @@ final class Harness implements AutoCloseable {
     return home.resolve("praksis.sock");
   }
 
-  private List<String> java(String module) {
-    return new ArrayList<>(
-        List.of(
-            Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-            "--enable-native-access=org.xerial.sqlitejdbc",
-            "--module-path",
-            modulePath.toString(),
-            "--module",
-            module,
-            "--home",
-            home.toString()));
+  private List<String> java(String module, String... args) {
+    List<String> command =
+        new ArrayList<>(List.of(image.resolve("bin/java").toString(), "--module", module));
+    command.addAll(List.of(args));
+    return command;
   }
 
   /** Starts the daemon itself (not through the CLI) and waits until it answers. */
   Process startDaemon() throws Exception {
+    List<String> command =
+        java("it.uhde.praksis.daemon/it.uhde.praksis.daemon.Main", "--home", home.toString());
+    command.add(1, "--enable-native-access=org.xerial.sqlitejdbc");
     Process p =
-        new ProcessBuilder(java("it.uhde.praksis.daemon/it.uhde.praksis.daemon.Main"))
+        new ProcessBuilder(command)
             .redirectErrorStream(true)
             .redirectOutput(ProcessBuilder.Redirect.appendTo(home.resolve("daemon.log").toFile()))
             .start();
@@ -124,16 +105,7 @@ final class Harness implements AutoCloseable {
 
   CliResult cli(String... args) throws Exception {
     List<String> command =
-        new ArrayList<>(
-            List.of(
-                Path.of(System.getProperty("java.home"), "bin", "java").toString(),
-                "--module-path",
-                modulePath.toString(),
-                "--module",
-                "it.uhde.praksis.cli/it.uhde.praksis.cli.Praksis",
-                args[0],
-                "--home",
-                home.toString()));
+        java("it.uhde.praksis.cli/it.uhde.praksis.cli.Praksis", args[0], "--home", home.toString());
     command.addAll(List.of(args).subList(1, args.length));
     Process p = new ProcessBuilder(command).redirectErrorStream(true).start();
     p.getOutputStream().close();
