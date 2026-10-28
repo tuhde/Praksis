@@ -12,6 +12,12 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.Inject.class, name = "inject"),
   @JsonSubTypes.Type(value = Request.Log.class, name = "log"),
   @JsonSubTypes.Type(value = Request.Audit.class, name = "audit"),
+  @JsonSubTypes.Type(value = Request.Approvals.class, name = "approvals"),
+  @JsonSubTypes.Type(value = Request.Answer.class, name = "answer"),
+  @JsonSubTypes.Type(value = Request.Missed.class, name = "missed"),
+  @JsonSubTypes.Type(value = Request.Grants.class, name = "grants"),
+  @JsonSubTypes.Type(value = Request.Revoke.class, name = "revoke"),
+  @JsonSubTypes.Type(value = Request.Reload.class, name = "reload"),
   @JsonSubTypes.Type(value = Request.Stop.class, name = "stop")
 })
 public sealed interface Request {
@@ -47,6 +53,44 @@ public sealed interface Request {
    * @param limit the maximum number of lines, newest first
    */
   record Audit(int limit) implements Request {}
+
+  /** Asks for the requests for permissions. Answered with {@link Response.ApprovalList}. */
+  record Approvals() implements Request {}
+
+  /**
+   * Answers a request for a permission. Answered with {@link Response.Done}.
+   *
+   * @param id the number of the request
+   * @param decision {@code once}, {@code always} or {@code deny}
+   * @param missed what to do with the events the rule missed: {@code replay} or {@code discard};
+   *     required for {@code always}, optional for {@code deny} (default: keep them), not used for
+   *     {@code once}
+   */
+  record Answer(long id, String decision, String missed) implements Request {}
+
+  /**
+   * Replays or discards the events a rule missed. Answered with {@link Response.Done}.
+   *
+   * @param rule the rule id
+   * @param action {@code replay} or {@code discard}
+   */
+  record Missed(String rule, String action) implements Request {}
+
+  /** Asks for the grants in effect. Answered with {@link Response.GrantList}. */
+  record Grants() implements Request {}
+
+  /**
+   * Removes a grant from {@code policy.toml}. Answered with {@link Response.Done}.
+   *
+   * @param id the grant id
+   */
+  record Revoke(String id) implements Request {}
+
+  /**
+   * Reads {@code policy.toml} again, e.g. after a person edited it. Answered with {@link
+   * Response.Done}.
+   */
+  record Reload() implements Request {}
 
   /**
    * Asks the daemon to finish what it is doing and exit. Answered with {@link Response.Stopped}.

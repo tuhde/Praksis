@@ -336,6 +336,100 @@ class EngineTest {
     assertThat(audit.get(1).detail()).isEqualTo("{\"value\":\"two\"}");
   }
 
+  private List<Event> missedEvents(String rule) throws Exception {
+    List<Event> out = new ArrayList<>();
+    for (String id : store.missed(rule)) {
+      out.add(store.event(id).orElseThrow());
+    }
+    return out;
+  }
+
+  @Test
+  void aDisabledRuleIsReportedOnceAndItsMissedEventsCanBeReplayedAfterAGrant() throws Exception {
+    rule("a", "", call("x", "test.record", "'one'"));
+    java.util.concurrent.atomic.AtomicBoolean granted =
+        new java.util.concurrent.atomic.AtomicBoolean();
+    List<String> reported = Collections.synchronizedList(new ArrayList<>());
+    Engine.Options options =
+        new Engine.Options(
+            (r, c, a) ->
+                granted.get()
+                    ? AccessPolicy.Decision.allow()
+                    : AccessPolicy.Decision.deny("no grant"),
+            AuditLog.none(),
+            Engine.Options.defaults().clock(),
+            false,
+            (rule, cap, args, event) ->
+                reported.add(rule + " " + cap.name() + " " + args + " " + event.id()));
+    Event first = event("t", "m1");
+    try (Engine engine = engine(options)) {
+      run(engine, first);
+      run(engine, event("t", "m2"));
+      run(engine, event("t", "m3"));
+      assertThat(reported).containsExactly("a test.record {value=one} " + first.id());
+      assertThat(store.missed("a")).hasSize(3);
+      assertThat(calls).isEmpty();
+
+      granted.set(true);
+      engine.enable("a");
+      engine.replay("a", missedEvents("a"), false);
+      assertThat(engine.awaitIdle(java.time.Duration.ofSeconds(5))).isTrue();
+    }
+    assertThat(calls).containsExactly("record:one", "record:one", "record:one");
+    assertThat(store.missed("a")).isEmpty();
+    assertThat(store.recentLog(50)).anyMatch(l -> l.message().equals("replay after approval"));
+  }
+
+  @Test
+  void allowOnceLetsTheCallThroughWithoutAGrantAndReplayStopsWhenDeniedAgain() throws Exception {
+    rule("a", "", call("x", "test.record", "'one'"));
+    Engine.Options options =
+        new Engine.Options(
+            (r, c, a) -> AccessPolicy.Decision.deny("no grant"),
+            AuditLog.none(),
+            Engine.Options.defaults().clock(),
+            false);
+    try (Engine engine = engine(options)) {
+      run(engine, event("t", "m1"));
+      run(engine, event("t", "m2"));
+      List<Event> missed = missedEvents("a");
+      assertThat(missed).hasSize(2);
+
+      // one event is let through, the rule stays as it is for later events
+      engine.enable("a");
+      engine.replay("a", missed.subList(0, 1), true);
+      assertThat(engine.awaitIdle(java.time.Duration.ofSeconds(5))).isTrue();
+      assertThat(calls).containsExactly("record:one");
+      assertThat(store.missed("a")).containsExactly(missed.get(1).id());
+
+      // without the permission the replay is denied again at the first event and stops there
+      engine.replay("a", missed.subList(1, 2), false);
+      assertThat(engine.awaitIdle(java.time.Duration.ofSeconds(5))).isTrue();
+      assertThat(calls).hasSize(1);
+      assertThat(engine.disabledRules()).containsKey("a");
+      assertThat(store.missed("a")).containsExactly(missed.get(1).id());
+    }
+  }
+
+  @Test
+  void disableAndEnableAreAvailableToTheCaller() throws Exception {
+    rule("a", "", call("x", "test.record", "'one'"));
+    try (Engine engine = engine(Engine.Options.defaults())) {
+      assertThat(engine.hasRule("a")).isTrue();
+      assertThat(engine.hasRule("zzz")).isFalse();
+      engine.disable("a", "waiting for an answer");
+      run(engine, event("t", "m1"));
+      assertThat(calls).isEmpty();
+      assertThat(engine.disabledRules()).containsEntry("a", "waiting for an answer");
+      engine.enable("a");
+      run(engine, event("t", "m2"));
+      assertThat(calls).containsExactly("record:one");
+      org.assertj.core.api.Assertions.assertThatThrownBy(
+              () -> engine.replay("zzz", List.of(), false))
+          .isInstanceOf(IllegalArgumentException.class);
+    }
+  }
+
   @Test
   void aDisabledRequiredRuleEndsTheEvent() throws Exception {
     rule("a", "required = true\n", call("x", "test.record", "'one'"));

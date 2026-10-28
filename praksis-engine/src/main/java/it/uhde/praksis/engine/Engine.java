@@ -64,8 +64,14 @@ public final class Engine implements EventSink, AutoCloseable {
    * @param auditLog told about every capability call
    * @param clock the source of {@code now} and of log times
    * @param dryRun whether capabilities are told to change nothing
+   * @param denials told when a denied call disables a rule
    */
-  public record Options(AccessPolicy accessPolicy, AuditLog auditLog, Clock clock, boolean dryRun) {
+  public record Options(
+      AccessPolicy accessPolicy, AuditLog auditLog, Clock clock, boolean dryRun, Denials denials) {
+    public Options(AccessPolicy accessPolicy, AuditLog auditLog, Clock clock, boolean dryRun) {
+      this(accessPolicy, auditLog, clock, dryRun, Denials.none());
+    }
+
     public static Options defaults() {
       return new Options(AccessPolicy.allowAll(), AuditLog.none(), Clock.systemUTC(), false);
     }
@@ -248,55 +254,133 @@ public final class Engine implements EventSink, AutoCloseable {
       if (!trigger.type().equals(event.type())) {
         continue;
       }
-      String ruleId = rule.rule().id();
-      boolean stop;
-      try {
-        if (rule.filter().isPresent()
-            && !Boolean.TRUE.equals(rule.filter().get().evaluate(bindings(event, Map.of())))) {
-          continue;
-        }
-        String why = disabled.get(ruleId);
-        if (why != null) {
-          miss(ruleId, event);
-          log(
-              event,
-              Optional.of(ruleId),
-              Optional.empty(),
-              rule.rule().required() ? Outcome.FAILED : Outcome.SKIPPED,
-              "rule is disabled: " + why);
-          if (rule.rule().required()) {
-            break;
-          }
-          continue;
-        }
-        stop = run(rule, event);
-      } catch (Exception e) {
-        if (e instanceof Denied d) {
-          disabled.putIfAbsent(ruleId, d.reason);
-          miss(ruleId, event);
-        }
-        log(
-            event,
-            Optional.of(ruleId),
-            Optional.empty(),
-            e instanceof Denied ? Outcome.DENIED : Outcome.FAILED,
-            message(e));
-        if (rule.rule().required()) {
-          log(
-              event,
-              Optional.of(ruleId),
-              Optional.empty(),
-              Outcome.FAILED,
-              "required rule failed: no further rules for this event");
-          break;
-        }
-        continue;
-      }
-      if (stop) {
+      if (fire(rule, event, false) == Flow.END) {
         break;
       }
     }
     store.markDone(event.id());
+  }
+
+  /** Whether the rules after this one still get the event. */
+  private enum Flow {
+    NEXT,
+    END
+  }
+
+  /**
+   * Fires one rule for an event if its filter matches, and logs what happens.
+   *
+   * @param allowOnce let the rule's calls through whatever the access policy says: the person
+   *     answered "allow once" for this very event
+   */
+  private Flow fire(CompiledRule rule, Event event, boolean allowOnce) throws StoreException {
+    String ruleId = rule.rule().id();
+    try {
+      if (rule.filter().isPresent()
+          && !Boolean.TRUE.equals(rule.filter().get().evaluate(bindings(event, Map.of())))) {
+        return Flow.NEXT;
+      }
+      String why = disabled.get(ruleId);
+      if (why != null) {
+        miss(ruleId, event);
+        log(
+            event,
+            Optional.of(ruleId),
+            Optional.empty(),
+            rule.rule().required() ? Outcome.FAILED : Outcome.SKIPPED,
+            "rule is disabled: " + why);
+        return rule.rule().required() ? Flow.END : Flow.NEXT;
+      }
+      return run(rule, event, allowOnce) ? Flow.END : Flow.NEXT;
+    } catch (Exception e) {
+      if (e instanceof Denied d) {
+        if (disabled.putIfAbsent(ruleId, d.reason) == null) {
+          options.denials().denied(ruleId, d.capability, d.args, event);
+        }
+        miss(ruleId, event);
+      }
+      log(
+          event,
+          Optional.of(ruleId),
+          Optional.empty(),
+          e instanceof Denied ? Outcome.DENIED : Outcome.FAILED,
+          message(e));
+      if (rule.rule().required()) {
+        log(
+            event,
+            Optional.of(ruleId),
+            Optional.empty(),
+            Outcome.FAILED,
+            "required rule failed: no further rules for this event");
+        return Flow.END;
+      }
+      return Flow.NEXT;
+    }
+  }
+
+  /** Disables a rule, e.g. because a request for its permission has not been answered. */
+  public void disable(String ruleId, String reason) {
+    disabled.put(ruleId, reason);
+  }
+
+  /** Lets a disabled rule run again. */
+  public void enable(String ruleId) {
+    disabled.remove(ruleId);
+  }
+
+  /** Whether the ruleset has a rule with this id. */
+  public boolean hasRule(String ruleId) {
+    return rules.stream().anyMatch(r -> r.rule().id().equals(ruleId));
+  }
+
+  /**
+   * Fires one rule for events it missed, in the order given, in the background. Each event that was
+   * handled is forgotten as missed. It stops when the rule is disabled again, e.g. because another
+   * call is denied. Events are not replayed in step with live events of the same target.
+   *
+   * @param allowOnce let the calls through whatever the access policy says
+   * @throws IllegalArgumentException if there is no such rule
+   */
+  public void replay(String ruleId, List<Event> events, boolean allowOnce) {
+    CompiledRule rule =
+        rules.stream()
+            .filter(r -> r.rule().id().equals(ruleId))
+            .findFirst()
+            .orElseThrow(() -> new IllegalArgumentException("no rule '" + ruleId + "'"));
+    synchronized (lock) {
+      if (closed) {
+        return;
+      }
+      unfinished++;
+    }
+    executor.execute(
+        () -> {
+          try {
+            for (Event event : events) {
+              if (disabled.containsKey(ruleId)) {
+                break;
+              }
+              log(
+                  event,
+                  Optional.of(ruleId),
+                  Optional.empty(),
+                  Outcome.OK,
+                  "replay after approval");
+              fire(rule, event, allowOnce);
+              if (disabled.containsKey(ruleId)) {
+                break; // denied again: this event stays missed
+              }
+              store.removeMissed(ruleId, event.id());
+            }
+          } catch (StoreException | RuntimeException e) {
+            System.err.println("praksis: cannot replay for " + ruleId + ": " + e);
+          } finally {
+            synchronized (lock) {
+              unfinished--;
+              lock.notifyAll();
+            }
+          }
+        });
   }
 
   /** Remembers that a rule did not handle this event, so it can be replayed once it may run. */
@@ -306,7 +390,7 @@ public final class Engine implements EventSink, AutoCloseable {
   }
 
   /** Runs the actions of a matching rule. Returns true if the rule stopped the event. */
-  private boolean run(CompiledRule rule, Event event) throws Exception {
+  private boolean run(CompiledRule rule, Event event, boolean allowOnce) throws Exception {
     String ruleId = rule.rule().id();
     Map<String, Map<String, Object>> results = new HashMap<>();
     for (CompiledAction action : rule.actions()) {
@@ -316,7 +400,7 @@ public final class Engine implements EventSink, AutoCloseable {
           return true;
         }
         case CompiledAction.Call call -> {
-          Map<String, Object> out = call(rule, call, event, results);
+          Map<String, Object> out = call(rule, call, event, results, allowOnce);
           results.put(call.id(), out);
           log(event, Optional.of(ruleId), Optional.of(call.id()), Outcome.OK, call.capability());
         }
@@ -329,7 +413,8 @@ public final class Engine implements EventSink, AutoCloseable {
       CompiledRule rule,
       CompiledAction.Call call,
       Event event,
-      Map<String, Map<String, Object>> results)
+      Map<String, Map<String, Object>> results,
+      boolean allowOnce)
       throws Exception {
     String ruleId = rule.rule().id();
     Map<String, Object> args = new LinkedHashMap<>();
@@ -342,7 +427,10 @@ public final class Engine implements EventSink, AutoCloseable {
           });
     }
     CapabilityDescriptor descriptor = catalog.capability(call.capability()).orElseThrow();
-    AccessPolicy.Decision decision = options.accessPolicy().check(ruleId, descriptor, args);
+    AccessPolicy.Decision decision =
+        allowOnce
+            ? AccessPolicy.Decision.allow()
+            : options.accessPolicy().check(ruleId, descriptor, args);
     if (!decision.allowed()) {
       options
           .auditLog()
@@ -353,7 +441,7 @@ public final class Engine implements EventSink, AutoCloseable {
               args,
               false,
               Optional.of(decision.reason()));
-      throw new Denied(call.capability(), decision.reason());
+      throw new Denied(descriptor, args, decision.reason());
     }
     CapabilityContext context =
         new Context(options.dryRun(), event.id() + "/" + ruleId + "/" + call.id(), event);
@@ -382,10 +470,14 @@ public final class Engine implements EventSink, AutoCloseable {
   private static final class Denied extends Exception {
     private static final long serialVersionUID = 1L;
 
+    private final transient CapabilityDescriptor capability;
+    private final transient Map<String, Object> args;
     private final String reason;
 
-    Denied(String capability, String reason) {
-      super("call of " + capability + " denied: " + reason);
+    Denied(CapabilityDescriptor capability, Map<String, Object> args, String reason) {
+      super("call of " + capability.name() + " denied: " + reason);
+      this.capability = capability;
+      this.args = args;
       this.reason = reason;
     }
   }

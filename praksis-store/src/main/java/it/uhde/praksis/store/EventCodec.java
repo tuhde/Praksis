@@ -35,6 +35,17 @@ final class EventCodec {
     }
   }
 
+  /** The map that {@link #encodeMap} wrote. */
+  static Map<String, Object> decodeMap(String json) {
+    try {
+      Map<String, Object> out = new LinkedHashMap<>();
+      MAPPER.readTree(json).properties().forEach(e -> out.put(e.getKey(), plain(e.getValue())));
+      return out;
+    } catch (JsonProcessingException ex) {
+      throw new IllegalStateException("stored arguments are not valid JSON", ex);
+    }
+  }
+
   static String encode(Event e) {
     ObjectNode n = JSON.objectNode();
     n.put("id", e.id());

@@ -31,6 +31,8 @@ public record AuditEntry(
     CALL,
     /** A grant was added or revoked through the daemon. */
     GRANT,
+    /** A request for a permission was opened or answered. */
+    APPROVAL,
     /** The grants in {@code policy.toml} when the daemon started, if they differ from last time. */
     POLICY
   }
@@ -51,6 +53,17 @@ public record AuditEntry(
         allowed,
         EventCodec.encodeMap(args),
         error);
+  }
+
+  /** A line that is not a call, with what happened as JSON built from the map. */
+  public static AuditEntry of(
+      Instant time,
+      Kind kind,
+      Optional<String> ruleId,
+      String subject,
+      java.util.Map<String, Object> detail) {
+    return new AuditEntry(
+        time, kind, ruleId, subject, true, EventCodec.encodeMap(detail), Optional.empty());
   }
 
   public AuditEntry {

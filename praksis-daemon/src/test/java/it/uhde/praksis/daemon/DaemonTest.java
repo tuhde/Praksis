@@ -225,6 +225,225 @@ class DaemonTest {
     daemon.close();
   }
 
+  private void dropMail(String name) throws IOException {
+    Files.writeString(mail.resolve("new/" + name), "Subject: " + name + "\n\nbody\n");
+  }
+
+  private boolean archived(String name) {
+    return Files.exists(mail.resolve(".Archive/cur/" + name + ":2,"));
+  }
+
+  private Response.ApprovalList approvals() throws IOException {
+    return (Response.ApprovalList) ask(new Request.Approvals());
+  }
+
+  private int requests() {
+    try {
+      return approvals().approvals().size();
+    } catch (IOException e) {
+      return -1;
+    }
+  }
+
+  private void awaitRequest(int missed) throws Exception {
+    await(
+        () -> {
+          try {
+            return approvals().missed().getOrDefault("mail.archive", 0) == missed;
+          } catch (IOException e) {
+            return false;
+          }
+        });
+  }
+
+  @Test
+  void allowAlwaysAddsAGrantAndReplaysTheMissedMailInOrder() throws Exception {
+    Files.delete(home.resolve("policy.toml"));
+    Daemon daemon = start();
+    dropMail("1.a");
+    awaitRequest(1);
+    dropMail("2.b");
+    awaitRequest(2);
+
+    Response.ApprovalList list = approvals();
+    assertThat(list.approvals()).hasSize(1);
+    Response.ApprovalList.Item request = list.approvals().get(0);
+    assertThat(request.state()).isEqualTo("PENDING");
+    assertThat(request.ruleId()).isEqualTo("mail.archive");
+    assertThat(request.layer()).isEqualTo("ruleset");
+    assertThat(request.capability()).isEqualTo("mail.move");
+    assertThat(request.args()).containsExactly(Map.entry("folder", "Archive"));
+    assertThat(list.disabled()).containsKey("mail.archive");
+
+    // the answer must say what happens to the missed mail
+    assertThat(ask(new Request.Answer(request.id(), "always", null)))
+        .isInstanceOfSatisfying(
+            Response.Error.class, e -> assertThat(e.message()).contains("replay or discard"));
+    assertThat(ask(new Request.Answer(request.id(), "maybe", null)))
+        .isInstanceOf(Response.Error.class);
+    assertThat(ask(new Request.Answer(99, "deny", null)))
+        .isInstanceOfSatisfying(
+            Response.Error.class, e -> assertThat(e.message()).contains("no request #99"));
+
+    assertThat(ask(new Request.Answer(request.id(), "always", "replay")))
+        .isInstanceOfSatisfying(
+            Response.Done.class, d -> assertThat(d.message()).contains("Granted 'approval-1'"));
+    await(() -> archived("1.a") && archived("2.b"));
+    assertThat(Files.readString(home.resolve("policy.toml")))
+        .contains("id = \"approval-1\"")
+        .contains("layer = \"ruleset\"")
+        .contains("folder = { equals = \"Archive\" }");
+    assertThat(approvals().approvals().get(0).state()).isEqualTo("ALLOWED_ALWAYS");
+    await(() -> logHasMissed(0));
+    assertThat(ask(new Request.Answer(request.id(), "deny", null)))
+        .isInstanceOfSatisfying(
+            Response.Error.class, e -> assertThat(e.message()).contains("answered already"));
+
+    // from now on the rule just works, and the grant and the answer are in the audit log
+    dropMail("3.c");
+    await(() -> archived("3.c"));
+    assertThat(ask(new Request.Grants()))
+        .isInstanceOfSatisfying(
+            Response.GrantList.class,
+            g ->
+                assertThat(g.grants())
+                    .extracting(Response.GrantList.Item::id)
+                    .containsExactly("approval-1"));
+    assertThat(ask(new Request.Audit(50)))
+        .isInstanceOfSatisfying(
+            Response.AuditLines.class,
+            a -> {
+              assertThat(a.lines())
+                  .anyMatch(l -> l.kind().equals("APPROVAL") && l.subject().equals("request #1"));
+              assertThat(a.lines())
+                  .anyMatch(
+                      l ->
+                          l.kind().equals("GRANT")
+                              && l.subject().equals("approval-1")
+                              && l.detail().contains("\"action\":\"added\""));
+            });
+    daemon.close();
+  }
+
+  private boolean logHasMissed(int count) {
+    try {
+      return approvals().missed().getOrDefault("mail.archive", 0) == count;
+    } catch (IOException e) {
+      return false;
+    }
+  }
+
+  @Test
+  void allowOnceHandlesTheDeniedMailAndTheNextOneAsksAgain() throws Exception {
+    Files.delete(home.resolve("policy.toml"));
+    start();
+    dropMail("1.a");
+    awaitRequest(1);
+    long first = approvals().approvals().get(0).id();
+    assertThat(ask(new Request.Answer(first, "once", "replay"))).isInstanceOf(Response.Error.class);
+    assertThat(ask(new Request.Answer(first, "once", null))).isInstanceOf(Response.Done.class);
+    await(() -> archived("1.a"));
+    assertThat(Files.exists(home.resolve("policy.toml"))).isFalse();
+
+    dropMail("2.b");
+    await(() -> requests() == 2);
+    assertThat(approvals().approvals())
+        .extracting(Response.ApprovalList.Item::state)
+        .containsExactly("ALLOWED_ONCE", "PENDING");
+    assertThat(archived("2.b")).isFalse();
+  }
+
+  @Test
+  void aRefusedRuleStaysDisabledAfterARestartUntilAGrantIsAdded() throws Exception {
+    Files.delete(home.resolve("policy.toml"));
+    Daemon daemon = start();
+    dropMail("1.a");
+    awaitRequest(1);
+    long id = approvals().approvals().get(0).id();
+    assertThat(ask(new Request.Answer(id, "deny", null)))
+        .isInstanceOfSatisfying(
+            Response.Done.class, d -> assertThat(d.message()).contains("stays disabled"));
+    daemon.close();
+
+    // after the restart the rule is disabled from the start: the mail is skipped, not denied again
+    start();
+    dropMail("2.b");
+    awaitRequest(2);
+    assertThat(approvals().approvals()).hasSize(1);
+    assertThat(approvals().approvals().get(0).state()).isEqualTo("DENIED");
+    assertThat(approvals().disabled().get("mail.archive")).contains("refused in request #1");
+    assertThat(archived("1.a")).isFalse();
+
+    // a grant added by hand frees the rule; the missed mail waits until someone decides
+    write(
+        "policy.toml",
+        """
+        format_version = 1
+
+        [[grant]]
+        id = "by-hand"
+        layer = "ruleset"
+        capability = "mail.move"
+        [grant.args]
+        folder = { prefix = "Arch" }
+        """);
+    assertThat(ask(new Request.Reload())).isInstanceOf(Response.Done.class);
+    assertThat(approvals().approvals().get(0).state()).isEqualTo("COVERED");
+    assertThat(approvals().disabled()).isEmpty();
+    assertThat(approvals().missed()).containsEntry("mail.archive", 2);
+
+    assertThat(ask(new Request.Missed("nope", "replay"))).isInstanceOf(Response.Error.class);
+    assertThat(ask(new Request.Missed("mail.archive", "replay"))).isInstanceOf(Response.Done.class);
+    await(() -> archived("1.a") && archived("2.b"));
+    awaitRequest(0);
+  }
+
+  @Test
+  void discardingDropsTheMissedMailWithoutMovingIt() throws Exception {
+    Files.delete(home.resolve("policy.toml"));
+    start();
+    dropMail("1.a");
+    awaitRequest(1);
+    long id = approvals().approvals().get(0).id();
+    assertThat(ask(new Request.Answer(id, "always", "discard"))).isInstanceOf(Response.Done.class);
+    awaitRequest(0);
+    assertThat(archived("1.a")).isFalse();
+    assertThat(mail.resolve("new/1.a")).exists();
+  }
+
+  @Test
+  void aRevokedGrantMakesTheRuleAskAgain() throws Exception {
+    Daemon daemon = start();
+    dropMail("1.a");
+    await(() -> archived("1.a"));
+
+    assertThat(ask(new Request.Revoke("nope"))).isInstanceOf(Response.Error.class);
+    assertThat(ask(new Request.Revoke("archive")))
+        .isInstanceOfSatisfying(
+            Response.Done.class, d -> assertThat(d.message()).contains("Revoked 'archive'"));
+    assertThat(Files.readString(home.resolve("policy.toml"))).doesNotContain("archive");
+
+    dropMail("2.b");
+    awaitRequest(1);
+    assertThat(archived("2.b")).isFalse();
+    daemon.close();
+  }
+
+  @Test
+  void aBrokenPolicyEditIsRefusedAndTheOldGrantsStayInUse() throws Exception {
+    start();
+    write("policy.toml", "format_version = 1\n[[grant]]\nid = \"x\"\n");
+    assertThat(ask(new Request.Reload()))
+        .isInstanceOfSatisfying(
+            Response.Error.class,
+            e ->
+                assertThat(e.message())
+                    .contains("old grants stay in use")
+                    .contains("missing 'layer'"));
+    dropMail("1.a");
+    await(() -> archived("1.a"));
+  }
+
   @Test
   void aPolicyThatDoesNotMatchTheModulesAndLayersStopsTheStart() throws Exception {
     write(

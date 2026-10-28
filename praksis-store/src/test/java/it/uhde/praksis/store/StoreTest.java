@@ -199,12 +199,66 @@ class StoreTest {
         var s = c.createStatement()) {
       s.execute("DROP TABLE audit");
       s.execute("DROP TABLE missed");
+      s.execute("DROP TABLE approval");
       s.execute("PRAGMA user_version = 1");
     }
     try (Store store = Store.open(file)) {
       assertThat(store.pending()).hasSize(1);
       assertThat(store.recentAudit(5)).isEmpty();
       assertThat(store.missedCounts()).isEmpty();
+    }
+  }
+
+  @Test
+  void approvalRequestsAreOpenedOncePerRuleAndAnswered() throws Exception {
+    try (Store store = Store.open(dir.resolve("praksis.db"))) {
+      Approval first =
+          store.openApproval(
+              T0, "mail.10-spam", "mail", "mail.move", Map.of("folder", "Trash"), "e1");
+      assertThat(first.state()).isEqualTo(Approval.State.PENDING);
+      assertThat(first.args()).containsEntry("folder", "Trash");
+
+      // the rule already has an open request
+      Approval again =
+          store.openApproval(
+              T0.plusSeconds(1),
+              "mail.10-spam",
+              "mail",
+              "mail.move",
+              Map.of("folder", "Other"),
+              "e2");
+      assertThat(again.id()).isEqualTo(first.id());
+      Approval other =
+          store.openApproval(
+              T0, "mail.20-lists", "mail", "mail.move", Map.of("folder", "Lists"), "e3");
+      assertThat(other.id()).isNotEqualTo(first.id());
+
+      assertThat(store.approvals(java.util.Set.of(Approval.State.PENDING))).hasSize(2);
+      store.answer(first.id(), Approval.State.DENIED, T0.plusSeconds(5));
+      Approval denied = store.approval(first.id()).orElseThrow();
+      assertThat(denied.state()).isEqualTo(Approval.State.DENIED);
+      assertThat(denied.state().disables()).isTrue();
+      assertThat(denied.answered()).contains(T0.plusSeconds(5));
+      // a refused request still counts as open for the rule
+      assertThat(store.openApproval(T0, "mail.10-spam", "mail", "mail.move", Map.of(), "e4").id())
+          .isEqualTo(first.id());
+
+      store.answer(first.id(), Approval.State.ALLOWED_ALWAYS, T0.plusSeconds(6));
+      assertThat(store.approval(first.id()).orElseThrow().state().disables()).isFalse();
+      // the rule can be denied again later and gets a new request
+      assertThat(store.openApproval(T0, "mail.10-spam", "mail", "mail.move", Map.of(), "e5").id())
+          .isGreaterThan(other.id());
+      assertThat(store.approval(999)).isEmpty();
+    }
+  }
+
+  @Test
+  void oneMissedEventCanBeRemoved() throws Exception {
+    try (Store store = Store.open(dir.resolve("praksis.db"))) {
+      store.addMissed(T0, "a", "e1", T0.minusSeconds(1), 10);
+      store.addMissed(T0, "a", "e2", T0.minusSeconds(1), 10);
+      store.removeMissed("a", "e1");
+      assertThat(store.missed("a")).containsExactly("e2");
     }
   }
 }

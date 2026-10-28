@@ -26,7 +26,7 @@ import java.util.Optional;
  * <p>All methods are safe to call from several threads.
  */
 public final class Store implements AutoCloseable {
-  private static final int SCHEMA_VERSION = 2;
+  private static final int SCHEMA_VERSION = 3;
 
   private final Connection connection;
 
@@ -115,6 +115,24 @@ public final class Store implements AutoCloseable {
               UNIQUE (rule_id, event_id)
             )""");
         s.execute("PRAGMA user_version = 2");
+      }
+    }
+    if (version < 3) {
+      try (Statement s = connection.createStatement()) {
+        s.execute(
+            """
+            CREATE TABLE approval (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              time TEXT NOT NULL,
+              rule_id TEXT NOT NULL,
+              layer TEXT NOT NULL,
+              capability TEXT NOT NULL,
+              args TEXT NOT NULL,
+              event_id TEXT NOT NULL,
+              state TEXT NOT NULL,
+              answered TEXT
+            )""");
+        s.execute("PRAGMA user_version = 3");
       }
     }
   }
@@ -342,6 +360,117 @@ public final class Store implements AutoCloseable {
       return out;
     } catch (SQLException e) {
       throw new StoreException("cannot count the missed events", e);
+    }
+  }
+
+  /** Forgets one event a rule missed, e.g. after it was replayed. */
+  public synchronized void removeMissed(String ruleId, String eventId) throws StoreException {
+    try (PreparedStatement s =
+        connection.prepareStatement("DELETE FROM missed WHERE rule_id = ? AND event_id = ?")) {
+      s.setString(1, ruleId);
+      s.setString(2, eventId);
+      s.executeUpdate();
+    } catch (SQLException e) {
+      throw new StoreException("cannot forget the missed event " + eventId, e);
+    }
+  }
+
+  /**
+   * Opens a request for a permission. A rule that already has an unanswered or refused request gets
+   * no second one; that request is returned.
+   */
+  public synchronized Approval openApproval(
+      Instant time,
+      String ruleId,
+      String layer,
+      String capability,
+      java.util.Map<String, Object> args,
+      String eventId)
+      throws StoreException {
+    for (Approval a :
+        approvals(java.util.EnumSet.of(Approval.State.PENDING, Approval.State.DENIED))) {
+      if (a.ruleId().equals(ruleId)) {
+        return a;
+      }
+    }
+    try (PreparedStatement s =
+        connection.prepareStatement(
+            "INSERT INTO approval (time, rule_id, layer, capability, args, event_id, state)"
+                + " VALUES (?, ?, ?, ?, ?, ?, 'PENDING')",
+            Statement.RETURN_GENERATED_KEYS)) {
+      s.setString(1, time.toString());
+      s.setString(2, ruleId);
+      s.setString(3, layer);
+      s.setString(4, capability);
+      s.setString(5, EventCodec.encodeMap(args));
+      s.setString(6, eventId);
+      s.executeUpdate();
+      try (ResultSet keys = s.getGeneratedKeys()) {
+        keys.next();
+        return new Approval(
+            keys.getLong(1),
+            time,
+            ruleId,
+            layer,
+            capability,
+            args,
+            eventId,
+            Approval.State.PENDING,
+            Optional.empty());
+      }
+    } catch (SQLException e) {
+      throw new StoreException("cannot open an approval request for " + ruleId, e);
+    }
+  }
+
+  /** The requests in these states, oldest first. */
+  public synchronized List<Approval> approvals(java.util.Set<Approval.State> states)
+      throws StoreException {
+    List<Approval> out = new ArrayList<>();
+    try (Statement s = connection.createStatement();
+        ResultSet r =
+            s.executeQuery(
+                "SELECT id, time, rule_id, layer, capability, args, event_id, state, answered"
+                    + " FROM approval ORDER BY id")) {
+      while (r.next()) {
+        Approval.State state = Approval.State.valueOf(r.getString(8));
+        if (states.contains(state)) {
+          out.add(
+              new Approval(
+                  r.getLong(1),
+                  Instant.parse(r.getString(2)),
+                  r.getString(3),
+                  r.getString(4),
+                  r.getString(5),
+                  EventCodec.decodeMap(r.getString(6)),
+                  r.getString(7),
+                  state,
+                  Optional.ofNullable(r.getString(9)).map(Instant::parse)));
+        }
+      }
+      return out;
+    } catch (SQLException e) {
+      throw new StoreException("cannot read the approval requests", e);
+    }
+  }
+
+  /** The request with this number, in any state. */
+  public synchronized Optional<Approval> approval(long id) throws StoreException {
+    return approvals(java.util.EnumSet.allOf(Approval.State.class)).stream()
+        .filter(a -> a.id() == id)
+        .findFirst();
+  }
+
+  /** Records the answer to a request. */
+  public synchronized void answer(long id, Approval.State state, Instant at) throws StoreException {
+    try (PreparedStatement s =
+        connection.prepareStatement("UPDATE approval SET state = ?, answered = ? WHERE id = ?")) {
+      s.setString(1, state.name());
+      s.setString(2, at.toString());
+      s.setLong(3, id);
+      s.executeUpdate();
+    } catch (SQLException e) {
+      throw new StoreException("cannot answer approval request " + id, e);
     }
   }
 

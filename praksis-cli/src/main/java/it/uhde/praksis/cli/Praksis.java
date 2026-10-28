@@ -35,7 +35,9 @@ import picocli.CommandLine.Spec;
       Praksis.Layers.class,
       Praksis.Effective.class,
       Praksis.LogCommand.class,
-      Praksis.AuditCommand.class
+      Praksis.AuditCommand.class,
+      Praksis.Approvals.class,
+      Praksis.GrantsCommand.class
     })
 public final class Praksis {
   static final int EXIT_FAILED = 1;
@@ -280,6 +282,190 @@ public final class Praksis {
         return 0;
       }
       return exitCodeFor(response);
+    }
+  }
+
+  @Command(
+      name = "approvals",
+      description =
+          "Lists the requests for permissions, with the disabled rules and the events they missed."
+              + " A rule whose call no grant covers is disabled until a request is answered.",
+      subcommands = {
+        Praksis.Approvals.Allow.class,
+        Praksis.Approvals.Deny.class,
+        Praksis.Approvals.Replay.class,
+        Praksis.Approvals.Discard.class
+      })
+  static final class Approvals extends Base {
+    @Override
+    public Integer call() {
+      Response response = send(new Request.Approvals());
+      if (response instanceof Response.ApprovalList l) {
+        if (l.approvals().isEmpty()) {
+          out().println("No requests.");
+        }
+        for (Response.ApprovalList.Item a : l.approvals()) {
+          out()
+              .printf(
+                  "#%d  %-14s %s (layer %s) needs %s %s  [%s]%n",
+                  a.id(), a.state(), a.ruleId(), a.layer(), a.capability(), a.args(), a.time());
+        }
+        if (!l.disabled().isEmpty()) {
+          out().println("Disabled rules:");
+          l.disabled().forEach((rule, why) -> out().printf("  %s: %s%n", rule, why));
+        }
+        if (!l.missed().isEmpty()) {
+          out().println("Missed events:");
+          l.missed().forEach((rule, n) -> out().printf("  %s: %d%n", rule, n));
+        }
+        return 0;
+      }
+      return exitCodeFor(response);
+    }
+
+    abstract static class Answering extends Base {
+      int print(Response response) {
+        if (response instanceof Response.Done d) {
+          out().println(d.message());
+          return 0;
+        }
+        return exitCodeFor(response);
+      }
+    }
+
+    @Command(
+        name = "allow",
+        description =
+            "Allows what a rule asked for. --once lets the one denied event through. --always adds"
+                + " a grant to policy.toml for exactly the call that was seen and needs --replay or"
+                + " --discard for the events the rule missed meanwhile.")
+    static final class Allow extends Answering {
+      @CommandLine.Parameters(index = "0", paramLabel = "<request>", description = "The number.")
+      long id;
+
+      @Option(names = "--once", description = "Let the one denied event through.")
+      boolean once;
+
+      @Option(names = "--always", description = "Add a grant for what was seen.")
+      boolean always;
+
+      @Option(names = "--replay", description = "Handle the missed events now, in order.")
+      boolean replay;
+
+      @Option(names = "--discard", description = "Drop the missed events.")
+      boolean discard;
+
+      @Override
+      public Integer call() {
+        if (once == always) {
+          err().println("Say either --once or --always.");
+          return 2;
+        }
+        if (replay && discard) {
+          err().println("Say either --replay or --discard.");
+          return 2;
+        }
+        return print(
+            send(
+                new Request.Answer(
+                    id, once ? "once" : "always", replay ? "replay" : discard ? "discard" : null)));
+      }
+    }
+
+    @Command(
+        name = "deny",
+        description = "Refuses a request. The rule stays disabled, also after a restart.")
+    static final class Deny extends Answering {
+      @CommandLine.Parameters(index = "0", paramLabel = "<request>", description = "The number.")
+      long id;
+
+      @Option(names = "--discard", description = "Drop the events the rule missed.")
+      boolean discard;
+
+      @Override
+      public Integer call() {
+        return print(send(new Request.Answer(id, "deny", discard ? "discard" : null)));
+      }
+    }
+
+    @Command(
+        name = "replay",
+        description = "Handles the events a rule missed, in order, for a rule that runs again.")
+    static final class Replay extends Answering {
+      @CommandLine.Parameters(index = "0", paramLabel = "<rule>", description = "The rule id.")
+      String rule;
+
+      @Override
+      public Integer call() {
+        return print(send(new Request.Missed(rule, "replay")));
+      }
+    }
+
+    @Command(name = "discard", description = "Drops the events a rule missed.")
+    static final class Discard extends Answering {
+      @CommandLine.Parameters(index = "0", paramLabel = "<rule>", description = "The rule id.")
+      String rule;
+
+      @Override
+      public Integer call() {
+        return print(send(new Request.Missed(rule, "discard")));
+      }
+    }
+  }
+
+  @Command(
+      name = "grants",
+      description = "Lists the grants in policy.toml that are in effect.",
+      subcommands = {Praksis.GrantsCommand.Revoke.class, Praksis.GrantsCommand.Reload.class})
+  static final class GrantsCommand extends Base {
+    @Override
+    public Integer call() {
+      Response response = send(new Request.Grants());
+      if (response instanceof Response.GrantList l) {
+        if (l.grants().isEmpty()) {
+          out().println("No grants: nothing is allowed.");
+        }
+        for (Response.GrantList.Item g : l.grants()) {
+          out().printf("%s  layer %s may call %s%n", g.id(), g.layer(), g.capability());
+          g.args().forEach((arg, how) -> out().printf("    %s: %s%n", arg, how));
+          if (g.note() != null) {
+            out().printf("    %s%n", g.note());
+          }
+        }
+        return 0;
+      }
+      return exitCodeFor(response);
+    }
+
+    @Command(name = "revoke", description = "Removes a grant from policy.toml.")
+    static final class Revoke extends Base {
+      @CommandLine.Parameters(index = "0", paramLabel = "<grant>", description = "The grant id.")
+      String id;
+
+      @Override
+      public Integer call() {
+        Response response = send(new Request.Revoke(id));
+        if (response instanceof Response.Done d) {
+          out().println(d.message());
+          return 0;
+        }
+        return exitCodeFor(response);
+      }
+    }
+
+    @Command(
+        name = "reload",
+        description = "Reads policy.toml again after it was edited by hand and checks it.")
+    static final class Reload extends Base {
+      @Override
+      public Integer call() {
+        Response response = send(new Request.Reload());
+        if (response instanceof Response.Done d) {
+          out().println(d.message());
+          return 0;
+        }
+        return exitCodeFor(response);
+      }
     }
   }
 

@@ -15,7 +15,7 @@ import java.util.stream.Collectors;
  * last defined it, so a private layer that patches a public rule needs its own grant.
  */
 public final class GrantPolicy implements AccessPolicy {
-  private final Policy policy;
+  private volatile Policy policy;
   private final Map<String, String> layers;
 
   /**
@@ -25,6 +25,21 @@ public final class GrantPolicy implements AccessPolicy {
   public GrantPolicy(Policy policy, Map<String, String> layers) {
     this.policy = policy;
     this.layers = Map.copyOf(layers);
+  }
+
+  /** Uses these grants from now on, e.g. after {@code policy.toml} was changed. */
+  public void replace(Policy newPolicy) {
+    this.policy = newPolicy;
+  }
+
+  /** The grants in use. */
+  public Policy policy() {
+    return policy;
+  }
+
+  /** The layer that owns a rule, if the rule exists. */
+  public Optional<String> layerOf(String ruleId) {
+    return Optional.ofNullable(layers.get(ruleId));
   }
 
   @Override

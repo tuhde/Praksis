@@ -4,6 +4,7 @@ package it.uhde.praksis.protocol;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import java.util.List;
+import java.util.Map;
 
 /** What the daemon answers. On the wire it is one JSON object with a {@code type} field. */
 @JsonTypeInfo(use = JsonTypeInfo.Id.NAME, property = "type")
@@ -12,10 +13,71 @@ import java.util.List;
   @JsonSubTypes.Type(value = Response.Injected.class, name = "injected"),
   @JsonSubTypes.Type(value = Response.LogLines.class, name = "log"),
   @JsonSubTypes.Type(value = Response.AuditLines.class, name = "audit"),
+  @JsonSubTypes.Type(value = Response.ApprovalList.class, name = "approvals"),
+  @JsonSubTypes.Type(value = Response.GrantList.class, name = "grants"),
+  @JsonSubTypes.Type(value = Response.Done.class, name = "done"),
   @JsonSubTypes.Type(value = Response.Stopped.class, name = "stopped"),
   @JsonSubTypes.Type(value = Response.Error.class, name = "error")
 })
 public sealed interface Response {
+  /**
+   * What was done, in a sentence for a person.
+   *
+   * @param message the sentence
+   */
+  record Done(String message) implements Response {}
+
+  /**
+   * The requests for permissions and the events that rules missed.
+   *
+   * @param approvals the requests, oldest first, with the answered ones
+   * @param missed how many events each rule missed, for rules that missed any
+   * @param disabled the rules that are disabled, by rule id, with the reason
+   */
+  record ApprovalList(
+      List<Item> approvals, Map<String, Integer> missed, Map<String, String> disabled)
+      implements Response {
+    /**
+     * One request.
+     *
+     * @param id the number to answer with
+     * @param time when it was opened, ISO-8601
+     * @param state {@code PENDING}, {@code DENIED}, {@code ALLOWED_ONCE}, {@code ALLOWED_ALWAYS},
+     *     {@code COVERED} or {@code STALE}
+     * @param ruleId the disabled rule
+     * @param layer the layer that owns it
+     * @param capability the capability it needs
+     * @param args the arguments of the refused call that a grant could restrict
+     */
+    public record Item(
+        long id,
+        String time,
+        String state,
+        String ruleId,
+        String layer,
+        String capability,
+        Map<String, Object> args) {}
+  }
+
+  /**
+   * The grants in effect.
+   *
+   * @param grants the grants
+   */
+  record GrantList(List<Item> grants) implements Response {
+    /**
+     * One grant.
+     *
+     * @param id the grant id
+     * @param layer the layer it is for
+     * @param capability the capability
+     * @param args the restriction per argument, as written in {@code policy.toml}
+     * @param note why it exists, or null
+     */
+    public record Item(
+        String id, String layer, String capability, Map<String, String> args, String note) {}
+  }
+
   /**
    * The latest lines of the audit log, newest first.
    *

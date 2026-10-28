@@ -5,7 +5,6 @@ import it.uhde.praksis.capability.Capability;
 import it.uhde.praksis.capability.CapabilityException;
 import it.uhde.praksis.capability.Event;
 import it.uhde.praksis.capability.ModuleDescriptor;
-import it.uhde.praksis.engine.AccessPolicy;
 import it.uhde.praksis.engine.Engine;
 import it.uhde.praksis.engine.GrantPolicy;
 import it.uhde.praksis.engine.LoadedModules;
@@ -61,6 +60,7 @@ public final class Daemon implements AutoCloseable {
   private Ruleset ruleset;
   private Store store;
   private Engine engine;
+  private Approvals approvals;
   private ApiServer api;
 
   private Daemon(DaemonConfig config) {
@@ -108,9 +108,10 @@ public final class Daemon implements AutoCloseable {
       LayerStack.Effective effective =
           new Layers(config, new GitCli(config.gitCache())).effective();
       ruleset = effective.ruleset();
-      AccessPolicy access = accessPolicy(config, modules.catalog(), effective);
+      GrantPolicy access = accessPolicy(config, modules.catalog(), effective);
       store = Store.open(config.database());
       auditPolicy(config, store);
+      approvals = new Approvals(config, store, access, modules.catalog(), clock);
       Map<String, Capability> capabilities = modules.capabilities();
       engine =
           new Engine(
@@ -119,7 +120,10 @@ public final class Daemon implements AutoCloseable {
               compiler,
               capabilities,
               store,
-              new Engine.Options(access, new StoreAuditLog(store), clock, config.dryRun()));
+              new Engine.Options(
+                  access, new StoreAuditLog(store), clock, config.dryRun(), approvals));
+      approvals.bind(engine);
+      approvals.sync();
       engine.recover();
       api = new ApiServer(config.socket(), this::handle, this::requestStop);
       api.start();
@@ -136,7 +140,7 @@ public final class Daemon implements AutoCloseable {
   }
 
   /** The grants in {@code policy.toml}, checked against the modules and layers in use. */
-  static AccessPolicy accessPolicy(
+  static GrantPolicy accessPolicy(
       DaemonConfig config, ModuleCatalog catalog, LayerStack.Effective effective)
       throws DaemonException {
     try {
@@ -212,9 +216,16 @@ public final class Daemon implements AutoCloseable {
                     .stream()
                     .map(Daemon::auditLine)
                     .toList());
+        case Request.Approvals a -> approvals.list();
+        case Request.Answer a ->
+            new Response.Done(approvals.answer(a.id(), a.decision(), a.missed()));
+        case Request.Missed m -> new Response.Done(approvals.missed(m.rule(), m.action()));
+        case Request.Grants g -> approvals.grants();
+        case Request.Revoke r -> new Response.Done(approvals.revoke(r.id()));
+        case Request.Reload r -> new Response.Done(approvals.reload());
         case Request.Stop s -> new Response.Stopped();
       };
-    } catch (Injection.Invalid e) {
+    } catch (Injection.Invalid | Approvals.Failure e) {
       return new Response.Error(e.getMessage());
     } catch (StoreException e) {
       return new Response.Error("store: " + e.getMessage());
