@@ -32,6 +32,8 @@ import picocli.CommandLine.Spec;
       Praksis.Status.class,
       Praksis.Inject.class,
       Praksis.Modules.class,
+      Praksis.Layers.class,
+      Praksis.Effective.class,
       Praksis.LogCommand.class
     })
 public final class Praksis {
@@ -97,6 +99,29 @@ public final class Praksis {
           err().println("Cannot talk to the daemon at " + socket + ": " + e.getMessage());
         }
         return null;
+      }
+    }
+
+    /**
+     * Runs the daemon's main class with the given arguments, prints its output, returns its exit
+     * code.
+     */
+    int runDaemonCommand(String... args) throws InterruptedException {
+      try {
+        Process p =
+            new ProcessBuilder(DaemonCommand.buildWith(parent().home(), args))
+                .redirectErrorStream(true)
+                .start();
+        p.getOutputStream().close();
+        String output = new String(p.getInputStream().readAllBytes());
+        int exit = p.waitFor();
+        PrintWriter target = exit == 0 ? out() : err();
+        target.print(output);
+        target.flush();
+        return exit == 0 ? 0 : EXIT_FAILED;
+      } catch (IOException e) {
+        err().println("Cannot run the daemon's command: " + e.getMessage());
+        return EXIT_FAILED;
       }
     }
 
@@ -234,21 +259,60 @@ public final class Praksis {
     static final class Lock extends Base {
       @Override
       public Integer call() throws InterruptedException {
-        try {
-          Process p =
-              new ProcessBuilder(DaemonCommand.buildWith(parent().home(), "--lock-modules"))
-                  .redirectErrorStream(true)
-                  .start();
-          p.getOutputStream().close();
-          String output = new String(p.getInputStream().readAllBytes());
-          int exit = p.waitFor();
-          (exit == 0 ? out() : err()).print(output);
-          return exit == 0 ? 0 : EXIT_FAILED;
-        } catch (IOException e) {
-          err().println("Cannot run the module locker: " + e.getMessage());
-          return EXIT_FAILED;
-        }
+        return runDaemonCommand("--lock-modules");
       }
+    }
+  }
+
+  @Command(
+      name = "layers",
+      description = "Manages the ruleset layers that come from git.",
+      subcommands = {Praksis.Layers.StatusCommand.class, Praksis.Layers.UpdateCommand.class})
+  static final class Layers {
+    @Command(name = "status", description = "Shows the commit every layer is pinned to.")
+    static final class StatusCommand extends Base {
+      @Override
+      public Integer call() throws InterruptedException {
+        return runDaemonCommand("--admin", "layers", "status");
+      }
+    }
+
+    @Command(
+        name = "update",
+        description =
+            "Moves layers to the latest commit of their branch or tag, but only if the ruleset"
+                + " that results is valid. Otherwise the pins stay as they are.")
+    static final class UpdateCommand extends Base {
+      @Option(names = "--dry-run", description = "Only show what would change.")
+      boolean dryRun;
+
+      @CommandLine.Parameters(
+          paramLabel = "<layer>",
+          description = "Layers to move (default: all).")
+      java.util.List<String> names = new java.util.ArrayList<>();
+
+      @Override
+      public Integer call() throws InterruptedException {
+        java.util.List<String> args =
+            new java.util.ArrayList<>(java.util.List.of("--admin", "layers", "update"));
+        if (dryRun) {
+          args.add("--dry-run");
+        }
+        args.addAll(names);
+        return runDaemonCommand(args.toArray(String[]::new));
+      }
+    }
+  }
+
+  @Command(
+      name = "effective",
+      description =
+          "Shows the ruleset that would run: every rule in the order it fires, which layer it comes"
+              + " from, what later layers did to it, and its hash for 'based_on'.")
+  static final class Effective extends Base {
+    @Override
+    public Integer call() throws InterruptedException {
+      return runDaemonCommand("--admin", "effective");
     }
   }
 

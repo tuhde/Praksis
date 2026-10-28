@@ -23,6 +23,11 @@
     </dependency>
     <dependency>
       <groupId>it.uhde</groupId>
+      <artifactId>praksis-git</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>it.uhde</groupId>
       <artifactId>praksis-protocol</artifactId>
       <version>${project.version}</version>
     </dependency>

@@ -187,4 +187,10 @@ class PraksisTest {
             "/h");
     assertThat(DaemonCommand.build(Path.of("/h"), "/jdk", null)).doesNotContain("--module-path");
   }
+
+  @Test
+  void adminCommandsAreRunByTheDaemonMainClass() {
+    assertThat(DaemonCommand.buildWith(Path.of("/h"), "--admin", "layers", "update", "--dry-run"))
+        .endsWith("--home", "/h", "--admin", "layers", "update", "--dry-run");
+  }
 }

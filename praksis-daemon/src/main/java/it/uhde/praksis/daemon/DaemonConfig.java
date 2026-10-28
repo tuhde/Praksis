@@ -33,6 +33,18 @@ import java.util.Set;
  *                              # runtime image; else the class path is used
  * dry_run    = false
  *
+ * [[layer]]                    # ruleset layers, bottom to top; without any, "ruleset" is used
+ * name = "mail"
+ * git  = "https://github.com/tuhde/Praksis-Mail"   # pinned in rulesets.lock
+ * ref  = "main"
+ *
+ * [[layer]]
+ * name = "local"
+ * path = "my-rules"            # a directory, read as it is and not pinned
+ *
+ * [param]                      # values for ruleset parameters
+ * newsletter_folder = "News"
+ *
  * [module.maildir]             # settings handed to the module with this name
  * root = "/home/me/Maildir"
  * </pre>
@@ -45,6 +57,8 @@ import java.util.Set;
  * @param expression the directory with the expression implementation, if it is not on the path
  * @param dryRun whether capabilities are told to change nothing
  * @param moduleSettings the settings per module name
+ * @param layers the ruleset layers, bottom to top; empty means the single directory {@code ruleset}
+ * @param params values for ruleset parameters, which win over the defaults in the layers
  */
 public record DaemonConfig(
     Path home,
@@ -54,7 +68,9 @@ public record DaemonConfig(
     Path database,
     Optional<Path> expression,
     boolean dryRun,
-    Map<String, Map<String, Object>> moduleSettings) {
+    Map<String, Map<String, Object>> moduleSettings,
+    List<LayerConfig> layers,
+    Map<String, Object> params) {
   private static final String FILE = "praksis.toml";
   private static final Set<String> KEYS =
       Set.of(
@@ -65,7 +81,24 @@ public record DaemonConfig(
           "database",
           "expression",
           "dry_run",
-          "module");
+          "module",
+          "layer",
+          "param");
+
+  /** The file that pins the commit of every git layer. */
+  public Path rulesetLock() {
+    return home.resolve("rulesets.lock");
+  }
+
+  /** Where the local copies of the git repositories are kept. */
+  public Path gitCache() {
+    return home.resolve("cache").resolve("git");
+  }
+
+  /** Where the files of each pinned commit are kept: {@code <name>/<commit>}. */
+  public Path snapshots() {
+    return home.resolve("layers");
+  }
 
   /** The socket of the daemon with this home directory. */
   public Path socket() {
@@ -115,6 +148,23 @@ public record DaemonConfig(
                 modulesTable
                     .subTables()
                     .forEach((name, t) -> settings.put(name, normalizeMap(t.rawEntries()))));
+    List<LayerConfig> layers = new ArrayList<>();
+    java.util.Set<String> names = new java.util.HashSet<>();
+    for (Table l : table.tables("layer")) {
+      LayerConfig.parse(l, dir).ifPresent(layers::add);
+      l.string("name", false)
+          .ifPresent(
+              n -> {
+                if (!names.add(n)) {
+                  l.problem("layer name '" + n + "' is used twice");
+                }
+              });
+    }
+    if (!layers.isEmpty() && table.has("ruleset")) {
+      table.problem("'ruleset' and [[layer]] cannot be used together; make it a layer with path");
+    }
+    Map<String, Object> params = new LinkedHashMap<>();
+    table.table("param", false).ifPresent(p -> params.putAll(normalizeMap(p.rawEntries())));
     if (!problems.isEmpty()) {
       throw new DaemonException(
           "invalid "
@@ -123,7 +173,7 @@ public record DaemonConfig(
               + String.join("\n  ", problems.stream().map(Problem::toString).toList()));
     }
     return new DaemonConfig(
-        dir, ruleset, modules, lockfile, database, expression, dryRun, settings);
+        dir, ruleset, modules, lockfile, database, expression, dryRun, settings, layers, params);
   }
 
   /** The directory of what ships with the runtime image, if this is one: {@code lib/praksis}. */

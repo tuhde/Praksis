@@ -13,13 +13,13 @@ import it.uhde.praksis.engine.ModuleLoadException;
 import it.uhde.praksis.engine.ModuleLoader;
 import it.uhde.praksis.expression.ExpressionCompiler;
 import it.uhde.praksis.expression.Expressions;
+import it.uhde.praksis.git.GitCli;
 import it.uhde.praksis.protocol.Client;
 import it.uhde.praksis.protocol.Request;
 import it.uhde.praksis.protocol.Response;
 import it.uhde.praksis.ruleset.Problem;
 import it.uhde.praksis.ruleset.Ruleset;
 import it.uhde.praksis.ruleset.RulesetException;
-import it.uhde.praksis.ruleset.RulesetLoader;
 import it.uhde.praksis.store.LogEntry;
 import it.uhde.praksis.store.Store;
 import it.uhde.praksis.store.StoreException;
@@ -93,11 +93,8 @@ public final class Daemon implements AutoCloseable {
     refuseIfRunning();
     try {
       modules = ModuleLoader.load(config.modules(), config.lockfile(), config.moduleSettings());
-      ExpressionCompiler compiler =
-          config.expression().isPresent()
-              ? ModuleLoader.loadExpressionCompiler(config.expression().get())
-              : Expressions.compiler();
-      ruleset = RulesetLoader.load(config.ruleset());
+      ExpressionCompiler compiler = compiler(config);
+      ruleset = new Layers(config, new GitCli(config.gitCache())).effective().ruleset();
       store = Store.open(config.database());
       Map<String, Capability> capabilities = modules.capabilities();
       engine =
@@ -114,15 +111,24 @@ public final class Daemon implements AutoCloseable {
       modules.startSources(engine);
     } catch (RulesetException e) {
       throw new DaemonException(
-          "the ruleset in "
-              + config.ruleset()
-              + " is not valid:\n  "
+          "the ruleset is not valid:\n  "
               + String.join("\n  ", e.problems().stream().map(Problem::toString).toList()),
           e);
     } catch (ModuleLoadException | CapabilityException | StoreException | IOException e) {
       throw new DaemonException(e.getMessage(), e);
     }
     LOG.log(System.Logger.Level.INFO, "praksis daemon started, home " + config.home());
+  }
+
+  /** The expression implementation: from its directory if configured, else from the class path. */
+  static ExpressionCompiler compiler(DaemonConfig config) throws DaemonException {
+    try {
+      return config.expression().isPresent()
+          ? ModuleLoader.loadExpressionCompiler(config.expression().get())
+          : Expressions.compiler();
+    } catch (ModuleLoadException e) {
+      throw new DaemonException(e.getMessage(), e);
+    }
   }
 
   /** Fails if another daemon answers on the socket; removes the socket of a dead one. */

@@ -63,4 +63,76 @@ class DaemonConfigTest {
     assertThatThrownBy(() -> DaemonConfig.load(home.resolve("missing")))
         .hasMessageContaining("does not exist");
   }
+
+  @Test
+  void readsLayersAndParameters() throws Exception {
+    Files.writeString(
+        home.resolve("praksis.toml"),
+        """
+        format_version = 1
+
+        [[layer]]
+        name = "mail"
+        git = "https://example.org/Praksis-Mail"
+        ref = "main"
+
+        [[layer]]
+        name = "local"
+        path = "my-rules"
+
+        [param]
+        folder = "News"
+        count = 3
+        """);
+    DaemonConfig c = DaemonConfig.load(home);
+    assertThat(c.layers()).hasSize(2);
+    assertThat(c.layers().get(0).isGit()).isTrue();
+    assertThat(c.layers().get(0).git()).contains("https://example.org/Praksis-Mail");
+    assertThat(c.layers().get(0).ref()).contains("main");
+    assertThat(c.layers().get(1).isGit()).isFalse();
+    assertThat(c.layers().get(1).path()).contains(home.resolve("my-rules"));
+    assertThat(c.params()).containsEntry("folder", "News").containsEntry("count", 3L);
+    assertThat(c.rulesetLock()).isEqualTo(home.resolve("rulesets.lock"));
+    assertThat(c.snapshots()).isEqualTo(home.resolve("layers"));
+  }
+
+  @Test
+  void reportsMistakesInLayers() throws Exception {
+    Files.writeString(
+        home.resolve("praksis.toml"),
+        """
+        format_version = 1
+        ruleset = "x"
+
+        [[layer]]
+        name = "a"
+        git = "g"
+
+        [[layer]]
+        name = "a"
+        path = "p"
+        ref = "main"
+
+        [[layer]]
+        name = "b c"
+        git = "g"
+        path = "p"
+        ref = "main"
+
+        [[layer]]
+        git = "g"
+        ref = "main"
+        wrong = 1
+        """);
+    assertThatThrownBy(() -> DaemonConfig.load(home))
+        .isInstanceOf(DaemonException.class)
+        .hasMessageContaining("a git layer needs 'ref'")
+        .hasMessageContaining("layer name 'a' is used twice")
+        .hasMessageContaining("'ref' is only for git layers")
+        .hasMessageContaining("must match")
+        .hasMessageContaining("give exactly one of 'git' and 'path'")
+        .hasMessageContaining("missing 'name'")
+        .hasMessageContaining("unknown key 'wrong'")
+        .hasMessageContaining("'ruleset' and [[layer]] cannot be used together");
+  }
 }
