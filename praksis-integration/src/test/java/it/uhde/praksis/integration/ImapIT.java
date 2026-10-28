@@ -211,4 +211,61 @@ class ImapIT {
       h.stop(daemon);
     }
   }
+
+  @Test
+  void aDaemonKilledWhileReplayingMissedMailFinishesTheJobWithoutRepeatingAnything()
+      throws Exception {
+    int mails = 60;
+    try (Server server = new Server();
+        Harness h = new Harness()) {
+      h.grantMoves(java.util.Map.of()); // nothing is allowed yet
+      useImap(h, server, true, "\"imap.inbox\", \"mail.move\"");
+      for (int i = 0; i < mails; i++) {
+        server.deliver("replay " + i);
+      }
+      Process daemon = h.startDaemon();
+      Harness.await(
+          "every mail to be missed",
+          () -> h.cli("approvals").output().contains("mail.archive: " + mails));
+      assertThat(server.count("INBOX")).isEqualTo(mails);
+
+      // the grant is made, the replay starts, and the daemon dies in the middle of it
+      Harness.CliResult allowed = h.cli("approvals", "allow", "1", "--always", "--replay");
+      assertThat(allowed.exit()).as(allowed.output()).isZero();
+      Harness.await("the replay to begin", () -> server.count("Archive") > 5);
+      h.kill(daemon);
+      assertThat(server.count("INBOX") + server.count("Archive")).isEqualTo(mails);
+
+      // after the restart the grant is still there and the rest of the mail is still missed
+      daemon = h.startDaemon();
+      String after = h.cli("approvals").output();
+      assertThat(after).contains("ALLOWED_ALWAYS").doesNotContain("Disabled rules");
+      Harness.CliResult replay = h.cli("approvals", "replay", "mail.archive");
+      assertThat(replay.exit()).as(replay.output()).isZero();
+      try {
+        Harness.await("every mail to be archived", () -> server.count("Archive") == mails);
+      } catch (AssertionError e) {
+        throw new AssertionError(
+            e.getMessage()
+                + "\nINBOX "
+                + server.count("INBOX")
+                + ", Archive "
+                + server.count("Archive")
+                + "\n"
+                + h.cli("approvals").output()
+                + "\nlog tail: "
+                + h.log().stream().skip(Math.max(0, h.log().size() - 8)).toList()
+                + "\n"
+                + h.daemonLog(),
+            e);
+      }
+      Harness.await(
+          "nothing to be missed any more", () -> !h.cli("approvals").output().contains("Missed"));
+
+      assertThat(server.count("INBOX")).isZero();
+      // a mail that was moved just before the kill is moved again and found already there
+      assertThat(h.log()).extracting(l -> l.outcome()).doesNotContain("FAILED");
+      h.stop(daemon);
+    }
+  }
 }

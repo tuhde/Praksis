@@ -251,4 +251,79 @@ class LayersIT {
       }
     }
   }
+
+  @Test
+  void aPrivatePatchIsGovernedByTheGrantsOfThePrivateLayerNotTheUpstreamOne() throws Exception {
+    try (Harness h = new Harness()) {
+      Path repos = Files.createTempDirectory("pkr");
+      try {
+        Repo mail = new Repo(repos.resolve("mail"));
+        mail.commit(
+            "first",
+            "ruleset.toml",
+            HEADER.formatted("praksis-mail"),
+            "rules/mail.10-spam.toml",
+            rule("mail.10-spam", "Spam", SPAM_FILTER, "Spam"),
+            "rules/mail.20-lists.toml",
+            rule("mail.20-lists", "Lists", LISTS_FILTER, "Lists"));
+        Repo mine = new Repo(repos.resolve("mine"));
+        mine.commit(
+            "mine",
+            "ruleset.toml",
+            HEADER.formatted("myPraksis"),
+            "patch/mail.20-lists.toml",
+            PATCH);
+        Files.writeString(
+            h.home.resolve("praksis.toml"),
+            """
+            format_version = 1
+            [[layer]]
+            name = "mail"
+            git = "%s"
+            ref = "main"
+            [[layer]]
+            name = "mine"
+            git = "%s"
+            ref = "main"
+            [module.maildir]
+            root = "%s"
+            poll_interval_ms = 20
+            """
+                .formatted(mail.url(), mine.url(), h.mail));
+        // the upstream layer may sort spam and lists; the private layer has no grant yet
+        h.grantMoves(java.util.Map.of("mail", java.util.List.of("Spam", "Lists")));
+        assertThat(h.cli("layers", "update").exit()).isZero();
+        assertThat(h.cli("effective").output()).contains("mail: add; mine: patch");
+
+        Process daemon = h.startDaemon();
+        h.deliverWithHeaders("1.spam", "X-Spam-Flag: YES", "Subject: a");
+        h.deliverWithHeaders("2.list", "List-Id: <dev.l.example>", "Subject: b");
+        Harness.await(
+            "the patched rule to ask", () -> h.cli("approvals").output().contains("PENDING"));
+        assertThat(h.cli("approvals").output())
+            .containsPattern(
+                "#1 +PENDING +mail\\.20-lists \\(layer mine\\) needs mail\\.move \\{folder=Lists\\}");
+        assertThat(h.names(".Spam/cur")).containsExactly("1.spam:2,");
+
+        // the upstream layer's own rule is not affected
+        h.deliverWithHeaders("3.spam", "X-Spam-Flag: YES", "Subject: c");
+        Harness.await("the second spam mail", () -> h.names(".Spam/cur").size() == 2);
+        assertThat(h.names("new")).containsExactly("2.list");
+
+        // the answer grants the private layer, not the upstream layer
+        Harness.CliResult allowed = h.cli("approvals", "allow", "1", "--always", "--replay");
+        assertThat(allowed.exit()).as(allowed.output()).isZero();
+        Harness.await("the list mail", () -> h.names(".Lists/cur").size() == 1);
+        assertThat(h.names(".Lists/cur")).containsExactly("2.list:2,");
+        String grants = h.cli("grants").output();
+        assertThat(grants)
+            .contains("mail-moves  layer mail may call mail.move")
+            .contains("approval-1  layer mine may call mail.move")
+            .contains("folder: equals = \"Lists\"");
+        h.stop(daemon);
+      } finally {
+        deleteTree(repos);
+      }
+    }
+  }
 }
