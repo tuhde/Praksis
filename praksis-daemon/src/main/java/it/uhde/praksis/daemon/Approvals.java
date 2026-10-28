@@ -316,7 +316,13 @@ final class Approvals implements Denials {
           new Response.GrantList.Item(
               g.id(), g.layer(), g.capability(), args, g.note().orElse(null)));
     }
-    return new Response.GrantList(items);
+    List<Response.GrantList.Credential> credentials = new ArrayList<>();
+    for (var b : access.policy().credentials()) {
+      credentials.add(
+          new Response.GrantList.Credential(
+              b.name(), b.components(), b.command().get(0), b.note().orElse(null)));
+    }
+    return new Response.GrantList(items, credentials);
   }
 
   String revoke(String id) throws Failure, StoreException {

@@ -33,6 +33,8 @@ public record AuditEntry(
     GRANT,
     /** A request for a permission was opened or answered. */
     APPROVAL,
+    /** A module asked for the secret of a credential binding, allowed or refused. */
+    CREDENTIAL,
     /** The grants in {@code policy.toml} when the daemon started, if they differ from last time. */
     POLICY
   }

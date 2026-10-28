@@ -3,6 +3,7 @@ package it.uhde.praksis.engine;
 
 import it.uhde.praksis.capability.Capability;
 import it.uhde.praksis.capability.CapabilityException;
+import it.uhde.praksis.capability.Credentials;
 import it.uhde.praksis.capability.EventSink;
 import it.uhde.praksis.capability.EventSource;
 import it.uhde.praksis.capability.ModuleDescriptor;
@@ -43,6 +44,15 @@ public final class LoadedModules implements AutoCloseable {
 
   public List<EventSource> sources() {
     return sources;
+  }
+
+  /**
+   * Gives every capability and event source its way to get secrets. The function is asked once per
+   * part, with the name of the capability or event source, so the answer can depend on who asks.
+   */
+  public void useCredentials(java.util.function.Function<String, Credentials> perComponent) {
+    capabilities.forEach((name, capability) -> capability.useCredentials(perComponent.apply(name)));
+    sources.forEach(source -> source.useCredentials(perComponent.apply(source.name())));
   }
 
   /** Starts all event sources. If one fails, the ones already started are stopped again. */

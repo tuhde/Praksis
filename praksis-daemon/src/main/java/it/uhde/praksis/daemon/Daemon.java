@@ -5,6 +5,7 @@ import it.uhde.praksis.capability.Capability;
 import it.uhde.praksis.capability.CapabilityException;
 import it.uhde.praksis.capability.Event;
 import it.uhde.praksis.capability.ModuleDescriptor;
+import it.uhde.praksis.engine.CredentialResolver;
 import it.uhde.praksis.engine.Engine;
 import it.uhde.praksis.engine.GrantPolicy;
 import it.uhde.praksis.engine.LoadedModules;
@@ -111,6 +112,7 @@ public final class Daemon implements AutoCloseable {
       GrantPolicy access = accessPolicy(config, modules.catalog(), effective);
       store = Store.open(config.database());
       auditPolicy(config, store);
+      modules.useCredentials(new CredentialResolver(access::policy, store, clock)::forComponent);
       approvals = new Approvals(config, store, access, modules.catalog(), clock);
       Map<String, Capability> capabilities = modules.capabilities();
       engine =

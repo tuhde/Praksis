@@ -38,7 +38,9 @@ class PolicyTest {
                 new FieldDescriptor("limit", ValueType.INT, false, true)),
             List.of());
     return new ModuleCatalog(
-        List.of(new ModuleDescriptor("mail", "1", List.of(), List.of(move), List.of(), List.of())));
+        List.of(
+            new ModuleDescriptor(
+                "mail", "1", List.of(), List.of(move), List.of(), List.of("mail.inbox"))));
   }
 
   private static final String SORT =
@@ -182,5 +184,70 @@ class PolicyTest {
             "policy.toml: grant 'c': parameter 'message' cannot be restricted by a grant",
             "policy.toml: grant 'c': 'prefix' only works on strings: 'limit'",
             "policy.toml: grant 'c': mail.move has no parameter 'colour'");
+  }
+
+  @Test
+  void credentialBindingsAreReadAndCheckedAgainstTheModules() throws Exception {
+    Policy policy =
+        load(
+            """
+            format_version = 1
+
+            [credential."imap:work"]
+            command = ["pass", "show", "mail/work"]
+            capabilities = ["mail.inbox", "mail.move"]
+            note = "the work mailbox"
+            """);
+    CredentialBinding b = policy.credential("imap:work").orElseThrow();
+    assertThat(b.command()).containsExactly("pass", "show", "mail/work");
+    assertThat(b.components()).containsExactly("mail.inbox", "mail.move");
+    assertThat(b.note()).contains("the work mailbox");
+    assertThat(policy.credential("nope")).isEmpty();
+    assertThat(policy.grants()).isEmpty();
+    assertThat(policy.check(catalog(), Set.of())).isEmpty();
+
+    Policy bad =
+        load(
+            """
+            format_version = 1
+
+            [credential.other]
+            command = ["x"]
+            capabilities = ["mail.copy", "mail.inbox"]
+            """);
+    assertThat(bad.check(catalog(), Set.of()))
+        .extracting(Problem::toString)
+        .containsExactly(
+            "policy.toml: credential 'other': no capability or event source named 'mail.copy'");
+  }
+
+  @Test
+  void credentialMistakesAreAllReported() {
+    assertThatThrownBy(
+            () ->
+                load(
+                    """
+                    format_version = 1
+
+                    [credential."Bad Name"]
+                    command = ["x"]
+                    capabilities = ["a"]
+
+                    [credential.no-command]
+                    capabilities = ["a"]
+
+                    [credential.no-capabilities]
+                    command = ["x"]
+
+                    [credential.blank]
+                    command = ["x", " "]
+                    capabilities = ["a"]
+                    colour = "red"
+                    """))
+        .isInstanceOf(RulesetException.class)
+        .hasMessageContaining("the name must be lower case")
+        .hasMessageContaining("'command' must be a list with the command")
+        .hasMessageContaining("'capabilities' must list the capabilities")
+        .hasMessageContaining("unknown key 'colour'");
   }
 }

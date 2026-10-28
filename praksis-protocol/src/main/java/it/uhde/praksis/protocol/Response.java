@@ -60,11 +60,23 @@ public sealed interface Response {
   }
 
   /**
-   * The grants in effect.
+   * The grants and credential bindings in effect.
    *
    * @param grants the grants
+   * @param credentials the credential bindings; never the secrets
    */
-  record GrantList(List<Item> grants) implements Response {
+  record GrantList(List<Item> grants, List<Credential> credentials) implements Response {
+    /**
+     * One credential binding.
+     *
+     * @param name the name modules ask for
+     * @param components the capabilities and event sources that may ask
+     * @param executable the program that prints the secret, without its arguments
+     * @param note what it is for, or null
+     */
+    public record Credential(
+        String name, List<String> components, String executable, String note) {}
+
     /**
      * One grant.
      *

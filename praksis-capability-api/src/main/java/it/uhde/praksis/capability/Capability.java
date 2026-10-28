@@ -18,6 +18,14 @@ public interface Capability {
   default void configure(java.util.Map<String, Object> settings) throws CapabilityException {}
 
   /**
+   * Hands over the way to get secrets, once, after {@link #configure} and before any other method.
+   * The default does nothing; implementations that need a secret keep it. Every request goes
+   * through the user's credential bindings, which name the capabilities and event sources allowed
+   * to ask.
+   */
+  default void useCredentials(Credentials credentials) {}
+
+  /**
    * Releases what the implementation holds, e.g. connections and their threads. Called once when
    * the daemon shuts down, after the last call.
    */

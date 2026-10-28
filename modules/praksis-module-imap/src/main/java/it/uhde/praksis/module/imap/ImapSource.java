@@ -2,6 +2,7 @@
 package it.uhde.praksis.module.imap;
 
 import it.uhde.praksis.capability.CapabilityException;
+import it.uhde.praksis.capability.Credentials;
 import it.uhde.praksis.capability.Event;
 import it.uhde.praksis.capability.EventSink;
 import it.uhde.praksis.capability.EventSource;
@@ -54,6 +55,7 @@ public final class ImapSource implements EventSource {
           "X-Spam-Flag");
 
   private ImapSettings settings;
+  private Credentials credentials;
   private Connection connection;
   private ScheduledExecutorService poller;
   private long validity = -1;
@@ -70,6 +72,11 @@ public final class ImapSource implements EventSource {
   }
 
   @Override
+  public synchronized void useCredentials(Credentials credentials) {
+    this.credentials = credentials;
+  }
+
+  @Override
   public synchronized void start(EventSink sink) throws CapabilityException {
     if (settings == null) {
       throw new CapabilityException("imap source is not configured", false);
@@ -78,6 +85,7 @@ public final class ImapSource implements EventSource {
       throw new CapabilityException("imap source is already started", false);
     }
     connection = new Connection(settings);
+    connection.useCredentials(credentials);
     poller =
         Executors.newSingleThreadScheduledExecutor(
             r -> {

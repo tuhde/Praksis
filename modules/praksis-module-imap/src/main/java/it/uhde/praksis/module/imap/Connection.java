@@ -2,6 +2,7 @@
 package it.uhde.praksis.module.imap;
 
 import it.uhde.praksis.capability.CapabilityException;
+import it.uhde.praksis.capability.Credentials;
 import jakarta.mail.MessagingException;
 import jakarta.mail.Session;
 import java.io.IOException;
@@ -26,10 +27,30 @@ import org.eclipse.angus.mail.imap.IMAPStore;
  */
 final class Connection implements AutoCloseable {
   private final ImapSettings settings;
+  private Credentials credentials;
   private IMAPStore store;
 
   Connection(ImapSettings settings) {
     this.settings = settings;
+  }
+
+  /** Where a credential binding's password comes from. */
+  void useCredentials(Credentials credentials) {
+    this.credentials = credentials;
+  }
+
+  private String password() throws CapabilityException {
+    if (settings.credential().isEmpty()) {
+      return Secrets.read(settings.passwordCommand());
+    }
+    if (credentials == null) {
+      throw new CapabilityException(
+          "credential '"
+              + settings.credential().get()
+              + "' cannot be read: the daemon gave this module no way to get secrets",
+          false);
+    }
+    return credentials.secret(settings.credential().get());
   }
 
   /** The connected store; connects first if there is no usable connection. */
@@ -38,7 +59,7 @@ final class Connection implements AutoCloseable {
       return store;
     }
     close();
-    String password = Secrets.read(settings.passwordCommand());
+    String password = password();
     Session session = Session.getInstance(properties());
     IMAPStore fresh = (IMAPStore) session.getStore("imap");
     try {

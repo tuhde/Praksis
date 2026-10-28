@@ -15,6 +15,14 @@ public interface EventSource {
    */
   default void configure(java.util.Map<String, Object> settings) throws CapabilityException {}
 
+  /**
+   * Hands over the way to get secrets, once, after {@link #configure} and before any other method.
+   * The default does nothing; implementations that need a secret keep it. Every request goes
+   * through the user's credential bindings, which name the capabilities and event sources allowed
+   * to ask.
+   */
+  default void useCredentials(Credentials credentials) {}
+
   /** The name of this source, unique across modules. Matches an entry in the module descriptor. */
   String name();
 

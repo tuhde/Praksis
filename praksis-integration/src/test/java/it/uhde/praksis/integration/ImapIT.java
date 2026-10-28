@@ -55,6 +55,16 @@ class ImapIT {
   }
 
   private static void useImap(Harness h, Server server) throws Exception {
+    useImap(h, server, false, "");
+  }
+
+  /**
+   * Configures the module. With a binding the password comes from {@code [credential."imap:me"]} in
+   * policy.toml, which names the parts that may ask for it; otherwise from a command in the module
+   * settings.
+   */
+  private static void useImap(Harness h, Server server, boolean bound, String askers)
+      throws Exception {
     Files.writeString(
         h.home.resolve("praksis.toml"),
         """
@@ -66,17 +76,34 @@ class ImapIT {
         port = %d
         security = "none"
         user = "me"
-        password_command = ["sh", "-c", "printf secret"]
+        %s
         poll_interval_ms = 50
         """
-            .formatted(server.greenMail.getImap().getPort()));
+            .formatted(
+                server.greenMail.getImap().getPort(),
+                bound
+                    ? "credential = \"imap:me\""
+                    : "password_command = [\"sh\", \"-c\", \"printf secret\"]"));
+    if (bound) {
+      Files.writeString(
+          h.home.resolve("policy.toml"),
+          Files.readString(h.home.resolve("policy.toml"))
+              + """
+
+              [credential."imap:me"]
+              command = ["sh", "-c", "printf secret"]
+              capabilities = [%s]
+              note = "the test mailbox"
+              """
+                  .formatted(askers));
+    }
   }
 
   @Test
   void theRuleMovesMailOnAnImapServer() throws Exception {
     try (Server server = new Server();
         Harness h = new Harness()) {
-      useImap(h, server);
+      useImap(h, server, true, "\"imap.inbox\", \"mail.move\"");
       for (int i = 0; i < 5; i++) {
         server.deliver("mail " + i);
       }
@@ -85,6 +112,17 @@ class ImapIT {
       assertThat(server.count("INBOX")).isZero();
       assertThat(h.status().modules()).containsExactly("imap");
       assertThat(h.log()).extracting(l -> l.outcome()).doesNotContain("FAILED");
+
+      // the password came through the binding: asked for by name, audited, never shown
+      assertThat(h.cli("grants").output())
+          .contains("imap:me  for imap.inbox, mail.move, from the command 'sh'")
+          .contains("(the test mailbox)")
+          .doesNotContain("printf"); // the program is shown, not its arguments
+      String audit = h.cli("audit", "-n", "100").output();
+      assertThat(audit)
+          .containsPattern("CREDENTIAL +- +allowed +imap:me \\{\"component\":\"imap\\.inbox\"\\}")
+          .containsPattern("CREDENTIAL +- +allowed +imap:me \\{\"component\":\"mail\\.move\"\\}")
+          .doesNotContain("secret");
 
       // mail that arrives later is handled too
       server.deliver("later");
@@ -99,6 +137,29 @@ class ImapIT {
           }
         }
       }
+      h.stop(daemon);
+    }
+  }
+
+  @Test
+  void aBindingThatDoesNotNameTheMoveCannotMoveAnything() throws Exception {
+    try (Server server = new Server();
+        Harness h = new Harness()) {
+      useImap(h, server, true, "\"imap.inbox\"");
+      server.deliver("stays");
+      Process daemon = h.startDaemon();
+      Harness.await(
+          "the refusal to be logged",
+          () ->
+              h.log().stream()
+                  .anyMatch(
+                      l ->
+                          l.message().contains("credential 'imap:me' is not bound for mail.move")));
+      assertThat(server.count("INBOX")).isEqualTo(1);
+      assertThat(server.count("Archive")).isZero();
+      assertThat(h.cli("audit", "-n", "100").output())
+          .containsPattern(
+              "CREDENTIAL +- +DENIED +imap:me .*\\[credential 'imap:me' is not bound for mail\\.move\\]");
       h.stop(daemon);
     }
   }

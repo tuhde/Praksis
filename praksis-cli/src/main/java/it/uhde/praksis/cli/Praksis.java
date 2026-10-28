@@ -267,7 +267,9 @@ public final class Praksis {
       if (response instanceof Response.AuditLines l) {
         for (Response.AuditLines.Line line : l.lines()) {
           String verdict =
-              line.kind().equals("CALL") ? (line.allowed() ? "allowed" : "DENIED") : "";
+              line.kind().equals("CALL") || line.kind().equals("CREDENTIAL")
+                  ? (line.allowed() ? "allowed" : "DENIED")
+                  : "";
           out()
               .printf(
                   "%s  %-6s %-14s %-8s %s %s%s%n",
@@ -415,7 +417,7 @@ public final class Praksis {
 
   @Command(
       name = "grants",
-      description = "Lists the grants in policy.toml that are in effect.",
+      description = "Lists the grants and credential bindings in policy.toml that are in effect.",
       subcommands = {Praksis.GrantsCommand.Revoke.class, Praksis.GrantsCommand.Reload.class})
   static final class GrantsCommand extends Base {
     @Override
@@ -424,6 +426,18 @@ public final class Praksis {
       if (response instanceof Response.GrantList l) {
         if (l.grants().isEmpty()) {
           out().println("No grants: nothing is allowed.");
+        }
+        if (!l.credentials().isEmpty()) {
+          out().println("Credentials (the secrets are never shown):");
+          for (Response.GrantList.Credential c : l.credentials()) {
+            out()
+                .printf(
+                    "  %s  for %s, from the command '%s'%s%n",
+                    c.name(),
+                    String.join(", ", c.components()),
+                    c.executable(),
+                    c.note() == null ? "" : "  (" + c.note() + ")");
+          }
         }
         for (Response.GrantList.Item g : l.grants()) {
           out().printf("%s  layer %s may call %s%n", g.id(), g.layer(), g.capability());

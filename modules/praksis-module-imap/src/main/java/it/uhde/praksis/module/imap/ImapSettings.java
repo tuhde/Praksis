@@ -17,7 +17,9 @@ import java.util.Set;
  * <pre>
  * host             = "imap.example.org"                    required
  * user             = "me@example.org"                      required
- * password_command = ["pass", "show", "mail/example"]      required: its output is the password
+ * credential       = "imap:work"                           the credential binding in policy.toml, or
+ * password_command = ["pass", "show", "mail/example"]      a command whose output is the password;
+ *                                                          exactly one of them
  * security         = "ssl"      # ssl (default, port 993), starttls (143) or none (loopback only)
  * port             = 993
  * folder           = "INBOX"    # the folder to watch
@@ -31,7 +33,8 @@ import java.util.Set;
  * @param port the port
  * @param security how the connection is protected
  * @param user the login name
- * @param passwordCommand the command whose output is the password
+ * @param passwordCommand the command whose output is the password; empty if a credential is used
+ * @param credential the name of the credential binding that gives the password, or empty
  * @param folder the folder the source watches
  * @param initial which mails of the folder are handled when the daemon first sees it
  * @param pollInterval how often the source looks for new mail
@@ -44,6 +47,7 @@ record ImapSettings(
     Security security,
     String user,
     List<String> passwordCommand,
+    Optional<String> credential,
     String folder,
     Initial initial,
     Duration pollInterval,
@@ -71,6 +75,7 @@ record ImapSettings(
           "security",
           "user",
           "password_command",
+          "credential",
           "folder",
           "initial",
           "poll_interval_ms",
@@ -93,14 +98,26 @@ record ImapSettings(
           false);
     }
     long port = number(settings, "port", security == Security.SSL ? 993 : 143, 1, 65535);
-    Object command = settings.get("password_command");
-    if (!(command instanceof List<?> list)
-        || list.isEmpty()
-        || !list.stream().allMatch(e -> e instanceof String s && !s.isBlank())) {
+    List<String> command = List.of();
+    Optional<String> credential = Optional.empty();
+    if (settings.containsKey("credential") == settings.containsKey("password_command")) {
       throw new CapabilityException(
-          "imap setting 'password_command' is required: a list with the command and its"
-              + " arguments, e.g. [\"pass\", \"show\", \"mail/example\"]",
+          "imap needs exactly one of the settings 'credential' (the name of a binding in"
+              + " policy.toml) and 'password_command' (a command that prints the password)",
           false);
+    }
+    if (settings.containsKey("credential")) {
+      credential = Optional.of(string(settings, "credential", null));
+    } else {
+      if (!(settings.get("password_command") instanceof List<?> list)
+          || list.isEmpty()
+          || !list.stream().allMatch(e -> e instanceof String s && !s.isBlank())) {
+        throw new CapabilityException(
+            "imap setting 'password_command' must be a list with the command and its"
+                + " arguments, e.g. [\"pass\", \"show\", \"mail/example\"]",
+            false);
+      }
+      command = list.stream().map(String.class::cast).toList();
     }
     Optional<Path> ca = Optional.empty();
     if (settings.containsKey("ca_file")) {
@@ -115,7 +132,8 @@ record ImapSettings(
         (int) port,
         security,
         user,
-        list.stream().map(String.class::cast).toList(),
+        command,
+        credential,
         string(settings, "folder", "INBOX"),
         Initial.valueOf(choice(settings, "initial", "unseen", Initial.values())),
         Duration.ofMillis(number(settings, "poll_interval_ms", 30_000, 1, Long.MAX_VALUE)),

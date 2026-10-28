@@ -13,10 +13,12 @@ import java.util.Optional;
 public final class ModuleCatalog {
   private final Map<String, CapabilityDescriptor> capabilities = new HashMap<>();
   private final Map<String, EventTypeDescriptor> eventTypes = new HashMap<>();
+  private final java.util.Set<String> sources = new java.util.HashSet<>();
 
   /** Builds the catalog. Fails if two modules declare the same capability or event type. */
   public ModuleCatalog(List<ModuleDescriptor> modules) {
     for (ModuleDescriptor module : modules) {
+      sources.addAll(module.sources());
       for (CapabilityDescriptor c : module.capabilities()) {
         if (capabilities.putIfAbsent(c.name(), c) != null) {
           throw new IllegalArgumentException("capability declared twice: " + c.name());
@@ -28,6 +30,11 @@ public final class ModuleCatalog {
         }
       }
     }
+  }
+
+  /** Whether a module provides an event source with this name. */
+  public boolean hasSource(String name) {
+    return sources.contains(name);
   }
 
   public Optional<CapabilityDescriptor> capability(String name) {

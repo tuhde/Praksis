@@ -75,14 +75,27 @@ class ImapSettingsTest {
   @Test
   void mistakesAreReportedClearly() {
     assertBad(Map.of(), "'host' is required");
-    assertBad(with("password_command", "pass"), "'password_command' is required");
-    assertBad(with("password_command", List.of()), "'password_command' is required");
+    assertBad(with("password_command", "pass"), "'password_command' must be a list");
+    assertBad(with("password_command", List.of()), "'password_command' must be a list");
+    assertBad(with("credential", "imap:work"), "exactly one of the settings 'credential'");
     assertBad(with("nope", 1), "unknown imap setting 'nope'");
     assertBad(with("security", "tls13"), "must be one of [ssl, starttls, none]");
     assertBad(with("port", 0L), "'port' must be an integer");
     assertBad(with("port", "993"), "'port' must be an integer");
     assertBad(with("initial", "some"), "must be one of [unseen, all, none]");
     assertBad(with("ca_file", dir.resolve("missing.pem").toString()), "no such file");
+  }
+
+  @Test
+  void theLoginComesFromACredentialOrACommandButNotBoth() throws Exception {
+    Map<String, Object> m = base();
+    m.remove("password_command");
+    assertBad(m, "exactly one of the settings 'credential'");
+    m.put("credential", "imap:work");
+    ImapSettings s = ImapSettings.parse(m);
+    assertThat(s.credential()).contains("imap:work");
+    assertThat(s.passwordCommand()).isEmpty();
+    assertThat(ImapSettings.parse(base()).credential()).isEmpty();
   }
 
   @Test

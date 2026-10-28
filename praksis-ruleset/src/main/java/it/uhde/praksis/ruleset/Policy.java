@@ -24,13 +24,22 @@ import java.util.regex.Pattern;
  * anything.
  *
  * @param grants the grants, in file order
+ * @param credentials the credential bindings
  */
-public record Policy(List<Grant> grants) {
+public record Policy(List<Grant> grants, List<CredentialBinding> credentials) {
   private static final Pattern ID = Pattern.compile("[a-z0-9][a-z0-9._-]*");
   private static final TomlMapper MAPPER = new TomlMapper();
 
+  private static final Pattern CREDENTIAL = Pattern.compile("[a-z0-9][a-z0-9._:-]*");
+
   public Policy {
     grants = List.copyOf(grants);
+    credentials = List.copyOf(credentials);
+  }
+
+  /** A policy with grants only. */
+  public Policy(List<Grant> grants) {
+    this(grants, List.of());
   }
 
   /** A policy that allows nothing. */
@@ -56,7 +65,7 @@ public record Policy(List<Grant> grants) {
     } catch (IOException e) {
       throw new RulesetException(List.of(new Problem(where, "cannot read: " + e.getMessage())));
     }
-    t.onlyKeys(Set.of("format_version", "grant"));
+    t.onlyKeys(Set.of("format_version", "grant", "credential"));
     int version = RulesetLoader.formatVersion(t);
     if (version != 0 && version != 1) {
       t.problem("unsupported 'format_version' " + version);
@@ -66,10 +75,18 @@ public record Policy(List<Grant> grants) {
     for (Table g : t.tables("grant")) {
       grant(g, ids).ifPresent(grants::add);
     }
+    List<CredentialBinding> credentials = new ArrayList<>();
+    t.table("credential", false)
+        .ifPresent(
+            c -> {
+              for (var e : c.subTables().entrySet()) {
+                credential(e.getKey(), e.getValue()).ifPresent(credentials::add);
+              }
+            });
     if (!problems.isEmpty()) {
       throw new RulesetException(problems);
     }
-    return new Policy(grants);
+    return new Policy(grants, credentials);
   }
 
   private static Optional<Grant> grant(Table g, Set<String> ids) {
@@ -98,6 +115,23 @@ public record Policy(List<Grant> grants) {
       return Optional.empty();
     }
     return Optional.of(new Grant(id.get(), layer.get(), capability.get(), args, note));
+  }
+
+  private static Optional<CredentialBinding> credential(String name, Table c) {
+    c.onlyKeys(Set.of("command", "capabilities", "note"));
+    if (!CREDENTIAL.matcher(name).matches()) {
+      c.problem("the name must be lower case letters, digits, '.', '_', ':' or '-'");
+    }
+    List<String> command = c.strings("command");
+    List<String> components = c.strings("capabilities");
+    if (command.isEmpty() || command.stream().anyMatch(String::isBlank)) {
+      c.problem("'command' must be a list with the command and its arguments");
+    }
+    if (components.isEmpty()) {
+      c.problem("'capabilities' must list the capabilities and event sources that may ask for it");
+    }
+    Optional<String> note = c.string("note", false);
+    return Optional.of(new CredentialBinding(name, command, components, note));
   }
 
   private static Optional<ArgMatcher> matcher(Table m) {
@@ -178,6 +212,20 @@ public record Policy(List<Grant> grants) {
         }
       }
     }
+    for (CredentialBinding b : credentials) {
+      String where = "policy.toml: credential '" + b.name() + "'";
+      for (String component : b.components()) {
+        if (catalog.capability(component).isEmpty() && !catalog.hasSource(component)) {
+          problems.add(
+              new Problem(where, "no capability or event source named '" + component + "'"));
+        }
+      }
+    }
     return problems;
+  }
+
+  /** The binding with this name, if there is one. */
+  public Optional<CredentialBinding> credential(String name) {
+    return credentials.stream().filter(b -> b.name().equals(name)).findFirst();
   }
 }

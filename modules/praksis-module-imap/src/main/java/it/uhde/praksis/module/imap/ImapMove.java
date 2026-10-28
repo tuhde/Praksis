@@ -4,6 +4,7 @@ package it.uhde.praksis.module.imap;
 import it.uhde.praksis.capability.Capability;
 import it.uhde.praksis.capability.CapabilityContext;
 import it.uhde.praksis.capability.CapabilityException;
+import it.uhde.praksis.capability.Credentials;
 import jakarta.mail.Flags;
 import jakarta.mail.Folder;
 import jakarta.mail.Message;
@@ -45,6 +46,13 @@ public final class ImapMove implements Capability {
   public void configure(Map<String, Object> config) throws CapabilityException {
     settings = ImapSettings.parse(config);
     connection = new Connection(settings);
+  }
+
+  @Override
+  public synchronized void useCredentials(Credentials credentials) {
+    if (connection != null) {
+      connection.useCredentials(credentials);
+    }
   }
 
   @Override
