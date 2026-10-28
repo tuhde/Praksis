@@ -27,7 +27,8 @@ import java.util.Set;
  * ruleset    = "ruleset"       # directory with ruleset.toml and rules/
  * modules    = "modules"       # directory with one subdirectory per module; if it is not set
  *                              # and the home has none, the one that ships with the runtime image
- * enabled_modules = ["maildir"]  # load only these; without it every module in the directory
+ * enabled_modules = ["maildir"]  # load only these; without it the modules with a [module.*]
+ *                              # section below, or every module if there is none
  * lockfile   = "modules.lock"
  * database   = "praksis.db"
  * expression = "lib/expression"  # directory with the CEL jar; else the one that ships with the
@@ -60,7 +61,9 @@ import java.util.Set;
  * @param moduleSettings the settings per module name
  * @param layers the ruleset layers, bottom to top; empty means the single directory {@code ruleset}
  * @param params values for ruleset parameters, which win over the defaults in the layers
- * @param enabledModules the modules to load; empty means every module in the directory
+ * @param enabledModules the modules to load; empty means every module in the directory. Unless
+ *     {@code enabled_modules} says otherwise these are the modules that have a {@code [module.*]}
+ *     section.
  */
 public record DaemonConfig(
     Path home,
@@ -164,7 +167,12 @@ public record DaemonConfig(
                 }
               });
     }
+    // Without a list, the modules that have settings are the ones in use: the runtime image ships
+    // several, e.g. two mail backends, and only the one that was configured should start.
     java.util.Set<String> enabled = new java.util.LinkedHashSet<>(table.strings("enabled_modules"));
+    if (!table.has("enabled_modules")) {
+      enabled.addAll(settings.keySet());
+    }
     if (!layers.isEmpty() && table.has("ruleset")) {
       table.problem("'ruleset' and [[layer]] cannot be used together; make it a layer with path");
     }

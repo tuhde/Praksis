@@ -73,5 +73,12 @@ public final class LoadedModules implements AutoCloseable {
   @Override
   public void close() {
     stopSources();
+    for (Capability capability : capabilities.values()) {
+      try {
+        capability.close();
+      } catch (RuntimeException e) {
+        // one module failing to clean up must not keep the others from it
+      }
+    }
   }
 }

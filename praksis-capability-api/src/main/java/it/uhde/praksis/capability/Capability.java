@@ -17,6 +17,12 @@ public interface Capability {
    */
   default void configure(java.util.Map<String, Object> settings) throws CapabilityException {}
 
+  /**
+   * Releases what the implementation holds, e.g. connections and their threads. Called once when
+   * the daemon shuts down, after the last call.
+   */
+  default void close() {}
+
   /** The capability name, e.g. {@code mail.move}. Matches an entry in the module descriptor. */
   String name();
 

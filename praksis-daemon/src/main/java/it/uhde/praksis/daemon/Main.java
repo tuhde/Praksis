@@ -72,5 +72,7 @@ public final class Main {
     Runtime.getRuntime().addShutdownHook(new Thread(daemon::close, "praksis-shutdown"));
     daemon.awaitStop();
     daemon.close();
+    // Everything is closed and stored. A thread that a module forgot must not keep the process.
+    System.exit(0);
   }
 }

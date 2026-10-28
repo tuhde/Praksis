@@ -149,7 +149,13 @@ final class Harness implements AutoCloseable {
   /** Asks the daemon to stop and waits until the process is gone. */
   void stop(Process p) throws Exception {
     assertThat(ask(new Request.Stop())).isEqualTo(new Response.Stopped());
-    assertThat(p.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+    if (!p.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)) {
+      // SIGQUIT makes the JVM print all its threads to its output, which is daemon.log
+      new ProcessBuilder("kill", "-3", String.valueOf(p.pid())).start().waitFor();
+      Thread.sleep(1000);
+      throw new AssertionError(
+          "the daemon did not exit within 30 seconds; its threads:\n" + daemonLog());
+    }
   }
 
   List<String> names(String dir) throws IOException {

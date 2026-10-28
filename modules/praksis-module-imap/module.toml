@@ -1,0 +1,33 @@
+format_version = 1
+name = "imap"
+version = "0.1.0"
+module = "it.uhde.praksis.module.imap"
+jdk_modules = ["java.desktop", "java.logging", "java.xml"]
+sources = ["imap.inbox"]
+
+[[capability]]
+name = "mail.move"
+effect = "local-write"
+dry_run = true
+params = [
+  { name = "message", type = "string", required = true, scopable = false },
+  { name = "folder", type = "string", required = true, scopable = true },
+]
+results = [{ name = "message", type = "string", required = true }]
+
+[[event]]
+type = "mail.received"
+fields = [
+  { name = "message", type = "string", required = true },
+  { name = "folder", type = "string", required = true },
+  { name = "size", type = "int", required = true },
+  { name = "from", type = "string" },
+  { name = "to", type = "string" },
+  { name = "subject", type = "string" },
+  { name = "message_id", type = "string" },
+  { name = "cc", type = "string" },
+  { name = "date", type = "string" },
+  { name = "list_id", type = "string" },
+  { name = "precedence", type = "string" },
+  { name = "x_spam_flag", type = "string" },
+]

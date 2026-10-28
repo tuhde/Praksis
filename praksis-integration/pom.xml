@@ -33,6 +33,13 @@
       <version>${project.version}</version>
       <type>pom</type>
     </dependency>
+
+    <!-- An IMAP server in the test process, for the IMAP module of the image. -->
+    <dependency>
+      <groupId>com.icegreen</groupId>
+      <artifactId>greenmail</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 
   <build>

@@ -28,6 +28,18 @@ class DaemonConfigTest {
   }
 
   @Test
+  void withoutAListTheModulesWithSettingsAreTheEnabledOnes() throws Exception {
+    Files.writeString(
+        home.resolve("praksis.toml"),
+        "format_version = 1\n[module.imap]\nhost = \"h\"\n[module.other]\nx = 1\n");
+    assertThat(DaemonConfig.load(home).enabledModules()).containsExactlyInAnyOrder("imap", "other");
+    Files.writeString(
+        home.resolve("praksis.toml"),
+        "format_version = 1\nenabled_modules = []\n[module.imap]\nhost = \"h\"\n");
+    assertThat(DaemonConfig.load(home).enabledModules()).isEmpty();
+  }
+
+  @Test
   void readsTheEnabledModules() throws Exception {
     Files.writeString(
         home.resolve("praksis.toml"), "format_version = 1\nenabled_modules = [\"imap\"]\n");
