@@ -1,0 +1,186 @@
+// SPDX-License-Identifier: Apache-2.0
+package it.uhde.praksis.ruleset;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import it.uhde.praksis.capability.CapabilityDescriptor;
+import it.uhde.praksis.capability.EffectClass;
+import it.uhde.praksis.capability.FieldDescriptor;
+import it.uhde.praksis.capability.ModuleDescriptor;
+import it.uhde.praksis.capability.ValueType;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+class PolicyTest {
+  @TempDir Path dir;
+
+  private Policy load(String toml) throws Exception {
+    Path file = dir.resolve("policy.toml");
+    Files.writeString(file, toml);
+    return Policy.load(file);
+  }
+
+  private static ModuleCatalog catalog() {
+    CapabilityDescriptor move =
+        new CapabilityDescriptor(
+            "mail.move",
+            EffectClass.LOCAL_WRITE,
+            true,
+            List.of(
+                new FieldDescriptor("message", ValueType.STRING, true, false),
+                new FieldDescriptor("folder", ValueType.STRING, true, true),
+                new FieldDescriptor("limit", ValueType.INT, false, true)),
+            List.of());
+    return new ModuleCatalog(
+        List.of(new ModuleDescriptor("mail", "1", List.of(), List.of(move), List.of(), List.of())));
+  }
+
+  private static final String SORT =
+      """
+      format_version = 1
+
+      [[grant]]
+      id = "mail-sort"
+      layer = "mail"
+      capability = "mail.move"
+      note = "sort incoming mail"
+      [grant.args]
+      folder = { one_of = ["Spam", "Lists", "Bulk"] }
+
+      [[grant]]
+      id = "archive"
+      layer = "mine"
+      capability = "mail.move"
+      [grant.args]
+      folder = { prefix = "Archive/" }
+      """;
+
+  @Test
+  void aMissingFileAllowsNothing() throws Exception {
+    Policy policy = Policy.load(dir.resolve("none.toml"));
+    assertThat(policy.grants()).isEmpty();
+    assertThat(policy.find("mail", "mail.move", Map.of("folder", "Spam"))).isEmpty();
+  }
+
+  @Test
+  void aGrantCoversOnlyItsLayerCapabilityAndArguments() throws Exception {
+    Policy policy = load(SORT);
+    assertThat(policy.grants()).extracting(Grant::id).containsExactly("mail-sort", "archive");
+    assertThat(policy.grants().get(0).note()).contains("sort incoming mail");
+
+    assertThat(policy.find("mail", "mail.move", Map.of("folder", "Spam", "message", "m")))
+        .map(Grant::id)
+        .contains("mail-sort");
+    assertThat(policy.find("mail", "mail.move", Map.of("folder", "Trash"))).isEmpty();
+    // the private layer does not inherit the upstream layer's grant, and the other way round
+    assertThat(policy.find("mine", "mail.move", Map.of("folder", "Spam"))).isEmpty();
+    assertThat(policy.find("mine", "mail.move", Map.of("folder", "Archive/2026")))
+        .map(Grant::id)
+        .contains("archive");
+    assertThat(policy.find("mail", "mail.move", Map.of("folder", "Archive/2026"))).isEmpty();
+    assertThat(policy.find("mail", "mail.delete", Map.of("folder", "Spam"))).isEmpty();
+    // a constrained argument that is missing is not covered
+    assertThat(policy.find("mail", "mail.move", Map.of("message", "m"))).isEmpty();
+  }
+
+  @Test
+  void matchersCompareNumbersAndStringsExactly() {
+    assertThat(new ArgMatcher.Equals(5L).matches(5)).isTrue();
+    assertThat(new ArgMatcher.Equals(5L).matches("5")).isFalse();
+    assertThat(new ArgMatcher.Equals("a").matches("A")).isFalse();
+    assertThat(new ArgMatcher.OneOf(List.of("a", 2L)).matches(2)).isTrue();
+    assertThat(new ArgMatcher.Prefix("Archive/").matches("Archive")).isFalse();
+    assertThat(new ArgMatcher.Prefix("Archive/").matches(3L)).isFalse();
+    assertThat(new ArgMatcher.OneOf(List.of("a", 2L)).describe()).isEqualTo("one_of = [\"a\", 2]");
+  }
+
+  @Test
+  void structuralMistakesAreAllReported() {
+    assertThatThrownBy(
+            () ->
+                load(
+                    """
+                    format_version = 1
+                    colour = "red"
+
+                    [[grant]]
+                    id = "A b"
+                    layer = "mail"
+
+                    [[grant]]
+                    id = "twice"
+                    layer = "mail"
+                    capability = "mail.move"
+                    [grant.args]
+                    folder = { prefix = "" }
+                    other = { equals = "x", one_of = ["y"] }
+                    third = { regex = ".*" }
+
+                    [[grant]]
+                    id = "twice"
+                    layer = "mail"
+                    capability = "mail.move"
+                    """))
+        .isInstanceOf(RulesetException.class)
+        .hasMessageContaining("unknown key 'colour'")
+        .hasMessageContaining("'id' must be lower case")
+        .hasMessageContaining("missing 'capability'")
+        .hasMessageContaining("'prefix' must be a non-empty string")
+        .hasMessageContaining("exactly one of")
+        .hasMessageContaining("unknown key 'regex'")
+        .hasMessageContaining("grant id 'twice' is used twice");
+  }
+
+  @Test
+  void aMissingOrWrongFormatVersionIsAnError() {
+    assertThatThrownBy(() -> load("[[grant]]\nid = \"a\"\nlayer = \"l\"\ncapability = \"c\"\n"))
+        .hasMessageContaining("missing 'format_version'");
+    assertThatThrownBy(() -> load("format_version = 2\n"))
+        .hasMessageContaining("unsupported 'format_version'");
+  }
+
+  @Test
+  void checkAgainstTheModulesAndLayers() throws Exception {
+    assertThat(load(SORT).check(catalog(), Set.of("mail", "mine"))).isEmpty();
+
+    Policy bad =
+        load(
+            """
+            format_version = 1
+
+            [[grant]]
+            id = "a"
+            layer = "nowhere"
+            capability = "mail.move"
+
+            [[grant]]
+            id = "b"
+            layer = "mail"
+            capability = "mail.copy"
+
+            [[grant]]
+            id = "c"
+            layer = "mail"
+            capability = "mail.move"
+            [grant.args]
+            message = { equals = "m" }
+            folder = { prefix = "A" }
+            limit = { prefix = "1" }
+            colour = { equals = "red" }
+            """);
+    assertThat(bad.check(catalog(), Set.of("mail")))
+        .extracting(Problem::toString)
+        .containsExactlyInAnyOrder(
+            "policy.toml: grant 'a': no layer named 'nowhere'",
+            "policy.toml: grant 'b': no capability named 'mail.copy'",
+            "policy.toml: grant 'c': parameter 'message' cannot be restricted by a grant",
+            "policy.toml: grant 'c': 'prefix' only works on strings: 'limit'",
+            "policy.toml: grant 'c': mail.move has no parameter 'colour'");
+  }
+}
