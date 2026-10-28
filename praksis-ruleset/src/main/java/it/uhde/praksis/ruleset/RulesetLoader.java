@@ -71,7 +71,7 @@ public final class RulesetLoader {
     return new Ruleset(version, name, params, rules);
   }
 
-  private static Table read(Path file, String where, List<Problem> problems) {
+  static Table read(Path file, String where, List<Problem> problems) {
     try {
       Map<String, Object> map = MAPPER.readValue(file.toFile(), new TypeReference<>() {});
       return new Table(map, where, problems);
@@ -81,7 +81,7 @@ public final class RulesetLoader {
     }
   }
 
-  private static int formatVersion(Table t) {
+  static int formatVersion(Table t) {
     Optional<Object> v = t.raw("format_version");
     if (v.isEmpty()) {
       t.problem("missing 'format_version'");
@@ -94,7 +94,7 @@ public final class RulesetLoader {
     return 0;
   }
 
-  private static List<ParamDecl> params(Table table) {
+  static List<ParamDecl> params(Table table) {
     List<ParamDecl> out = new ArrayList<>();
     for (var e : table.subTables().entrySet()) {
       Table p = e.getValue();
@@ -130,7 +130,7 @@ public final class RulesetLoader {
     return type;
   }
 
-  private static Optional<Rule> rule(Table t, String fileId) {
+  static Optional<Rule> rule(Table t, String fileId) {
     t.onlyKeys(Set.of("id", "description", "effect", "needs", "required", "trigger", "action"));
     String id = t.string("id", true).orElse(fileId);
     if (!ID.matcher(id).matches()) {
@@ -206,7 +206,7 @@ public final class RulesetLoader {
     return Optional.of(new Action.Call(id.get(), capability.get(), args));
   }
 
-  private static Arg arg(Table table, String name, Object value) {
+  static Arg arg(Table table, String name, Object value) {
     if (value instanceof Map<?, ?> m && m.containsKey("cel")) {
       if (m.size() == 1 && m.get("cel") instanceof String source) {
         return new Arg.Expr(source);
