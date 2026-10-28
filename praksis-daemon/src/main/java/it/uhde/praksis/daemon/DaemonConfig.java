@@ -1,0 +1,153 @@
+// SPDX-License-Identifier: Apache-2.0
+package it.uhde.praksis.daemon;
+
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.dataformat.toml.TomlMapper;
+import it.uhde.praksis.ruleset.Problem;
+import it.uhde.praksis.ruleset.Table;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+
+/**
+ * Where everything is. All of it lives in one home directory, which the CLI knows as well; the
+ * socket is always {@code <home>/praksis.sock}.
+ *
+ * <p>The optional file {@code <home>/praksis.toml} can change the defaults. Relative paths in it
+ * are relative to the home directory:
+ *
+ * <pre>
+ * format_version = 1
+ * ruleset    = "ruleset"       # directory with ruleset.toml and rules/
+ * modules    = "modules"       # directory with one subdirectory per module
+ * lockfile   = "modules.lock"
+ * database   = "praksis.db"
+ * expression = "lib/expression"  # directory with the CEL jar; without it the class path is used
+ * dry_run    = false
+ *
+ * [module.maildir]             # settings handed to the module with this name
+ * root = "/home/me/Maildir"
+ * </pre>
+ *
+ * @param home the home directory
+ * @param ruleset the ruleset directory
+ * @param modules the modules directory
+ * @param lockfile the module lockfile
+ * @param database the SQLite file
+ * @param expression the directory with the expression implementation, if it is not on the path
+ * @param dryRun whether capabilities are told to change nothing
+ * @param moduleSettings the settings per module name
+ */
+public record DaemonConfig(
+    Path home,
+    Path ruleset,
+    Path modules,
+    Path lockfile,
+    Path database,
+    Optional<Path> expression,
+    boolean dryRun,
+    Map<String, Map<String, Object>> moduleSettings) {
+  private static final String FILE = "praksis.toml";
+  private static final Set<String> KEYS =
+      Set.of(
+          "format_version",
+          "ruleset",
+          "modules",
+          "lockfile",
+          "database",
+          "expression",
+          "dry_run",
+          "module");
+
+  /** The socket of the daemon with this home directory. */
+  public Path socket() {
+    return home.resolve("praksis.sock");
+  }
+
+  /**
+   * Reads the configuration of a home directory.
+   *
+   * @throws DaemonException if the home directory is missing or the file is invalid
+   */
+  public static DaemonConfig load(Path home) throws DaemonException {
+    Path dir = home.toAbsolutePath().normalize();
+    if (!Files.isDirectory(dir)) {
+      throw new DaemonException("home directory " + dir + " does not exist");
+    }
+    Map<String, Object> values = new LinkedHashMap<>();
+    Path file = dir.resolve(FILE);
+    if (Files.exists(file)) {
+      try {
+        values = new TomlMapper().readValue(file.toFile(), new TypeReference<>() {});
+      } catch (IOException e) {
+        throw new DaemonException("cannot read " + file + ": " + e.getMessage(), e);
+      }
+    }
+    List<Problem> problems = new ArrayList<>();
+    Table table = new Table(values, FILE, problems);
+    table.onlyKeys(KEYS);
+    if (!values.isEmpty() && !Long.valueOf(1).equals(number(values.get("format_version")))) {
+      table.problem("'format_version' must be 1");
+    }
+    Path ruleset = path(table, dir, "ruleset", "ruleset");
+    Path modules = path(table, dir, "modules", "modules");
+    Path lockfile = path(table, dir, "lockfile", "modules.lock");
+    Path database = path(table, dir, "database", "praksis.db");
+    Optional<Path> expression =
+        table.string("expression", false).map(s -> dir.resolve(s).normalize());
+    boolean dryRun = table.bool("dry_run", false);
+    Map<String, Map<String, Object>> settings = new LinkedHashMap<>();
+    table
+        .table("module", false)
+        .ifPresent(
+            modulesTable ->
+                modulesTable
+                    .subTables()
+                    .forEach((name, t) -> settings.put(name, normalizeMap(t.rawEntries()))));
+    if (!problems.isEmpty()) {
+      throw new DaemonException(
+          "invalid "
+              + file
+              + ":\n  "
+              + String.join("\n  ", problems.stream().map(Problem::toString).toList()));
+    }
+    return new DaemonConfig(
+        dir, ruleset, modules, lockfile, database, expression, dryRun, settings);
+  }
+
+  private static Path path(Table table, Path home, String key, String fallback) {
+    return home.resolve(table.string(key, false).orElse(fallback)).normalize();
+  }
+
+  private static Long number(Object value) {
+    return value instanceof Number n ? n.longValue() : null;
+  }
+
+  /** TOML reading gives small integers as Integer; modules are promised Long (see ValueType). */
+  private static Object normalize(Object value) {
+    if (value instanceof Integer i) {
+      return i.longValue();
+    }
+    if (value instanceof Map<?, ?> map) {
+      Map<String, Object> out = new LinkedHashMap<>();
+      map.forEach((k, v) -> out.put((String) k, normalize(v)));
+      return out;
+    }
+    if (value instanceof List<?> list) {
+      return list.stream().map(DaemonConfig::normalize).toList();
+    }
+    return value;
+  }
+
+  private static Map<String, Object> normalizeMap(Map<String, Object> map) {
+    Map<String, Object> out = new LinkedHashMap<>();
+    map.forEach((k, v) -> out.put(k, normalize(v)));
+    return out;
+  }
+}
