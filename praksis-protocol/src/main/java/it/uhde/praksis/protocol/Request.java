@@ -18,6 +18,9 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.Grants.class, name = "grants"),
   @JsonSubTypes.Type(value = Request.Revoke.class, name = "revoke"),
   @JsonSubTypes.Type(value = Request.Reload.class, name = "reload"),
+  @JsonSubTypes.Type(value = Request.Shadow.class, name = "shadow"),
+  @JsonSubTypes.Type(value = Request.ShadowPromote.class, name = "shadow-promote"),
+  @JsonSubTypes.Type(value = Request.ShadowReset.class, name = "shadow-reset"),
   @JsonSubTypes.Type(value = Request.Stop.class, name = "stop")
 })
 public sealed interface Request {
@@ -91,6 +94,27 @@ public sealed interface Request {
    * Response.Done}.
    */
   record Reload() implements Request {}
+
+  /**
+   * Asks for the rules on trial and what they would have done. Answered with {@link
+   * Response.ShadowList}.
+   */
+  record Shadow() implements Request {}
+
+  /**
+   * Ends the trial of a rule: it runs live from now on. Answered with {@link Response.Done}.
+   *
+   * @param rule the rule id
+   */
+  record ShadowPromote(String rule) implements Request {}
+
+  /**
+   * Forgets what a rule on trial has been seen to do and starts the trial again. Answered with
+   * {@link Response.Done}.
+   *
+   * @param rule the rule id
+   */
+  record ShadowReset(String rule) implements Request {}
 
   /**
    * Asks the daemon to finish what it is doing and exit. Answered with {@link Response.Stopped}.

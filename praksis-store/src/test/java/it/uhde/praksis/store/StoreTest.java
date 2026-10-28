@@ -200,6 +200,10 @@ class StoreTest {
       s.execute("DROP TABLE audit");
       s.execute("DROP TABLE missed");
       s.execute("DROP TABLE approval");
+      s.execute("DROP TABLE meta");
+      s.execute("DROP TABLE promoted");
+      s.execute("DROP TABLE shadow_rule");
+      s.execute("DROP TABLE shadow_run");
       s.execute("PRAGMA user_version = 1");
     }
     try (Store store = Store.open(file)) {
@@ -259,6 +263,60 @@ class StoreTest {
       store.addMissed(T0, "a", "e2", T0.minusSeconds(1), 10);
       store.removeMissed("a", "e1");
       assertThat(store.missed("a")).containsExactly("e2");
+    }
+  }
+
+  @Test
+  void trialsPromotionsAndObservationsAreKept() throws Exception {
+    try (Store store = Store.open(dir.resolve("praksis.db"))) {
+      assertThat(store.meta("baseline")).isEmpty();
+      store.setMeta("baseline", "yes");
+      assertThat(store.meta("baseline")).contains("yes");
+
+      store.promote(new Promoted("a", "sha256:1", T0, "{\"id\":\"a\"}"));
+      store.promote(new Promoted("a", "sha256:1", T0.plusSeconds(9), "{}")); // again: no change
+      store.promote(new Promoted("a", "sha256:2", T0.plusSeconds(5), "{\"id\":\"a2\"}"));
+      assertThat(store.promoted())
+          .extracting(Promoted::hash)
+          .containsExactly("sha256:1", "sha256:2");
+
+      store.startShadow(new ShadowRule("a", "sha256:3", T0));
+      store.startShadow(new ShadowRule("a", "sha256:3", T0.plusSeconds(60))); // keeps the first
+      assertThat(store.shadowRules()).containsExactly(new ShadowRule("a", "sha256:3", T0));
+
+      for (int i = 0; i < 5; i++) {
+        store.addShadowRun(new ShadowRun(T0.plusSeconds(i), "a", "sha256:3", "e" + i, "[]", ""), 3);
+      }
+      assertThat(store.shadowCount("a", "sha256:3")).isEqualTo(3);
+      assertThat(store.shadowRuns("a", "sha256:3", 10))
+          .extracting(ShadowRun::eventId)
+          .containsExactly("e4", "e3", "e2");
+
+      store.restartShadow("a", "sha256:3", T0.plusSeconds(100));
+      assertThat(store.shadowCount("a", "sha256:3")).isZero();
+      assertThat(store.shadowRules().get(0).since()).isEqualTo(T0.plusSeconds(100));
+      store.endShadow("a", "sha256:3");
+      assertThat(store.shadowRules()).isEmpty();
+    }
+  }
+
+  @Test
+  void aDatabaseOfTheThirdVersionGainsTheShadowTables() throws Exception {
+    Path file = dir.resolve("praksis.db");
+    try (Store store = Store.open(file)) {
+      store.append(event("e1", Optional.empty(), Map.of()));
+    }
+    try (var c = java.sql.DriverManager.getConnection("jdbc:sqlite:" + file);
+        var s = c.createStatement()) {
+      s.execute("DROP TABLE meta");
+      s.execute("DROP TABLE promoted");
+      s.execute("DROP TABLE shadow_rule");
+      s.execute("DROP TABLE shadow_run");
+      s.execute("PRAGMA user_version = 3");
+    }
+    try (Store store = Store.open(file)) {
+      assertThat(store.pending()).hasSize(1);
+      assertThat(store.promoted()).isEmpty();
     }
   }
 }

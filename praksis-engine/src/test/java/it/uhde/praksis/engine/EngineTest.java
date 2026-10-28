@@ -584,4 +584,120 @@ class EngineTest {
     rule("a", "", call("x", "test.record", "event.data.nope"));
     assertThatThrownBy(this::engine).isInstanceOf(RulesetException.class);
   }
+
+  /** The rules on trial: files in a directory of their own. */
+  private List<it.uhde.praksis.ruleset.Rule> trial(String id, String extra, String actions)
+      throws Exception {
+    Path rules = dir.resolve("trial/rules");
+    Files.createDirectories(rules);
+    Files.writeString(
+        dir.resolve("trial/ruleset.toml"),
+        "format_version = 1\nname = \"t\"\n[param.prefix]\ntype = \"string\"\ndefault ="
+            + " \"p-\"\n");
+    Files.writeString(
+        rules.resolve(id + ".toml"),
+        "id = \""
+            + id
+            + "\"\neffect = \"local-write\"\nneeds = [\"test.record\"]\n"
+            + extra
+            + "\n[trigger]\nkind = \"event\"\ntype = \"test.event\"\n"
+            + actions);
+    return RulesetLoader.load(dir.resolve("trial")).rules();
+  }
+
+  private Engine engineWithTrial(List<it.uhde.praksis.ruleset.Rule> shadow) throws Exception {
+    return new Engine(
+        RulesetLoader.load(dir.resolve("ruleset")),
+        shadow,
+        CATALOG,
+        Expressions.compiler(),
+        capabilities,
+        store,
+        Engine.Options.defaults());
+  }
+
+  @Test
+  void aRuleOnTrialIsObservedAndDoesNothing() throws Exception {
+    rule("b", "", call("x", "test.record", "params.prefix + event.data.name"));
+    // the rule on trial comes first and stops: that must not keep b from seeing the event
+    var shadow =
+        trial(
+            "a",
+            "",
+            call("x", "test.record", "'a-' + event.data.name") + "\n[[action]]\nstop = true\n");
+    try (Engine engine = engineWithTrial(shadow)) {
+      assertThat(engine.shadowRules()).containsExactly("a");
+      run(engine, event("t", "mail"));
+    }
+    assertThat(calls).containsExactly("record:p-mail");
+    String hash = it.uhde.praksis.ruleset.RuleView.hash(shadow.get(0));
+    assertThat(store.shadowRuns("a", hash, 10))
+        .singleElement()
+        .satisfies(
+            r -> {
+              assertThat(r.calls()).contains("test.record").contains("a-mail");
+              assertThat(r.calls()).contains("\"allowed\":true");
+              assertThat(r.note()).isEqualTo("stop");
+            });
+    // nothing about it in the run log: it did not run
+    assertThat(store.recentLog(10)).extracting(l -> l.ruleId().orElse("")).containsOnly("b");
+  }
+
+  @Test
+  void aChangedRuleRunsAsItWasWhileTheNewVersionIsObservedAndThenTakesOver() throws Exception {
+    rule("a", "", call("x", "test.record", "'old-' + event.data.name"));
+    var shadow = trial("a", "", call("x", "test.record", "'new-' + event.data.name"));
+    try (Engine engine = engineWithTrial(shadow)) {
+      run(engine, event("t", "one"));
+      assertThat(calls).containsExactly("record:old-one");
+
+      assertThat(engine.promote("a")).isTrue();
+      assertThat(engine.shadowRules()).isEmpty();
+      assertThat(engine.promote("a")).isFalse();
+      run(engine, event("t", "two"));
+    }
+    assertThat(calls).containsExactly("record:old-one", "record:new-two");
+  }
+
+  @Test
+  void whatARuleOnTrialWouldBeDeniedOrWouldFailIsRecordedNotDone() throws Exception {
+    rule("b", "", call("x", "test.record", "'b'"));
+    var shadow =
+        trial("a", "", call("x", "test.record", "string(1 / (event.data.name.size() - 4))"));
+    String hash = it.uhde.praksis.ruleset.RuleView.hash(shadow.get(0));
+    try (Engine engine = engineWithTrial(shadow)) {
+      run(engine, event("t", "mail"));
+    }
+    assertThat(store.shadowRuns("a", hash, 1).get(0).note()).startsWith("would fail");
+
+    var denied = trial("c", "", call("x", "test.record", "'c'"));
+    Engine.Options deny =
+        new Engine.Options(
+            (rule, capability, args) ->
+                rule.equals("c")
+                    ? AccessPolicy.Decision.deny("no grant")
+                    : AccessPolicy.Decision.allow(),
+            AuditLog.none(),
+            java.time.Clock.systemUTC(),
+            false);
+    try (Engine engine =
+        new Engine(
+            RulesetLoader.load(dir.resolve("ruleset")),
+            denied,
+            CATALOG,
+            Expressions.compiler(),
+            capabilities,
+            store,
+            deny)) {
+      run(engine, event("t", "mail"));
+      assertThat(engine.disabledRules()).isEmpty(); // a denial on trial disables nothing
+    }
+    String deniedHash =
+        it.uhde.praksis.ruleset.RuleView.hash(
+            denied.stream().filter(r -> r.id().equals("c")).findFirst().orElseThrow());
+    assertThat(store.shadowRuns("c", deniedHash, 1).get(0).calls())
+        .contains("\"allowed\":false")
+        .contains("no grant");
+    assertThat(calls).containsExactly("record:b", "record:b");
+  }
 }

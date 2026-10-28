@@ -44,6 +44,11 @@ import java.util.Set;
  * name = "local"
  * path = "my-rules"            # a directory, read as it is and not pinned
  *
+ * [shadow]                     # new and changed rules are observed before they run
+ * enabled    = false           # off unless set
+ * trial_days = 7               # how long a rule is observed
+ * min_events = 20              # and with how many events at least
+ *
  * [param]                      # values for ruleset parameters
  * newsletter_folder = "News"
  *
@@ -61,6 +66,7 @@ import java.util.Set;
  * @param moduleSettings the settings per module name
  * @param layers the ruleset layers, bottom to top; empty means the single directory {@code ruleset}
  * @param params values for ruleset parameters, which win over the defaults in the layers
+ * @param shadow the settings for rules on trial
  * @param enabledModules the modules to load; empty means every module in the directory. Unless
  *     {@code enabled_modules} says otherwise these are the modules that have a {@code [module.*]}
  *     section.
@@ -76,7 +82,8 @@ public record DaemonConfig(
     Map<String, Map<String, Object>> moduleSettings,
     List<LayerConfig> layers,
     Map<String, Object> params,
-    java.util.Set<String> enabledModules) {
+    java.util.Set<String> enabledModules,
+    ShadowConfig shadow) {
   private static final String FILE = "praksis.toml";
   private static final Set<String> KEYS =
       Set.of(
@@ -90,7 +97,8 @@ public record DaemonConfig(
           "module",
           "layer",
           "param",
-          "enabled_modules");
+          "enabled_modules",
+          "shadow");
 
   /** The file that pins the commit of every git layer. */
   public Path rulesetLock() {
@@ -190,6 +198,11 @@ public record DaemonConfig(
     }
     Map<String, Object> params = new LinkedHashMap<>();
     table.table("param", false).ifPresent(p -> params.putAll(normalizeMap(p.rawEntries())));
+    ShadowConfig shadow =
+        table
+            .table("shadow", false)
+            .map(ShadowConfig::parse)
+            .orElse(new ShadowConfig(false, 7, 20));
     if (!problems.isEmpty()) {
       throw new DaemonException(
           "invalid "
@@ -208,7 +221,8 @@ public record DaemonConfig(
         settings,
         layers,
         params,
-        enabled);
+        enabled,
+        shadow);
   }
 
   /** The directory of what ships with the runtime image, if this is one: {@code lib/praksis}. */

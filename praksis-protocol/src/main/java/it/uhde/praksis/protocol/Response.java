@@ -15,6 +15,7 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Response.AuditLines.class, name = "audit"),
   @JsonSubTypes.Type(value = Response.ApprovalList.class, name = "approvals"),
   @JsonSubTypes.Type(value = Response.GrantList.class, name = "grants"),
+  @JsonSubTypes.Type(value = Response.ShadowList.class, name = "shadow"),
   @JsonSubTypes.Type(value = Response.Done.class, name = "done"),
   @JsonSubTypes.Type(value = Response.Stopped.class, name = "stopped"),
   @JsonSubTypes.Type(value = Response.Error.class, name = "error")
@@ -162,6 +163,52 @@ public sealed interface Response {
         String actionId,
         String outcome,
         String message) {}
+  }
+
+  /**
+   * The rules on trial.
+   *
+   * @param enabled whether shadow mode is turned on in {@code praksis.toml}
+   * @param rules the rules on trial
+   */
+  record ShadowList(boolean enabled, List<Item> rules) implements Response {
+    /**
+     * A rule on trial.
+     *
+     * @param rule the rule id
+     * @param hash the version on trial
+     * @param since when the trial started, ISO-8601
+     * @param replaces whether an older version runs live meanwhile
+     * @param events the events it was seen with
+     * @param calling how many of them it would have made calls for
+     * @param denied how many would have had a call that no grant covers
+     * @param failing how many it would have failed on
+     * @param ready whether the trial period and the number of events are met
+     * @param status what is still missing, or that it is ready
+     * @param samples the latest events
+     */
+    public record Item(
+        String rule,
+        String hash,
+        String since,
+        boolean replaces,
+        int events,
+        int calling,
+        int denied,
+        int failing,
+        boolean ready,
+        String status,
+        List<Sample> samples) {}
+
+    /**
+     * One observed event.
+     *
+     * @param event the event id
+     * @param calls what the rule would have called, one line each
+     * @param note a failure or {@code stop}, or empty
+     * @param live the rules that really handled the event, with their outcome
+     */
+    public record Sample(String event, List<String> calls, String note, List<String> live) {}
   }
 
   /** The daemon is shutting down. */

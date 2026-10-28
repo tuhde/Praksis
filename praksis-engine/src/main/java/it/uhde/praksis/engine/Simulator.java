@@ -5,7 +5,6 @@ import it.uhde.praksis.capability.Capability;
 import it.uhde.praksis.capability.CapabilityContext;
 import it.uhde.praksis.capability.CapabilityDescriptor;
 import it.uhde.praksis.capability.Event;
-import it.uhde.praksis.capability.FieldDescriptor;
 import it.uhde.praksis.expression.ExpressionCompiler;
 import it.uhde.praksis.ruleset.ModuleCatalog;
 import it.uhde.praksis.ruleset.Ruleset;
@@ -17,7 +16,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -67,7 +65,8 @@ final class Simulator implements AutoCloseable {
     try {
       Map<String, Capability> recorders = new HashMap<>();
       for (CapabilityDescriptor c : catalog.capabilities()) {
-        recorders.put(c.name(), new Recorder(c.name(), mocks.getOrDefault(c.name(), defaults(c))));
+        recorders.put(
+            c.name(), new Recorder(c.name(), mocks.getOrDefault(c.name(), Defaults.results(c))));
       }
       opened = Store.open(temp.resolve("sim.db"));
       engine =
@@ -128,25 +127,6 @@ final class Simulator implements AutoCloseable {
         // nothing is kept
       }
     }
-  }
-
-  private static Map<String, Object> defaults(CapabilityDescriptor c) {
-    Map<String, Object> out = new HashMap<>();
-    for (FieldDescriptor f : c.results()) {
-      out.put(
-          f.name(),
-          switch (f.type()) {
-            case STRING -> "";
-            case INT -> 0L;
-            case DOUBLE -> 0.0;
-            case BOOL -> false;
-            case TIMESTAMP -> Instant.EPOCH;
-            case BYTES -> new byte[0];
-            case LIST -> List.of();
-            case MAP -> Map.of();
-          });
-    }
-    return out;
   }
 
   private static void delete(Path dir) {

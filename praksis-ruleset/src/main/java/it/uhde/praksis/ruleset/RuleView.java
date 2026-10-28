@@ -70,6 +70,38 @@ public final class RuleView {
     return m;
   }
 
+  /** The rule as JSON, in the shape of {@link #toMap}; {@link #fromJson} reads it back. */
+  public static String toJson(Rule rule) {
+    try {
+      return CANONICAL.writeValueAsString(toMap(rule));
+    } catch (JsonProcessingException e) {
+      throw new IllegalStateException(e);
+    }
+  }
+
+  /**
+   * Reads a rule written by {@link #toJson}.
+   *
+   * @throws RulesetException if the text is not a rule
+   */
+  public static Rule fromJson(String json) throws RulesetException {
+    Map<String, Object> map;
+    try {
+      map = CANONICAL.readValue(json, new com.fasterxml.jackson.core.type.TypeReference<>() {});
+    } catch (JsonProcessingException e) {
+      throw new RulesetException(
+          List.of(new Problem("rule", "cannot read: " + e.getOriginalMessage())));
+    }
+    List<Problem> problems = new ArrayList<>();
+    String id = map.get("id") instanceof String s ? s : "";
+    java.util.Optional<Rule> rule = RulesetLoader.rule(new Table(map, "rule " + id, problems), id);
+    if (rule.isEmpty() || !problems.isEmpty()) {
+      throw new RulesetException(
+          problems.isEmpty() ? List.of(new Problem("rule " + id, "cannot be read")) : problems);
+    }
+    return rule.get();
+  }
+
   /** {@code sha256:<hex>} of the rule's content, independent of file formatting and key order. */
   public static String hash(Rule rule) {
     try {

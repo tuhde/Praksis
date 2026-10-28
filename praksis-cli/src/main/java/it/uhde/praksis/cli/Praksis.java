@@ -39,7 +39,8 @@ import picocli.CommandLine.Spec;
       Praksis.LogCommand.class,
       Praksis.AuditCommand.class,
       Praksis.Approvals.class,
-      Praksis.GrantsCommand.class
+      Praksis.GrantsCommand.class,
+      Praksis.ShadowCommand.class
     })
 public final class Praksis {
   static final int EXIT_FAILED = 1;
@@ -413,6 +414,94 @@ public final class Praksis {
       @Override
       public Integer call() {
         return print(send(new Request.Missed(rule, "discard")));
+      }
+    }
+  }
+
+  @Command(
+      name = "shadow",
+      description =
+          "Shows the rules on trial: new and changed rules run in shadow mode first, which means"
+              + " they are observed and do nothing. For each one: how many events it was seen with,"
+              + " what it would have called and which rules really handled the same events.",
+      subcommands = {Praksis.ShadowCommand.Promote.class, Praksis.ShadowCommand.Reset.class})
+  static final class ShadowCommand extends Base {
+    @Override
+    public Integer call() {
+      Response response = send(new Request.Shadow());
+      if (!(response instanceof Response.ShadowList l)) {
+        return exitCodeFor(response);
+      }
+      if (!l.enabled()) {
+        out().println("Shadow mode is off. Turn it on with [shadow] enabled = true.");
+      }
+      if (l.rules().isEmpty()) {
+        out().println("No rule is on trial.");
+      }
+      for (Response.ShadowList.Item r : l.rules()) {
+        out()
+            .printf(
+                "%s  %s%n    since %s, %s%n    seen with %d event(s): would call for %d, would be"
+                    + " refused for %d, would fail on %d%n    %s%n",
+                r.rule(),
+                r.replaces()
+                    ? "(a changed rule: the older version runs meanwhile)"
+                    : "(a new rule)",
+                r.since(),
+                r.status(),
+                r.events(),
+                r.calling(),
+                r.denied(),
+                r.failing(),
+                r.hash());
+        for (Response.ShadowList.Sample s : r.samples()) {
+          out().printf("    event %s%n", s.event());
+          s.calls().forEach(c -> out().printf("      would call   %s%n", c));
+          if (!s.note().isEmpty()) {
+            out().printf("      note         %s%n", s.note());
+          }
+          out()
+              .printf(
+                  "      really done  %s%n",
+                  s.live().isEmpty() ? "(nothing)" : String.join(", ", s.live()));
+        }
+      }
+      return 0;
+    }
+
+    @Command(
+        name = "promote",
+        description = "Ends the trial of a rule: its new version runs live from now on.")
+    static final class Promote extends Base {
+      @CommandLine.Parameters(index = "0", paramLabel = "<rule>", description = "The rule id.")
+      String rule;
+
+      @Override
+      public Integer call() {
+        Response response = send(new Request.ShadowPromote(rule));
+        if (response instanceof Response.Done d) {
+          out().println(d.message());
+          return 0;
+        }
+        return exitCodeFor(response);
+      }
+    }
+
+    @Command(
+        name = "reset",
+        description = "Forgets what a rule on trial was seen to do and starts the trial again.")
+    static final class Reset extends Base {
+      @CommandLine.Parameters(index = "0", paramLabel = "<rule>", description = "The rule id.")
+      String rule;
+
+      @Override
+      public Integer call() {
+        Response response = send(new Request.ShadowReset(rule));
+        if (response instanceof Response.Done d) {
+          out().println(d.message());
+          return 0;
+        }
+        return exitCodeFor(response);
       }
     }
   }

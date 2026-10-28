@@ -26,7 +26,7 @@ import java.util.Optional;
  * <p>All methods are safe to call from several threads.
  */
 public final class Store implements AutoCloseable {
-  private static final int SCHEMA_VERSION = 3;
+  private static final int SCHEMA_VERSION = 4;
 
   private final Connection connection;
 
@@ -134,6 +134,252 @@ public final class Store implements AutoCloseable {
             )""");
         s.execute("PRAGMA user_version = 3");
       }
+    }
+    if (version < 4) {
+      try (Statement s = connection.createStatement()) {
+        s.execute("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+        s.execute(
+            """
+            CREATE TABLE promoted (
+              rule_id TEXT NOT NULL,
+              hash TEXT NOT NULL,
+              time TEXT NOT NULL,
+              json TEXT NOT NULL,
+              PRIMARY KEY (rule_id, hash)
+            )""");
+        s.execute(
+            """
+            CREATE TABLE shadow_rule (
+              rule_id TEXT NOT NULL,
+              hash TEXT NOT NULL,
+              since TEXT NOT NULL,
+              PRIMARY KEY (rule_id, hash)
+            )""");
+        s.execute(
+            """
+            CREATE TABLE shadow_run (
+              seq INTEGER PRIMARY KEY AUTOINCREMENT,
+              time TEXT NOT NULL,
+              rule_id TEXT NOT NULL,
+              hash TEXT NOT NULL,
+              event_id TEXT NOT NULL,
+              calls TEXT NOT NULL,
+              note TEXT NOT NULL
+            )""");
+        s.execute("CREATE INDEX shadow_run_rule ON shadow_run (rule_id, hash, seq)");
+        s.execute("PRAGMA user_version = 4");
+      }
+    }
+  }
+
+  /** A small value kept by the store, e.g. that the baseline of promoted rules was taken. */
+  public synchronized Optional<String> meta(String key) throws StoreException {
+    try (PreparedStatement s =
+        connection.prepareStatement("SELECT value FROM meta WHERE key = ?")) {
+      s.setString(1, key);
+      try (ResultSet r = s.executeQuery()) {
+        return r.next() ? Optional.of(r.getString(1)) : Optional.empty();
+      }
+    } catch (SQLException e) {
+      throw new StoreException("cannot read " + key, e);
+    }
+  }
+
+  public synchronized void setMeta(String key, String value) throws StoreException {
+    try (PreparedStatement s =
+        connection.prepareStatement("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)")) {
+      s.setString(1, key);
+      s.setString(2, value);
+      s.executeUpdate();
+    } catch (SQLException e) {
+      throw new StoreException("cannot write " + key, e);
+    }
+  }
+
+  /** Marks a version of a rule as live. Doing it again changes nothing. */
+  public synchronized void promote(Promoted rule) throws StoreException {
+    try (PreparedStatement s =
+        connection.prepareStatement(
+            "INSERT OR IGNORE INTO promoted (rule_id, hash, time, json) VALUES (?, ?, ?, ?)")) {
+      s.setString(1, rule.ruleId());
+      s.setString(2, rule.hash());
+      s.setString(3, rule.time().toString());
+      s.setString(4, rule.json());
+      s.executeUpdate();
+    } catch (SQLException e) {
+      throw new StoreException("cannot promote " + rule.ruleId(), e);
+    }
+  }
+
+  /** Every version of every rule that was promoted, oldest first. */
+  public synchronized List<Promoted> promoted() throws StoreException {
+    List<Promoted> out = new ArrayList<>();
+    try (Statement s = connection.createStatement();
+        ResultSet r =
+            s.executeQuery("SELECT rule_id, hash, time, json FROM promoted ORDER BY time, rowid")) {
+      while (r.next()) {
+        out.add(
+            new Promoted(
+                r.getString(1), r.getString(2), Instant.parse(r.getString(3)), r.getString(4)));
+      }
+      return out;
+    } catch (SQLException e) {
+      throw new StoreException("cannot read the promoted rules", e);
+    }
+  }
+
+  /** Starts the trial of a version of a rule, unless it has started before. */
+  public synchronized void startShadow(ShadowRule rule) throws StoreException {
+    try (PreparedStatement s =
+        connection.prepareStatement(
+            "INSERT OR IGNORE INTO shadow_rule (rule_id, hash, since) VALUES (?, ?, ?)")) {
+      s.setString(1, rule.ruleId());
+      s.setString(2, rule.hash());
+      s.setString(3, rule.since().toString());
+      s.executeUpdate();
+    } catch (SQLException e) {
+      throw new StoreException("cannot start the trial of " + rule.ruleId(), e);
+    }
+  }
+
+  /** The versions on trial. */
+  public synchronized List<ShadowRule> shadowRules() throws StoreException {
+    List<ShadowRule> out = new ArrayList<>();
+    try (Statement s = connection.createStatement();
+        ResultSet r =
+            s.executeQuery("SELECT rule_id, hash, since FROM shadow_rule ORDER BY rule_id")) {
+      while (r.next()) {
+        out.add(new ShadowRule(r.getString(1), r.getString(2), Instant.parse(r.getString(3))));
+      }
+      return out;
+    } catch (SQLException e) {
+      throw new StoreException("cannot read the trials", e);
+    }
+  }
+
+  /** Ends the trial of a version of a rule and forgets what was observed. */
+  public synchronized void endShadow(String ruleId, String hash) throws StoreException {
+    try {
+      for (String table : new String[] {"shadow_rule", "shadow_run"}) {
+        try (PreparedStatement s =
+            connection.prepareStatement(
+                "DELETE FROM " + table + " WHERE rule_id = ? AND hash = ?")) {
+          s.setString(1, ruleId);
+          s.setString(2, hash);
+          s.executeUpdate();
+        }
+      }
+    } catch (SQLException e) {
+      throw new StoreException("cannot end the trial of " + ruleId, e);
+    }
+  }
+
+  /** Forgets what was observed of a version and starts its trial again at {@code since}. */
+  public synchronized void restartShadow(String ruleId, String hash, Instant since)
+      throws StoreException {
+    endShadow(ruleId, hash);
+    startShadow(new ShadowRule(ruleId, hash, since));
+  }
+
+  /** Records what a rule on trial would have done; keeps the newest {@code keep} per version. */
+  public synchronized void addShadowRun(ShadowRun run, int keep) throws StoreException {
+    try {
+      try (PreparedStatement s =
+          connection.prepareStatement(
+              "INSERT INTO shadow_run (time, rule_id, hash, event_id, calls, note)"
+                  + " VALUES (?, ?, ?, ?, ?, ?)")) {
+        s.setString(1, run.time().toString());
+        s.setString(2, run.ruleId());
+        s.setString(3, run.hash());
+        s.setString(4, run.eventId());
+        s.setString(5, run.calls());
+        s.setString(6, run.note());
+        s.executeUpdate();
+      }
+      try (PreparedStatement s =
+          connection.prepareStatement(
+              "DELETE FROM shadow_run WHERE rule_id = ? AND hash = ? AND seq <= (SELECT seq FROM"
+                  + " shadow_run WHERE rule_id = ? AND hash = ? ORDER BY seq DESC LIMIT 1 OFFSET"
+                  + " ?)")) {
+        s.setString(1, run.ruleId());
+        s.setString(2, run.hash());
+        s.setString(3, run.ruleId());
+        s.setString(4, run.hash());
+        s.setInt(5, keep);
+        s.executeUpdate();
+      }
+    } catch (SQLException e) {
+      throw new StoreException("cannot record the trial of " + run.ruleId(), e);
+    }
+  }
+
+  /** What a version has been seen to do, newest first. */
+  public synchronized List<ShadowRun> shadowRuns(String ruleId, String hash, int limit)
+      throws StoreException {
+    List<ShadowRun> out = new ArrayList<>();
+    try (PreparedStatement s =
+        connection.prepareStatement(
+            "SELECT time, rule_id, hash, event_id, calls, note FROM shadow_run WHERE rule_id = ?"
+                + " AND hash = ? ORDER BY seq DESC LIMIT ?")) {
+      s.setString(1, ruleId);
+      s.setString(2, hash);
+      s.setInt(3, limit);
+      try (ResultSet r = s.executeQuery()) {
+        while (r.next()) {
+          out.add(
+              new ShadowRun(
+                  Instant.parse(r.getString(1)),
+                  r.getString(2),
+                  r.getString(3),
+                  r.getString(4),
+                  r.getString(5),
+                  r.getString(6)));
+        }
+      }
+      return out;
+    } catch (SQLException e) {
+      throw new StoreException("cannot read the trial of " + ruleId, e);
+    }
+  }
+
+  /** How many events a version has been seen with. */
+  public synchronized int shadowCount(String ruleId, String hash) throws StoreException {
+    try (PreparedStatement s =
+        connection.prepareStatement(
+            "SELECT COUNT(*) FROM shadow_run WHERE rule_id = ? AND hash = ?")) {
+      s.setString(1, ruleId);
+      s.setString(2, hash);
+      try (ResultSet r = s.executeQuery()) {
+        return r.next() ? r.getInt(1) : 0;
+      }
+    } catch (SQLException e) {
+      throw new StoreException("cannot count the trial of " + ruleId, e);
+    }
+  }
+
+  /** The log lines of one event, oldest first. */
+  public synchronized List<LogEntry> logOf(String eventId) throws StoreException {
+    List<LogEntry> out = new ArrayList<>();
+    try (PreparedStatement s =
+        connection.prepareStatement(
+            "SELECT time, event_id, rule_id, action_id, outcome, message FROM run_log WHERE"
+                + " event_id = ? ORDER BY seq")) {
+      s.setString(1, eventId);
+      try (ResultSet r = s.executeQuery()) {
+        while (r.next()) {
+          out.add(
+              new LogEntry(
+                  Instant.parse(r.getString(1)),
+                  r.getString(2),
+                  Optional.ofNullable(r.getString(3)),
+                  Optional.ofNullable(r.getString(4)),
+                  LogEntry.Outcome.valueOf(r.getString(5)),
+                  r.getString(6)));
+        }
+      }
+      return out;
+    } catch (SQLException e) {
+      throw new StoreException("cannot read the log of " + eventId, e);
     }
   }
 

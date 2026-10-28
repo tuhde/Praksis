@@ -14,12 +14,15 @@ import it.uhde.praksis.ruleset.CompiledRule.CompiledArg;
 import it.uhde.praksis.ruleset.ModuleCatalog;
 import it.uhde.praksis.ruleset.ParamDecl;
 import it.uhde.praksis.ruleset.Problem;
+import it.uhde.praksis.ruleset.Rule;
+import it.uhde.praksis.ruleset.RuleView;
 import it.uhde.praksis.ruleset.Ruleset;
 import it.uhde.praksis.ruleset.RulesetException;
 import it.uhde.praksis.ruleset.RulesetValidator;
 import it.uhde.praksis.ruleset.Trigger;
 import it.uhde.praksis.store.LogEntry;
 import it.uhde.praksis.store.LogEntry.Outcome;
+import it.uhde.praksis.store.ShadowRun;
 import it.uhde.praksis.store.Store;
 import it.uhde.praksis.store.StoreException;
 import java.time.Clock;
@@ -77,7 +80,13 @@ public final class Engine implements EventSink, AutoCloseable {
     }
   }
 
-  private final List<CompiledRule> rules;
+  /** A rule in firing order; a rule on trial is observed and does nothing. */
+  private record Entry(CompiledRule rule, boolean shadow, String hash) {}
+
+  /** How many observations of a rule on trial are kept. */
+  public static final int SHADOW_KEEP = 1000;
+
+  private volatile List<Entry> timeline;
   private final Map<String, Object> params;
   private final ModuleCatalog catalog;
   private final Map<String, Capability> capabilities;
@@ -108,6 +117,26 @@ public final class Engine implements EventSink, AutoCloseable {
       Store store,
       Options options)
       throws RulesetException {
+    this(ruleset, List.of(), catalog, compiler, capabilities, store, options);
+  }
+
+  /**
+   * As above, with rules on trial. They are observed in their place in the firing order, for the
+   * events that reach them: what they would call is recorded, nothing is called, and their {@code
+   * stop} does not end the event for the rules after them. A rule on trial may have the id of a
+   * rule in {@code ruleset}, which is then the older version that stays live meanwhile.
+   *
+   * @param shadow the rules on trial
+   */
+  public Engine(
+      Ruleset ruleset,
+      List<Rule> shadow,
+      ModuleCatalog catalog,
+      ExpressionCompiler compiler,
+      Map<String, Capability> capabilities,
+      Store store,
+      Options options)
+      throws RulesetException {
     RulesetValidator.Result result = new RulesetValidator(compiler, catalog).compile(ruleset);
     List<Problem> problems = new ArrayList<>(result.problems());
     Map<String, Object> values = new LinkedHashMap<>();
@@ -132,7 +161,21 @@ public final class Engine implements EventSink, AutoCloseable {
     if (!problems.isEmpty()) {
       throw new RulesetException(problems);
     }
-    this.rules = result.rules();
+    RulesetValidator.Result trial =
+        new RulesetValidator(compiler, catalog)
+            .compile(
+                new Ruleset(ruleset.formatVersion(), ruleset.name(), ruleset.params(), shadow));
+    problems.addAll(trial.problems());
+    if (!problems.isEmpty()) {
+      throw new RulesetException(problems);
+    }
+    List<Entry> entries = new ArrayList<>();
+    result.rules().forEach(r -> entries.add(new Entry(r, false, RuleView.hash(r.rule()))));
+    trial.rules().forEach(r -> entries.add(new Entry(r, true, RuleView.hash(r.rule()))));
+    entries.sort(
+        java.util.Comparator.comparing((Entry x) -> x.rule().rule().id())
+            .thenComparing(x -> !x.shadow()));
+    this.timeline = List.copyOf(entries);
     this.params = Map.copyOf(values);
     this.catalog = catalog;
     this.capabilities = Map.copyOf(capabilities);
@@ -249,9 +292,14 @@ public final class Engine implements EventSink, AutoCloseable {
   }
 
   private void handle(Event event) throws StoreException {
-    for (CompiledRule rule : rules) {
+    for (Entry entry : timeline) {
+      CompiledRule rule = entry.rule();
       Trigger.OnEvent trigger = (Trigger.OnEvent) rule.rule().trigger();
       if (!trigger.type().equals(event.type())) {
+        continue;
+      }
+      if (entry.shadow()) {
+        observe(entry, event);
         continue;
       }
       if (fire(rule, event, false) == Flow.END) {
@@ -318,6 +366,114 @@ public final class Engine implements EventSink, AutoCloseable {
     }
   }
 
+  /** The ids of the rules that are on trial. */
+  public java.util.Set<String> shadowRules() {
+    java.util.Set<String> out = new java.util.TreeSet<>();
+    timeline.stream().filter(Entry::shadow).forEach(r -> out.add(r.rule().rule().id()));
+    return out;
+  }
+
+  /**
+   * Ends the trial of a rule: the version on trial runs live from now on, and the older version, if
+   * there was one, is gone.
+   *
+   * @return false, changing nothing, if the rule is not on trial
+   */
+  public synchronized boolean promote(String ruleId) {
+    if (timeline.stream().noneMatch(e -> e.shadow() && e.rule().rule().id().equals(ruleId))) {
+      return false;
+    }
+    List<Entry> next = new ArrayList<>();
+    for (Entry e : timeline) {
+      if (!e.rule().rule().id().equals(ruleId)) {
+        next.add(e);
+      } else if (e.shadow()) {
+        next.add(new Entry(e.rule(), false, e.hash()));
+      }
+    }
+    timeline = List.copyOf(next);
+    return true;
+  }
+
+  /**
+   * Watches a rule on trial for an event that reaches it: if its filter matches, records the calls
+   * it would make, with the arguments as evaluated and whether the access policy would allow them.
+   * Nothing is called and nothing else is affected.
+   */
+  private void observe(Entry entry, Event event) throws StoreException {
+    CompiledRule rule = entry.rule();
+    String ruleId = rule.rule().id();
+    List<Map<String, Object>> calls = new ArrayList<>();
+    String note = "";
+    try {
+      if (rule.filter().isPresent()
+          && !Boolean.TRUE.equals(rule.filter().get().evaluate(bindings(event, Map.of())))) {
+        return;
+      }
+      Map<String, Map<String, Object>> results = new HashMap<>();
+      for (CompiledAction action : rule.actions()) {
+        if (action instanceof CompiledAction.Stop) {
+          note = "stop";
+          break;
+        }
+        CompiledAction.Call call = (CompiledAction.Call) action;
+        Map<String, Object> args = new LinkedHashMap<>();
+        for (var arg : call.args().entrySet()) {
+          args.put(
+              arg.getKey(),
+              switch (arg.getValue()) {
+                case CompiledArg.Value v -> v.value();
+                case CompiledArg.Computed c -> c.expression().evaluate(bindings(event, results));
+              });
+        }
+        CapabilityDescriptor descriptor = catalog.capability(call.capability()).orElseThrow();
+        AccessPolicy.Decision decision = options.accessPolicy().check(ruleId, descriptor, args);
+        Map<String, Object> seen = new LinkedHashMap<>();
+        seen.put("capability", call.capability());
+        seen.put("args", printable(args));
+        seen.put("allowed", decision.allowed());
+        seen.put("reason", decision.reason());
+        calls.add(seen);
+        results.put(call.id(), Defaults.results(descriptor));
+      }
+    } catch (RuntimeException e) {
+      note = "would fail: " + message(e);
+    } catch (Exception e) {
+      note = "would fail: " + message(e);
+    }
+    String json;
+    try {
+      json = JSON.writeValueAsString(calls);
+    } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+      json = "[]";
+      note = "cannot record the calls: " + e.getOriginalMessage();
+    }
+    store.addShadowRun(
+        new ShadowRun(options.clock().instant(), ruleId, entry.hash(), event.id(), json, note),
+        SHADOW_KEEP);
+  }
+
+  private static final com.fasterxml.jackson.databind.ObjectMapper JSON =
+      new com.fasterxml.jackson.databind.ObjectMapper();
+
+  /** Values as JSON can hold them: what has no JSON form is written as text. */
+  private static Object printable(Object value) {
+    return switch (value) {
+      case null -> null;
+      case String s -> s;
+      case Number n -> n;
+      case Boolean b -> b;
+      case Map<?, ?> m -> {
+        Map<String, Object> out = new LinkedHashMap<>();
+        m.forEach((k, v) -> out.put(String.valueOf(k), printable(v)));
+        yield out;
+      }
+      case List<?> l -> l.stream().map(Engine::printable).toList();
+      case byte[] b -> "(" + b.length + " bytes)";
+      default -> String.valueOf(value);
+    };
+  }
+
   /** Disables a rule, e.g. because a request for its permission has not been answered. */
   public void disable(String ruleId, String reason) {
     disabled.put(ruleId, reason);
@@ -330,7 +486,7 @@ public final class Engine implements EventSink, AutoCloseable {
 
   /** Whether the ruleset has a rule with this id. */
   public boolean hasRule(String ruleId) {
-    return rules.stream().anyMatch(r -> r.rule().id().equals(ruleId));
+    return timeline.stream().anyMatch(r -> !r.shadow() && r.rule().rule().id().equals(ruleId));
   }
 
   /**
@@ -343,8 +499,9 @@ public final class Engine implements EventSink, AutoCloseable {
    */
   public void replay(String ruleId, List<Event> events, boolean allowOnce) {
     CompiledRule rule =
-        rules.stream()
-            .filter(r -> r.rule().id().equals(ruleId))
+        timeline.stream()
+            .filter(r -> !r.shadow() && r.rule().rule().id().equals(ruleId))
+            .map(Entry::rule)
             .findFirst()
             .orElseThrow(() -> new IllegalArgumentException("no rule '" + ruleId + "'"));
     synchronized (lock) {

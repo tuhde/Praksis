@@ -62,6 +62,7 @@ public final class Daemon implements AutoCloseable {
   private Store store;
   private Engine engine;
   private Approvals approvals;
+  private Shadows shadows;
   private ApiServer api;
 
   private Daemon(DaemonConfig config) {
@@ -115,9 +116,12 @@ public final class Daemon implements AutoCloseable {
       modules.useCredentials(new CredentialResolver(access::policy, store, clock)::forComponent);
       approvals = new Approvals(config, store, access, modules.catalog(), clock);
       Map<String, Capability> capabilities = modules.capabilities();
+      shadows = new Shadows(config, store, clock, effective);
+      Shadows.Plan plan = shadows.plan();
       engine =
           new Engine(
-              ruleset,
+              plan.live(),
+              plan.trial(),
               modules.catalog(),
               compiler,
               capabilities,
@@ -125,6 +129,7 @@ public final class Daemon implements AutoCloseable {
               new Engine.Options(
                   access, new StoreAuditLog(store), clock, config.dryRun(), approvals));
       approvals.bind(engine);
+      shadows.bind(engine);
       approvals.sync();
       engine.recover();
       api = new ApiServer(config.socket(), this::handle, this::requestStop);
@@ -225,9 +230,12 @@ public final class Daemon implements AutoCloseable {
         case Request.Grants g -> approvals.grants();
         case Request.Revoke r -> new Response.Done(approvals.revoke(r.id()));
         case Request.Reload r -> new Response.Done(approvals.reload());
+        case Request.Shadow s -> shadows.list();
+        case Request.ShadowPromote p -> new Response.Done(shadows.promote(p.rule()));
+        case Request.ShadowReset r -> new Response.Done(shadows.reset(r.rule()));
         case Request.Stop s -> new Response.Stopped();
       };
-    } catch (Injection.Invalid | Approvals.Failure e) {
+    } catch (Injection.Invalid | Approvals.Failure | Shadows.Failure e) {
       return new Response.Error(e.getMessage());
     } catch (StoreException e) {
       return new Response.Error("store: " + e.getMessage());
