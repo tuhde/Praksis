@@ -1,0 +1,51 @@
+// SPDX-License-Identifier: Apache-2.0
+package it.uhde.praksis.integration;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
+
+/** A git repository made for a test, used as the upstream of a ruleset layer. */
+final class Repo {
+  final Path dir;
+
+  Repo(Path dir) throws Exception {
+    this.dir = Files.createDirectories(dir);
+    git("init", "--quiet", "--initial-branch=main");
+  }
+
+  /** The address to put in {@code praksis.toml}. */
+  String url() {
+    return dir.toUri().toString();
+  }
+
+  /** Writes the files (name, content, name, content, ...) and commits; returns the commit id. */
+  String commit(String message, String... filesAndContents) throws Exception {
+    for (int i = 0; i < filesAndContents.length; i += 2) {
+      Path file = dir.resolve(filesAndContents[i]);
+      Files.createDirectories(file.getParent());
+      Files.writeString(file, filesAndContents[i + 1]);
+    }
+    git("add", "--all");
+    git("commit", "--quiet", "-m", message);
+    return git("rev-parse", "HEAD");
+  }
+
+  private String git(String... args) throws Exception {
+    List<String> command = new ArrayList<>(List.of("git", "-c", "commit.gpgsign=false"));
+    command.addAll(List.of(args));
+    ProcessBuilder pb =
+        new ProcessBuilder(command).directory(dir.toFile()).redirectErrorStream(true);
+    pb.environment().put("GIT_AUTHOR_NAME", "Test");
+    pb.environment().put("GIT_AUTHOR_EMAIL", "test@example.org");
+    pb.environment().put("GIT_COMMITTER_NAME", "Test");
+    pb.environment().put("GIT_COMMITTER_EMAIL", "test@example.org");
+    Process p = pb.start();
+    String out = new String(p.getInputStream().readAllBytes());
+    assertThat(p.waitFor()).as(String.join(" ", command) + "\n" + out).isZero();
+    return out.strip();
+  }
+}

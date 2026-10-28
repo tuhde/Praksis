@@ -139,6 +139,19 @@ final class Harness implements AutoCloseable {
     Files.move(tmp, mail.resolve("new").resolve(uniqueName));
   }
 
+  /** Delivers a mail with exactly these header lines. */
+  void deliverWithHeaders(String uniqueName, String... headers) throws IOException {
+    Path tmp = mail.resolve("tmp").resolve(uniqueName);
+    Files.writeString(tmp, String.join("\n", headers) + "\n\nbody\n");
+    Files.move(tmp, mail.resolve("new").resolve(uniqueName));
+  }
+
+  /** Asks the daemon to stop and waits until the process is gone. */
+  void stop(Process p) throws Exception {
+    assertThat(ask(new Request.Stop())).isEqualTo(new Response.Stopped());
+    assertThat(p.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+  }
+
   List<String> names(String dir) throws IOException {
     Path d = mail.resolve(dir);
     if (!Files.isDirectory(d)) {
