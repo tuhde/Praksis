@@ -34,6 +34,7 @@
     <module>praksis-ruleset</module>
     <module>praksis-store</module>
     <module>praksis-engine</module>
+    <module>modules/praksis-module-maildir</module>
   </modules>
 
   <properties>

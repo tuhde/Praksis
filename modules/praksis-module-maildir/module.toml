@@ -1,0 +1,29 @@
+format_version = 1
+name = "maildir"
+version = "0.1.0"
+module = "it.uhde.praksis.module.maildir"
+jdk_modules = []
+sources = ["maildir.inbox"]
+
+[[capability]]
+name = "mail.move"
+effect = "local-write"
+dry_run = true
+params = [
+  { name = "path", type = "string", required = true, scopable = false },
+  { name = "folder", type = "string", required = true, scopable = true },
+]
+results = [{ name = "path", type = "string", required = true }]
+
+[[event]]
+type = "mail.received"
+fields = [
+  { name = "path", type = "string", required = true },
+  { name = "filename", type = "string", required = true },
+  { name = "folder", type = "string", required = true },
+  { name = "size", type = "int", required = true },
+  { name = "from", type = "string" },
+  { name = "to", type = "string" },
+  { name = "subject", type = "string" },
+  { name = "message_id", type = "string" },
+]
