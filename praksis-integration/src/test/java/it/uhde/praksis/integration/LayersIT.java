@@ -14,6 +14,11 @@ import org.junit.jupiter.api.Test;
  * survives an upstream update. Uses real git repositories, the real CLI and the real daemon.
  */
 class LayersIT {
+  private static final java.util.Map<String, java.util.List<String>> GRANTS =
+      java.util.Map.of(
+          "mail", java.util.List.of("Spam", "Lists", "Bulk"),
+          "mine", java.util.List.of("VIP", "Lists"));
+
   private static final String HEADER = "format_version = 1\nname = \"%s\"\n";
 
   private static String rule(String id, String description, String filter, String folder) {
@@ -108,6 +113,7 @@ class LayersIT {
             poll_interval_ms = 20
             """
                 .formatted(mail.url(), mine.url(), h.mail));
+        h.grantMoves(GRANTS);
 
         // nothing starts before the layers are pinned
         Harness.CliResult unpinned = h.cli("effective");
@@ -210,6 +216,7 @@ class LayersIT {
             poll_interval_ms = 20
             """
                 .formatted(mail.url(), mine.url(), h.mail));
+        h.grantMoves(GRANTS);
         assertThat(h.cli("layers", "update").exit()).isZero();
         String pinned = lockfile(h);
 

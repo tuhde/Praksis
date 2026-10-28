@@ -166,6 +166,8 @@ class LayerTest {
             Action.Call.class,
             c -> assertThat(c.args().get("folder")).isEqualTo(new Arg.Literal("Junk")));
     assertThat(e.origins().get(1).history()).containsExactly("mail: add", "mine: replace");
+    assertThat(e.origins().get(1).layer()).isEqualTo("mail");
+    assertThat(e.origins().get(1).owner()).isEqualTo("mine");
 
     // the upstream rule changes: the replacement is refused until someone has looked
     write(base, "rules/mail.spam.toml", SPAM.replace("\"Spam\"", "\"Spam2\""));
@@ -219,6 +221,7 @@ class LayerTest {
     assertThat(((Action.Call) archive.actions().get(0)).args().get("folder"))
         .isEqualTo(new Arg.Literal("Lists"));
     assertThat(e.origins().get(0).history()).containsExactly("mail: add", "mine: patch");
+    assertThat(e.origins().get(0).owner()).isEqualTo("mine");
     assertThat(e.origins().get(0).hash())
         .isEqualTo(RuleView.hash(archive))
         .isNotEqualTo(hashOf("mail.archive"));

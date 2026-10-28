@@ -97,6 +97,18 @@ public record DaemonConfig(
     return home.resolve("rulesets.lock");
   }
 
+  /** The local grants. Always in the home, never configurable and never part of a ruleset. */
+  public Path policy() {
+    return home.resolve("policy.toml");
+  }
+
+  /** The names of the ruleset layers: the configured ones, else the single layer "ruleset". */
+  public Set<String> layerNames() {
+    return layers.isEmpty()
+        ? Set.of("ruleset")
+        : layers.stream().map(LayerConfig::name).collect(java.util.stream.Collectors.toSet());
+  }
+
   /** Where the local copies of the git repositories are kept. */
   public Path gitCache() {
     return home.resolve("cache").resolve("git");

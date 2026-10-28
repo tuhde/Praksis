@@ -64,6 +64,18 @@ class DaemonTest {
             + mail
             + "'\n"
             + "poll_interval_ms = 20\n");
+    write(
+        "policy.toml",
+        """
+        format_version = 1
+
+        [[grant]]
+        id = "archive"
+        layer = "ruleset"
+        capability = "mail.move"
+        [grant.args]
+        folder = { equals = "Archive" }
+        """);
     write("ruleset/ruleset.toml", "format_version = 1\nname = \"mail\"\n");
     write("ruleset/rules/mail.archive.toml", RULE);
   }
@@ -150,6 +162,44 @@ class DaemonTest {
       daemon.close();
     }
     assertThat(home.resolve("praksis.sock")).doesNotExist();
+  }
+
+  @Test
+  void withoutAGrantTheRuleIsDisabledAndTheMailStays() throws Exception {
+    Files.delete(home.resolve("policy.toml"));
+    Files.writeString(mail.resolve("new/1700000000.M1P2.host"), "Subject: hi\n\nbody\n");
+    start();
+    await(
+        () ->
+            logHas(
+                x ->
+                    "DENIED".equals(x.outcome())
+                        && x.message().contains("layer 'ruleset' has no grant for mail.move")));
+    // mail that arrives after the rule was disabled is left alone and logged as skipped
+    Files.writeString(mail.resolve("new/1700000001.M1P2.host"), "Subject: hi again\n\nbody\n");
+    await(() -> logHas(x -> "SKIPPED".equals(x.outcome())));
+    assertThat(mail.resolve("new/1700000000.M1P2.host")).exists();
+    assertThat(mail.resolve("new/1700000001.M1P2.host")).exists();
+    assertThat(mail.resolve(".Archive")).doesNotExist();
+  }
+
+  @Test
+  void aPolicyThatDoesNotMatchTheModulesAndLayersStopsTheStart() throws Exception {
+    write(
+        "policy.toml",
+        """
+        format_version = 1
+
+        [[grant]]
+        id = "x"
+        layer = "elsewhere"
+        capability = "mail.copy"
+        """);
+    assertThatThrownBy(this::start)
+        .isInstanceOf(DaemonException.class)
+        .hasMessageContaining("the policy is not valid")
+        .hasMessageContaining("no layer named 'elsewhere'")
+        .hasMessageContaining("no capability named 'mail.copy'");
   }
 
   @Test

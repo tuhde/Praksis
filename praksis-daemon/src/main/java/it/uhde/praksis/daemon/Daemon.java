@@ -8,6 +8,7 @@ import it.uhde.praksis.capability.ModuleDescriptor;
 import it.uhde.praksis.engine.AccessPolicy;
 import it.uhde.praksis.engine.AuditLog;
 import it.uhde.praksis.engine.Engine;
+import it.uhde.praksis.engine.GrantPolicy;
 import it.uhde.praksis.engine.LoadedModules;
 import it.uhde.praksis.engine.ModuleLoadException;
 import it.uhde.praksis.engine.ModuleLoader;
@@ -17,6 +18,9 @@ import it.uhde.praksis.git.GitCli;
 import it.uhde.praksis.protocol.Client;
 import it.uhde.praksis.protocol.Request;
 import it.uhde.praksis.protocol.Response;
+import it.uhde.praksis.ruleset.LayerStack;
+import it.uhde.praksis.ruleset.ModuleCatalog;
+import it.uhde.praksis.ruleset.Policy;
 import it.uhde.praksis.ruleset.Problem;
 import it.uhde.praksis.ruleset.Ruleset;
 import it.uhde.praksis.ruleset.RulesetException;
@@ -99,7 +103,10 @@ public final class Daemon implements AutoCloseable {
               config.moduleSettings(),
               config.enabledModules());
       ExpressionCompiler compiler = compiler(config);
-      ruleset = new Layers(config, new GitCli(config.gitCache())).effective().ruleset();
+      LayerStack.Effective effective =
+          new Layers(config, new GitCli(config.gitCache())).effective();
+      ruleset = effective.ruleset();
+      AccessPolicy access = accessPolicy(config, modules.catalog(), effective);
       store = Store.open(config.database());
       Map<String, Capability> capabilities = modules.capabilities();
       engine =
@@ -109,7 +116,7 @@ public final class Daemon implements AutoCloseable {
               compiler,
               capabilities,
               store,
-              new Engine.Options(AccessPolicy.allowAll(), AuditLog.none(), clock, config.dryRun()));
+              new Engine.Options(access, AuditLog.none(), clock, config.dryRun()));
       engine.recover();
       api = new ApiServer(config.socket(), this::handle, this::requestStop);
       api.start();
@@ -123,6 +130,27 @@ public final class Daemon implements AutoCloseable {
       throw new DaemonException(e.getMessage(), e);
     }
     LOG.log(System.Logger.Level.INFO, "praksis daemon started, home " + config.home());
+  }
+
+  /** The grants in {@code policy.toml}, checked against the modules and layers in use. */
+  static AccessPolicy accessPolicy(
+      DaemonConfig config, ModuleCatalog catalog, LayerStack.Effective effective)
+      throws DaemonException {
+    try {
+      Policy policy = Policy.load(config.policy());
+      List<Problem> problems = policy.check(catalog, config.layerNames());
+      if (!problems.isEmpty()) {
+        throw new RulesetException(problems);
+      }
+      Map<String, String> layers = new java.util.HashMap<>();
+      effective.origins().forEach(o -> layers.put(o.ruleId(), o.owner()));
+      return new GrantPolicy(policy, layers);
+    } catch (RulesetException e) {
+      throw new DaemonException(
+          "the policy is not valid:\n  "
+              + String.join("\n  ", e.problems().stream().map(Problem::toString).toList()),
+          e);
+    }
   }
 
   /** The expression implementation: from its directory if configured, else from the class path. */

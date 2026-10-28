@@ -58,6 +58,23 @@ final class Harness implements AutoCloseable {
     Files.writeString(
         home.resolve("ruleset/ruleset.toml"), "format_version = 1\nname = \"mail\"\n");
     Files.writeString(home.resolve("ruleset/rules/mail.archive.toml"), RULE);
+    grantMoves(java.util.Map.of("ruleset", List.of("Archive")));
+  }
+
+  /** Replaces {@code policy.toml}: each layer may move mail to the folders listed for it. */
+  void grantMoves(java.util.Map<String, List<String>> foldersByLayer) throws Exception {
+    StringBuilder policy = new StringBuilder("format_version = 1\n");
+    for (var layer : new java.util.TreeMap<>(foldersByLayer).entrySet()) {
+      policy
+          .append("\n[[grant]]\nid = \"")
+          .append(layer.getKey())
+          .append("-moves\"\nlayer = \"")
+          .append(layer.getKey())
+          .append("\"\ncapability = \"mail.move\"\n[grant.args]\nfolder = { one_of = [")
+          .append(String.join(", ", layer.getValue().stream().map(f -> "\"" + f + "\"").toList()))
+          .append("] }\n");
+    }
+    Files.writeString(home.resolve("policy.toml"), policy.toString());
   }
 
   Path socket() {

@@ -36,10 +36,13 @@ public final class LayerStack {
    *
    * @param ruleId the rule
    * @param layer the layer that added it
+   * @param owner the layer that defined it last (the one that added, replaced or patched it); its
+   *     grants decide what the rule may do
    * @param hash the hash of the effective rule, see {@link RuleView#hash}
    * @param history what each layer did to it, in order, e.g. {@code mine: patch}
    */
-  public record Origin(String ruleId, String layer, String hash, List<String> history) {}
+  public record Origin(
+      String ruleId, String layer, String owner, String hash, List<String> history) {}
 
   /**
    * A rule that a layer turned off.
@@ -59,7 +62,7 @@ public final class LayerStack {
    */
   public record Effective(Ruleset ruleset, List<Origin> origins, List<Disabled> disabled) {}
 
-  private record Entry(Rule rule, String layer, List<String> history) {}
+  private record Entry(Rule rule, String layer, String owner, List<String> history) {}
 
   /**
    * @param layers bottom to top
@@ -104,7 +107,10 @@ public final class LayerStack {
             ordered.stream().map(Entry::rule).toList());
     List<Origin> origins =
         ordered.stream()
-            .map(e -> new Origin(e.rule().id(), e.layer(), RuleView.hash(e.rule()), e.history()))
+            .map(
+                e ->
+                    new Origin(
+                        e.rule().id(), e.layer(), e.owner(), RuleView.hash(e.rule()), e.history()))
             .toList();
     return new Effective(ruleset, origins, List.copyOf(disabled.values()));
   }
@@ -141,7 +147,9 @@ public final class LayerStack {
                     + disabled.get(rule.id()).layer()
                     + "'; it cannot be added again"));
       } else {
-        rules.put(rule.id(), new Entry(rule, layer.name(), List.of(layer.name() + ": add")));
+        rules.put(
+            rule.id(),
+            new Entry(rule, layer.name(), layer.name(), List.of(layer.name() + ": add")));
       }
     }
 
@@ -151,7 +159,7 @@ public final class LayerStack {
       Entry target =
           target(id, "replace", replace.basedOn(), where, below, disabled, touched, problems);
       if (target != null) {
-        rules.put(id, extended(target, replace.rule(), layer.name() + ": replace"));
+        rules.put(id, extended(target, replace.rule(), layer.name(), layer.name() + ": replace"));
       }
     }
 
@@ -171,7 +179,8 @@ public final class LayerStack {
         continue;
       }
       Optional<Rule> patched = patched(target.rule(), patch.changes(), where, problems);
-      patched.ifPresent(r -> rules.put(patch.id(), extended(target, r, layer.name() + ": patch")));
+      patched.ifPresent(
+          r -> rules.put(patch.id(), extended(target, r, layer.name(), layer.name() + ": patch")));
     }
 
     for (Disable disable : layer.disables()) {
@@ -193,10 +202,10 @@ public final class LayerStack {
     }
   }
 
-  private static Entry extended(Entry target, Rule rule, String step) {
+  private static Entry extended(Entry target, Rule rule, String owner, String step) {
     List<String> history = new ArrayList<>(target.history());
     history.add(step);
-    return new Entry(rule, target.layer(), history);
+    return new Entry(rule, target.layer(), owner, history);
   }
 
   /** The rule an operation is aimed at, or null after reporting why there is none. */

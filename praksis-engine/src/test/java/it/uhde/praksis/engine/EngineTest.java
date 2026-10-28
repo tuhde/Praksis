@@ -274,7 +274,56 @@ class EngineTest {
     }
     assertThat(calls).isEmpty();
     assertThat(audited).containsExactly("test.recordfalseno grant");
-    assertThat(store.recentLog(10)).anyMatch(l -> l.message().contains("denied: no grant"));
+    assertThat(store.recentLog(10))
+        .anyMatch(
+            l ->
+                l.outcome() == LogEntry.Outcome.DENIED && l.message().contains("denied: no grant"));
+  }
+
+  @Test
+  void aDeniedCallDisablesOnlyThatRuleAndItIsSkippedFromThenOn() throws Exception {
+    rule("a", "", call("x", "test.record", "'one'"));
+    rule("b", "", call("x", "test.slow", "'two'"));
+    AccessPolicy noRecord =
+        (rule, cap, args) ->
+            cap.name().equals("test.record")
+                ? AccessPolicy.Decision.deny("no grant")
+                : AccessPolicy.Decision.allow();
+    Engine.Options options =
+        new Engine.Options(noRecord, AuditLog.none(), Engine.Options.defaults().clock(), false);
+    try (Engine engine = engine(options)) {
+      run(engine, event("t", "m1"));
+      assertThat(engine.disabledRules()).containsOnlyKeys("a");
+      run(engine, event("t", "m2"));
+    }
+    // rule b keeps running for both events, rule a never ran
+    assertThat(calls).containsExactly("slow:two", "slow:two");
+    assertThat(store.recentLog(50))
+        .filteredOn(l -> l.ruleId().equals(Optional.of("a")))
+        .extracting(LogEntry::outcome)
+        .containsExactlyInAnyOrder(LogEntry.Outcome.DENIED, LogEntry.Outcome.SKIPPED);
+    assertThat(store.pending()).isEmpty();
+  }
+
+  @Test
+  void aDisabledRequiredRuleEndsTheEvent() throws Exception {
+    rule("a", "required = true\n", call("x", "test.record", "'one'"));
+    rule("b", "", call("x", "test.slow", "'two'"));
+    Engine.Options options =
+        new Engine.Options(
+            (r, c, a) ->
+                r.equals("a")
+                    ? AccessPolicy.Decision.deny("no grant")
+                    : AccessPolicy.Decision.allow(),
+            AuditLog.none(),
+            Engine.Options.defaults().clock(),
+            false);
+    try (Engine engine = engine(options)) {
+      run(engine, event("t", "m1"));
+      run(engine, event("t", "m2"));
+    }
+    assertThat(calls).isEmpty();
+    assertThat(store.pending()).isEmpty();
   }
 
   @Test

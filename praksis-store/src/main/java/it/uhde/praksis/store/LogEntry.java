@@ -26,7 +26,9 @@ public record LogEntry(
   public enum Outcome {
     OK,
     FAILED,
-    SKIPPED
+    SKIPPED,
+    /** A capability call that no grant covers; the rule is disabled from then on. */
+    DENIED
   }
 
   public LogEntry {

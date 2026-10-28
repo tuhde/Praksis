@@ -32,6 +32,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -43,7 +44,8 @@ import java.util.concurrent.TimeUnit;
  * with the same target are handled one at a time in the order they arrived, events with different
  * targets in parallel. If an action fails, the rest of that rule is skipped and the next rule
  * continues, unless the rule is {@code required}, which ends the handling of the event. A {@code
- * stop} action ends the handling of the event without error.
+ * stop} action ends the handling of the event without error. A call that the {@link AccessPolicy}
+ * denies disables that rule only, see {@link #disabledRules()}.
  *
  * <p>Events are stored before they are handled and marked done afterwards, see {@link Store}.
  */
@@ -74,6 +76,9 @@ public final class Engine implements EventSink, AutoCloseable {
   private final Map<String, Deque<Event>> queues = new HashMap<>();
   private int unfinished;
   private boolean closed;
+
+  /** Rules that made a call no grant covers, with the reason; they do nothing until enabled. */
+  private final Map<String, String> disabled = new ConcurrentHashMap<>();
 
   /**
    * Validates and compiles the ruleset and prepares the engine. Nothing runs until events arrive.
@@ -120,6 +125,11 @@ public final class Engine implements EventSink, AutoCloseable {
     this.capabilities = Map.copyOf(capabilities);
     this.store = store;
     this.options = options;
+  }
+
+  /** The rules that were disabled because a call was denied, by rule id, with the reason. */
+  public Map<String, String> disabledRules() {
+    return Map.copyOf(disabled);
   }
 
   /** Queues the events that were stored but not finished, e.g. before a crash or restart. */
@@ -238,9 +248,30 @@ public final class Engine implements EventSink, AutoCloseable {
             && !Boolean.TRUE.equals(rule.filter().get().evaluate(bindings(event, Map.of())))) {
           continue;
         }
+        String why = disabled.get(ruleId);
+        if (why != null) {
+          log(
+              event,
+              Optional.of(ruleId),
+              Optional.empty(),
+              rule.rule().required() ? Outcome.FAILED : Outcome.SKIPPED,
+              "rule is disabled: " + why);
+          if (rule.rule().required()) {
+            break;
+          }
+          continue;
+        }
         stop = run(rule, event);
       } catch (Exception e) {
-        log(event, Optional.of(ruleId), Optional.empty(), Outcome.FAILED, message(e));
+        if (e instanceof Denied d) {
+          disabled.putIfAbsent(ruleId, d.reason);
+        }
+        log(
+            event,
+            Optional.of(ruleId),
+            Optional.empty(),
+            e instanceof Denied ? Outcome.DENIED : Outcome.FAILED,
+            message(e));
         if (rule.rule().required()) {
           log(
               event,
@@ -307,8 +338,7 @@ public final class Engine implements EventSink, AutoCloseable {
               args,
               false,
               Optional.of(decision.reason()));
-      throw new IllegalStateException(
-          "call of " + call.capability() + " denied: " + decision.reason());
+      throw new Denied(call.capability(), decision.reason());
     }
     CapabilityContext context =
         new Context(options.dryRun(), event.id() + "/" + ruleId + "/" + call.id(), event);
@@ -330,6 +360,18 @@ public final class Engine implements EventSink, AutoCloseable {
               true,
               Optional.of(message(e)));
       throw new IllegalStateException("call of " + call.capability() + " failed: " + message(e), e);
+    }
+  }
+
+  /** A capability call that the access policy refused. */
+  private static final class Denied extends Exception {
+    private static final long serialVersionUID = 1L;
+
+    private final String reason;
+
+    Denied(String capability, String reason) {
+      super("call of " + capability + " denied: " + reason);
+      this.reason = reason;
     }
   }
 
