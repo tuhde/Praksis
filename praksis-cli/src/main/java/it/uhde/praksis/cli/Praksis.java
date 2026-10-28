@@ -557,13 +557,51 @@ public final class Praksis {
   @Command(
       name = "verify",
       description =
-          "Runs the static checks on the ruleset that would run and on policy.toml: it must be"
-              + " valid, rules may only ask for what they call, and grants must name layers and"
-              + " capabilities that exist. Exit code 1 if there are errors.")
+          "Runs the checks on the ruleset that would run (or on a candidate, see the options), on its tests"
+              + " and on policy.toml: it must be valid, every rule needs a passing test, rules may only"
+              + " ask for what they call, and grants must name layers and capabilities that exist. Exit"
+              + " code 1 if there are errors.")
   static final class Verify extends Base {
+    @Option(
+        names = "--replay",
+        description =
+            "Also run the stored events through the ruleset in use and through the candidate, and"
+                + " list the events that they treat differently.")
+    boolean replay;
+
+    @Option(names = "-n", description = "How many of the newest stored events to replay (200).")
+    Integer events;
+
+    @Option(
+        names = "--update",
+        description = "Check the ruleset that 'layers update' would produce (asks the servers).")
+    boolean update;
+
+    @Option(
+        names = "--layer",
+        paramLabel = "<name>=<directory>|<name>=@<ref>",
+        description =
+            "Check with this layer replaced by a directory, or by a branch or tag of its"
+                + " repository, e.g. an AI's branch of the private layer. Repeatable.")
+    java.util.List<String> layers = new java.util.ArrayList<>();
+
     @Override
     public Integer call() throws InterruptedException {
-      return runDaemonCommand("--admin", "verify");
+      java.util.List<String> args =
+          new java.util.ArrayList<>(java.util.List.of("--admin", "verify"));
+      if (replay) {
+        args.add("--replay");
+      }
+      if (events != null) {
+        args.addAll(java.util.List.of("-n", String.valueOf(events)));
+      }
+      if (update) {
+        args.add("--update");
+      }
+      for (String layer : layers) {
+        args.addAll(java.util.List.of("--layer", layer));
+      }
+      return runDaemonCommand(args.toArray(String[]::new));
     }
   }
 

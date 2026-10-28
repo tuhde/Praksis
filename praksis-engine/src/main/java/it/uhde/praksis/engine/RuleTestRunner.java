@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 package it.uhde.praksis.engine;
 
-import it.uhde.praksis.capability.Capability;
-import it.uhde.praksis.capability.CapabilityDescriptor;
 import it.uhde.praksis.capability.Event;
 import it.uhde.praksis.expression.ExpressionCompiler;
 import it.uhde.praksis.ruleset.ArgMatcher;
@@ -12,23 +10,13 @@ import it.uhde.praksis.ruleset.Problem;
 import it.uhde.praksis.ruleset.RuleTest;
 import it.uhde.praksis.ruleset.RuleTests;
 import it.uhde.praksis.ruleset.RulesetException;
-import it.uhde.praksis.store.LogEntry;
-import it.uhde.praksis.store.Store;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Comparator;
-import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Stream;
 
 /**
  * Runs the tests of the layers ({@code tests/<rule>.toml}, see {@link RuleTest}) on the real
@@ -140,32 +128,18 @@ public final class RuleTestRunner {
           "there is no rule '" + test.rule() + "' in the ruleset up to layer '" + layer + "'",
           Set.of());
     }
-    Path temp = null;
     try {
-      temp = Files.createTempDirectory("praksis-test");
-      return execute(layer, effective, test, temp);
-    } catch (IOException | InterruptedException | RuntimeException | RulesetException e) {
-      if (e instanceof InterruptedException) {
-        Thread.currentThread().interrupt();
-      }
-      return new Result(layer, test, false, "cannot run the test: " + e.getMessage(), Set.of());
+      return execute(layer, effective, test);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return new Result(layer, test, false, "cannot run the test: interrupted", Set.of());
     } catch (Exception e) {
-      return new Result(layer, test, false, "cannot run the test: " + e, Set.of());
-    } finally {
-      if (temp != null) {
-        delete(temp);
-      }
+      return new Result(layer, test, false, "cannot run the test: " + e.getMessage(), Set.of());
     }
   }
 
-  private Result execute(String layer, LayerStack.Effective effective, RuleTest test, Path temp)
+  private Result execute(String layer, LayerStack.Effective effective, RuleTest test)
       throws Exception {
-    List<Call> calls = Collections.synchronizedList(new ArrayList<>());
-    Map<String, Capability> recorders = new HashMap<>();
-    for (CapabilityDescriptor c : catalog.capabilities()) {
-      Map<String, Object> mocked = test.mocks().getOrDefault(c.name(), Map.of());
-      recorders.put(c.name(), new Recorder(c.name(), mocked));
-    }
     Event event =
         new Event(
             "test",
@@ -177,45 +151,23 @@ public final class RuleTestRunner {
             Optional.empty(),
             0,
             test.eventData());
-    try (Store store = Store.open(temp.resolve("test.db"));
-        Engine engine =
-            new Engine(
-                effective.ruleset(),
-                catalog,
-                compiler,
-                recorders,
-                store,
-                new Engine.Options(
-                    AccessPolicy.allowAll(),
-                    (time, rule, capability, args, allowed, error) ->
-                        calls.add(new Call(rule, capability, args, error)),
-                    java.time.Clock.systemUTC(),
-                    false))) {
-      engine.submit(event);
-      if (!engine.awaitIdle(Duration.ofSeconds(30))) {
-        return new Result(
-            layer, test, false, "the event was not handled within 30 seconds", Set.of());
-      }
-      Set<String> fired = new LinkedHashSet<>();
-      List<String> failures = new ArrayList<>();
-      for (LogEntry entry : store.recentLog(1000)) {
-        if (!entry.eventId().equals(event.id()) || entry.ruleId().isEmpty()) {
-          continue;
-        }
-        fired.add(entry.ruleId().get());
-        if (entry.outcome() != LogEntry.Outcome.OK
-            && entry.ruleId().get().equals(test.rule())
-            && entry.outcome() != LogEntry.Outcome.SKIPPED) {
-          failures.add(entry.message());
-        }
-      }
-      List<Call> made = calls.stream().filter(c -> c.rule().equals(test.rule())).toList();
-      String difference = failures.isEmpty() ? compare(test, made) : String.join("; ", failures);
-      return new Result(layer, test, difference.isEmpty(), difference, fired);
+    Simulator.Run run;
+    try (Simulator simulator =
+        new Simulator(effective.ruleset(), catalog, compiler, test.mocks())) {
+      run = simulator.run(event);
     }
+    List<String> failures =
+        run.failures().stream()
+            .filter(f -> f.startsWith(test.rule() + ": "))
+            .map(f -> f.substring(test.rule().length() + 2))
+            .toList();
+    List<Simulator.Call> made =
+        run.calls().stream().filter(c -> c.rule().equals(test.rule())).toList();
+    String difference = failures.isEmpty() ? compare(test, made) : String.join("; ", failures);
+    return new Result(layer, test, difference.isEmpty(), difference, run.fired());
   }
 
-  private static String compare(RuleTest test, List<Call> made) {
+  private static String compare(RuleTest test, List<Simulator.Call> made) {
     List<RuleTest.ExpectedCall> expected = test.calls();
     for (int i = 0; i < Math.max(expected.size(), made.size()); i++) {
       if (i >= made.size()) {
@@ -229,7 +181,7 @@ public final class RuleTestRunner {
         return "the rule made an unexpected call " + (i + 1) + ": " + made.get(i).describe();
       }
       RuleTest.ExpectedCall want = expected.get(i);
-      Call got = made.get(i);
+      Simulator.Call got = made.get(i);
       boolean same = want.capability().equals(got.capability());
       for (var arg : want.args().entrySet()) {
         same &=
@@ -245,31 +197,5 @@ public final class RuleTestRunner {
 
   private static String describe(RuleTest.ExpectedCall call) {
     return call.capability() + (call.args().isEmpty() ? "" : " " + call.args());
-  }
-
-  private static void delete(Path dir) {
-    try (Stream<Path> files = Files.walk(dir)) {
-      for (Path f : files.sorted(Comparator.reverseOrder()).toList()) {
-        Files.deleteIfExists(f);
-      }
-    } catch (IOException e) {
-      // a temporary directory that stays behind does no harm
-    }
-  }
-
-  private record Call(
-      String rule, String capability, Map<String, Object> args, Optional<String> error) {
-    String describe() {
-      return capability + " " + args;
-    }
-  }
-
-  /** Stands in for a capability: does nothing and returns the mocked results. */
-  private record Recorder(String name, Map<String, Object> results) implements Capability {
-    @Override
-    public Map<String, Object> invoke(
-        it.uhde.praksis.capability.CapabilityContext context, Map<String, Object> args) {
-      return results;
-    }
   }
 }

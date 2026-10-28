@@ -226,6 +226,25 @@ public final class Store implements AutoCloseable {
     }
   }
 
+  /** The newest stored events, whatever their state, returned oldest first. */
+  public synchronized List<Event> recentEvents(int limit) throws StoreException {
+    List<Event> out = new ArrayList<>();
+    try (PreparedStatement s =
+        connection.prepareStatement(
+            "SELECT json FROM (SELECT seq, json FROM event ORDER BY seq DESC LIMIT ?)"
+                + " ORDER BY seq")) {
+      s.setInt(1, limit);
+      try (ResultSet r = s.executeQuery()) {
+        while (r.next()) {
+          out.add(EventCodec.decode(r.getString(1)));
+        }
+      }
+      return out;
+    } catch (SQLException e) {
+      throw new StoreException("cannot read the events", e);
+    }
+  }
+
   /** The stored event with this id, whatever its state. */
   public synchronized Optional<Event> event(String eventId) throws StoreException {
     try (PreparedStatement s = connection.prepareStatement("SELECT json FROM event WHERE id = ?")) {

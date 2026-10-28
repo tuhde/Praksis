@@ -233,26 +233,7 @@ final class Layers {
       // there is nothing to compare with, e.g. the first time
     }
 
-    Map<String, Pin> next = new LinkedHashMap<>();
-    for (LayerConfig layer : config.layers()) {
-      if (!layer.isGit()) {
-        continue;
-      }
-      Pin pin = old.get(layer.name());
-      boolean move = names.isEmpty() || names.contains(layer.name()) || pin == null;
-      if (!move && (!pin.git().equals(layer.git().get()) || !pin.ref().equals(layer.ref().get()))) {
-        move = true; // the configuration changed, so the old pin means nothing
-      }
-      if (move) {
-        try {
-          String commit = git.resolve(layer.name(), layer.git().get(), layer.ref().get());
-          pin = new Pin(layer.git().get(), layer.ref().get(), commit);
-        } catch (GitException e) {
-          throw new DaemonException("layer '" + layer.name() + "': " + e.getMessage(), e);
-        }
-      }
-      next.put(layer.name(), pin);
-    }
+    Map<String, Pin> next = nextPins(names, old);
 
     LayerStack.Effective after;
     try {
@@ -331,6 +312,102 @@ final class Layers {
               + ". Restart the daemon to use them.");
     }
     return new Update(!dryRun, report, List.of());
+  }
+
+  /** The pins after moving the named git layers (all if none are named) to the latest commit. */
+  private Map<String, Pin> nextPins(Set<String> names, Map<String, Pin> old)
+      throws DaemonException {
+    Map<String, Pin> next = new LinkedHashMap<>();
+    for (LayerConfig layer : config.layers()) {
+      if (!layer.isGit()) {
+        continue;
+      }
+      Pin pin = old.get(layer.name());
+      boolean move = names.isEmpty() || names.contains(layer.name()) || pin == null;
+      if (!move && (!pin.git().equals(layer.git().get()) || !pin.ref().equals(layer.ref().get()))) {
+        move = true; // the configuration changed, so the old pin means nothing
+      }
+      if (move) {
+        try {
+          String commit = git.resolve(layer.name(), layer.git().get(), layer.ref().get());
+          pin = new Pin(layer.git().get(), layer.ref().get(), commit);
+        } catch (GitException e) {
+          throw new DaemonException("layer '" + layer.name() + "': " + e.getMessage(), e);
+        }
+      }
+      next.put(layer.name(), pin);
+    }
+    return next;
+  }
+
+  /**
+   * A ruleset that is not the one in use, put together for checking.
+   *
+   * @param sources the layers, bottom to top
+   * @param effective the ruleset they give
+   */
+  record Candidate(List<LayerStack.Source> sources, LayerStack.Effective effective) {}
+
+  /**
+   * The ruleset that would run if the pins moved to the latest commits ({@code update}) and/or
+   * layers were replaced.
+   *
+   * @param replacements layer name to a directory, or to {@code @<ref>} for a branch or tag of the
+   *     layer's own repository
+   * @param update whether the git layers move to the latest commit of their ref first
+   */
+  Candidate candidate(Map<String, String> replacements, boolean update)
+      throws DaemonException, RulesetException {
+    Map<String, Pin> pins = readLock();
+    if (update) {
+      pins = nextPins(Set.of(), pins);
+    }
+    List<LayerStack.Source> sources = new ArrayList<>();
+    Set<String> known = new LinkedHashSet<>();
+    for (LayerStack.Source source : sources(pins)) {
+      known.add(source.name());
+      String replacement = replacements.get(source.name());
+      sources.add(replacement == null ? source : replace(source, replacement));
+    }
+    for (String name : replacements.keySet()) {
+      if (!known.contains(name)) {
+        throw new DaemonException("there is no layer named '" + name + "'");
+      }
+    }
+    return new Candidate(List.copyOf(sources), LayerStack.resolve(sources, config.params()));
+  }
+
+  private LayerStack.Source replace(LayerStack.Source source, String replacement)
+      throws DaemonException {
+    if (!replacement.startsWith("@")) {
+      Path directory = Path.of(replacement).toAbsolutePath();
+      if (!Files.isDirectory(directory)) {
+        throw new DaemonException(
+            "layer '" + source.name() + "': " + replacement + " is not a directory");
+      }
+      return new LayerStack.Source(source.name(), directory);
+    }
+    LayerConfig layer =
+        config.layers().stream()
+            .filter(l -> l.name().equals(source.name()))
+            .findFirst()
+            .orElseThrow(
+                () ->
+                    new DaemonException(
+                        "layer '" + source.name() + "' has no repository to take a ref from"));
+    if (!layer.isGit()) {
+      throw new DaemonException(
+          "layer '" + source.name() + "' is a directory; give a directory to replace it");
+    }
+    String ref = replacement.substring(1);
+    try {
+      String commit = git.resolve(layer.name(), layer.git().get(), ref);
+      Path snapshot = config.snapshots().resolve(layer.name()).resolve(commit);
+      git.export(layer.name(), layer.git().get(), commit, snapshot);
+      return new LayerStack.Source(layer.name(), snapshot);
+    } catch (GitException e) {
+      throw new DaemonException("layer '" + layer.name() + "': " + e.getMessage(), e);
+    }
   }
 
   private static List<String> ruleChanges(LayerStack.Effective before, LayerStack.Effective after) {
