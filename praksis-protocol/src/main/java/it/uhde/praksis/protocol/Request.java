@@ -21,6 +21,15 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.Shadow.class, name = "shadow"),
   @JsonSubTypes.Type(value = Request.ShadowPromote.class, name = "shadow-promote"),
   @JsonSubTypes.Type(value = Request.ShadowReset.class, name = "shadow-reset"),
+  @JsonSubTypes.Type(value = Request.Changes.class, name = "changes"),
+  @JsonSubTypes.Type(value = Request.Effective.class, name = "effective"),
+  @JsonSubTypes.Type(value = Request.Layers.class, name = "layers"),
+  @JsonSubTypes.Type(value = Request.LayersUpdate.class, name = "layers-update"),
+  @JsonSubTypes.Type(value = Request.Verify.class, name = "verify"),
+  @JsonSubTypes.Type(value = Request.Proposals.class, name = "proposals"),
+  @JsonSubTypes.Type(value = Request.ProposalShow.class, name = "proposal-show"),
+  @JsonSubTypes.Type(value = Request.ProposalApprove.class, name = "proposal-approve"),
+  @JsonSubTypes.Type(value = Request.ProposalReject.class, name = "proposal-reject"),
   @JsonSubTypes.Type(value = Request.Stop.class, name = "stop")
 })
 public sealed interface Request {
@@ -115,6 +124,87 @@ public sealed interface Request {
    * @param rule the rule id
    */
   record ShadowReset(String rule) implements Request {}
+
+  /**
+   * Asks what has changed since a counter, and waits for a change if nothing has. A client that
+   * keeps its screens up to date sends the counter of the last answer in a loop; the first request
+   * uses 0 and gets every topic. Answered with {@link Response.ChangeList}.
+   *
+   * @param since the counter of the last answer
+   * @param waitMillis how long to wait for a change if there is none yet (at most 30 seconds)
+   */
+  record Changes(long since, int waitMillis) implements Request {}
+
+  /**
+   * Asks for the ruleset in use with where each rule comes from. Answered with {@link
+   * Response.EffectiveView}.
+   */
+  record Effective() implements Request {}
+
+  /** Asks for the layers and what they are pinned to. Answered with {@link Response.LayerList}. */
+  record Layers() implements Request {}
+
+  /**
+   * Moves the git layers to the latest commit, as {@code praksis layers update}. Answered with
+   * {@link Response.Lines}; the daemon uses the new pins after a restart.
+   *
+   * @param dryRun whether to only report
+   * @param acceptNewAccess whether to go on although rules get access that no grant covers
+   * @param names the layers to move; empty means all
+   */
+  record LayersUpdate(boolean dryRun, boolean acceptNewAccess, java.util.List<String> names)
+      implements Request {
+    public LayersUpdate {
+      names = names == null ? java.util.List.of() : names;
+    }
+  }
+
+  /**
+   * Runs the checks on the ruleset in use or on a candidate, as {@code praksis verify}. Answered
+   * with {@link Response.Verification}.
+   *
+   * @param replay whether to replay stored events through the candidate
+   * @param count how many events to replay
+   * @param update whether the candidate has the layers moved to their latest commits
+   * @param replacements layer name to a directory, or to {@code @<ref>}, for the candidate
+   */
+  record Verify(
+      boolean replay, int count, boolean update, java.util.Map<String, String> replacements)
+      implements Request {
+    public Verify {
+      replacements = replacements == null ? java.util.Map.of() : replacements;
+    }
+  }
+
+  /**
+   * Asks for the branches of AI-maintained layers that are not decided. Answered with {@link
+   * Response.ProposalList}.
+   */
+  record Proposals() implements Request {}
+
+  /**
+   * Asks for one proposal with the checks on it. Answered with {@link Response.ProposalDetail}.
+   *
+   * @param name {@code <layer>@<branch>}
+   */
+  record ProposalShow(String name) implements Request {}
+
+  /**
+   * Approves a proposal at the commit that was looked at. Answered with {@link Response.Lines}.
+   *
+   * @param name {@code <layer>@<branch>}
+   * @param commit the commit that was looked at (7 characters at least)
+   * @param withoutShadow whether to approve although shadow mode is off
+   */
+  record ProposalApprove(String name, String commit, boolean withoutShadow) implements Request {}
+
+  /**
+   * Rejects a proposal. Answered with {@link Response.Lines}.
+   *
+   * @param name {@code <layer>@<branch>}
+   * @param reason why, for the audit log
+   */
+  record ProposalReject(String name, String reason) implements Request {}
 
   /**
    * Asks the daemon to finish what it is doing and exit. Answered with {@link Response.Stopped}.

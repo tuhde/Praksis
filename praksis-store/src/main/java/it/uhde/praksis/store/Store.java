@@ -29,9 +29,19 @@ public final class Store implements AutoCloseable {
   private static final int SCHEMA_VERSION = 4;
 
   private final Connection connection;
+  private volatile java.util.function.Consumer<String> changes = topic -> {};
 
   private Store(Connection connection) {
     this.connection = connection;
+  }
+
+  /**
+   * Tells {@code listener} the topic of every write: {@code events}, {@code log}, {@code audit},
+   * {@code approvals} (requests and missed events) and {@code shadow}. The listener is called while
+   * the store is locked, so it must be quick and must not call the store.
+   */
+  public void onChange(java.util.function.Consumer<String> listener) {
+    this.changes = listener;
   }
 
   /** Opens the database file, creating it and its parent directory if needed. */
@@ -198,6 +208,11 @@ public final class Store implements AutoCloseable {
 
   /** Marks a version of a rule as live. Doing it again changes nothing. */
   public synchronized void promote(Promoted rule) throws StoreException {
+    promoteLocked(rule);
+    changes.accept("shadow");
+  }
+
+  private void promoteLocked(Promoted rule) throws StoreException {
     try (PreparedStatement s =
         connection.prepareStatement(
             "INSERT OR IGNORE INTO promoted (rule_id, hash, time, json) VALUES (?, ?, ?, ?)")) {
@@ -230,6 +245,11 @@ public final class Store implements AutoCloseable {
 
   /** Starts the trial of a version of a rule, unless it has started before. */
   public synchronized void startShadow(ShadowRule rule) throws StoreException {
+    startShadowLocked(rule);
+    changes.accept("shadow");
+  }
+
+  private void startShadowLocked(ShadowRule rule) throws StoreException {
     try (PreparedStatement s =
         connection.prepareStatement(
             "INSERT OR IGNORE INTO shadow_rule (rule_id, hash, since) VALUES (?, ?, ?)")) {
@@ -259,6 +279,11 @@ public final class Store implements AutoCloseable {
 
   /** Ends the trial of a version of a rule and forgets what was observed. */
   public synchronized void endShadow(String ruleId, String hash) throws StoreException {
+    endShadowLocked(ruleId, hash);
+    changes.accept("shadow");
+  }
+
+  private void endShadowLocked(String ruleId, String hash) throws StoreException {
     try {
       for (String table : new String[] {"shadow_rule", "shadow_run"}) {
         try (PreparedStatement s =
@@ -283,6 +308,11 @@ public final class Store implements AutoCloseable {
 
   /** Records what a rule on trial would have done; keeps the newest {@code keep} per version. */
   public synchronized void addShadowRun(ShadowRun run, int keep) throws StoreException {
+    addShadowRunLocked(run, keep);
+    changes.accept("shadow");
+  }
+
+  private void addShadowRunLocked(ShadowRun run, int keep) throws StoreException {
     try {
       try (PreparedStatement s =
           connection.prepareStatement(
@@ -390,6 +420,12 @@ public final class Store implements AutoCloseable {
    *     stored before
    */
   public synchronized boolean append(Event event) throws StoreException {
+    boolean result = appendLocked(event);
+    changes.accept("events");
+    return result;
+  }
+
+  private boolean appendLocked(Event event) throws StoreException {
     try (PreparedStatement s =
         connection.prepareStatement(
             "INSERT OR IGNORE INTO event (id, key, json) VALUES (?, ?, ?)")) {
@@ -419,6 +455,11 @@ public final class Store implements AutoCloseable {
 
   /** Marks an event as handled, so it is not handled again after a restart. */
   public synchronized void markDone(String eventId) throws StoreException {
+    markDoneLocked(eventId);
+    changes.accept("events");
+  }
+
+  private void markDoneLocked(String eventId) throws StoreException {
     try (PreparedStatement s =
         connection.prepareStatement("UPDATE event SET state = 'done' WHERE id = ?")) {
       s.setString(1, eventId);
@@ -430,6 +471,11 @@ public final class Store implements AutoCloseable {
 
   /** Appends a line to the run log. */
   public synchronized void log(LogEntry entry) throws StoreException {
+    logLocked(entry);
+    changes.accept("log");
+  }
+
+  private void logLocked(LogEntry entry) throws StoreException {
     try (PreparedStatement s =
         connection.prepareStatement(
             "INSERT INTO run_log (time, event_id, rule_id, action_id, outcome, message)"
@@ -505,6 +551,11 @@ public final class Store implements AutoCloseable {
 
   /** Appends a line to the audit log. */
   public synchronized void audit(AuditEntry entry) throws StoreException {
+    auditLocked(entry);
+    changes.accept("audit");
+  }
+
+  private void auditLocked(AuditEntry entry) throws StoreException {
     try (PreparedStatement s =
         connection.prepareStatement(
             "INSERT INTO audit (time, kind, rule_id, subject, allowed, detail, error)"
@@ -601,6 +652,13 @@ public final class Store implements AutoCloseable {
   public synchronized void addMissed(
       Instant time, String ruleId, String eventId, Instant cutoff, int maxPerRule)
       throws StoreException {
+    addMissedLocked(time, ruleId, eventId, cutoff, maxPerRule);
+    changes.accept("approvals");
+  }
+
+  private void addMissedLocked(
+      Instant time, String ruleId, String eventId, Instant cutoff, int maxPerRule)
+      throws StoreException {
     try {
       try (PreparedStatement s =
           connection.prepareStatement(
@@ -658,6 +716,11 @@ public final class Store implements AutoCloseable {
 
   /** Forgets one event a rule missed, e.g. after it was replayed. */
   public synchronized void removeMissed(String ruleId, String eventId) throws StoreException {
+    removeMissedLocked(ruleId, eventId);
+    changes.accept("approvals");
+  }
+
+  private void removeMissedLocked(String ruleId, String eventId) throws StoreException {
     try (PreparedStatement s =
         connection.prepareStatement("DELETE FROM missed WHERE rule_id = ? AND event_id = ?")) {
       s.setString(1, ruleId);
@@ -673,6 +736,19 @@ public final class Store implements AutoCloseable {
    * no second one; that request is returned.
    */
   public synchronized Approval openApproval(
+      Instant time,
+      String ruleId,
+      String layer,
+      String capability,
+      java.util.Map<String, Object> args,
+      String eventId)
+      throws StoreException {
+    Approval result = openApprovalLocked(time, ruleId, layer, capability, args, eventId);
+    changes.accept("approvals");
+    return result;
+  }
+
+  private Approval openApprovalLocked(
       Instant time,
       String ruleId,
       String layer,
@@ -756,6 +832,11 @@ public final class Store implements AutoCloseable {
 
   /** Records the answer to a request. */
   public synchronized void answer(long id, Approval.State state, Instant at) throws StoreException {
+    answerLocked(id, state, at);
+    changes.accept("approvals");
+  }
+
+  private void answerLocked(long id, Approval.State state, Instant at) throws StoreException {
     try (PreparedStatement s =
         connection.prepareStatement("UPDATE approval SET state = ?, answered = ? WHERE id = ?")) {
       s.setString(1, state.name());
@@ -769,6 +850,11 @@ public final class Store implements AutoCloseable {
 
   /** Forgets the events a rule missed, e.g. after they were replayed or discarded. */
   public synchronized void clearMissed(String ruleId) throws StoreException {
+    clearMissedLocked(ruleId);
+    changes.accept("approvals");
+  }
+
+  private void clearMissedLocked(String ruleId) throws StoreException {
     try (PreparedStatement s =
         connection.prepareStatement("DELETE FROM missed WHERE rule_id = ?")) {
       s.setString(1, ruleId);

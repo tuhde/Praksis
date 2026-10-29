@@ -16,6 +16,13 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Response.ApprovalList.class, name = "approvals"),
   @JsonSubTypes.Type(value = Response.GrantList.class, name = "grants"),
   @JsonSubTypes.Type(value = Response.ShadowList.class, name = "shadow"),
+  @JsonSubTypes.Type(value = Response.ChangeList.class, name = "changes"),
+  @JsonSubTypes.Type(value = Response.EffectiveView.class, name = "effective"),
+  @JsonSubTypes.Type(value = Response.LayerList.class, name = "layers"),
+  @JsonSubTypes.Type(value = Response.Lines.class, name = "lines"),
+  @JsonSubTypes.Type(value = Response.Verification.class, name = "verification"),
+  @JsonSubTypes.Type(value = Response.ProposalList.class, name = "proposals"),
+  @JsonSubTypes.Type(value = Response.ProposalDetail.class, name = "proposal"),
   @JsonSubTypes.Type(value = Response.Done.class, name = "done"),
   @JsonSubTypes.Type(value = Response.Stopped.class, name = "stopped"),
   @JsonSubTypes.Type(value = Response.Error.class, name = "error")
@@ -210,6 +217,187 @@ public sealed interface Response {
      */
     public record Sample(String event, List<String> calls, String note, List<String> live) {}
   }
+
+  /**
+   * What changed.
+   *
+   * @param counter to send with the next {@link Request.Changes}
+   * @param topics the topics that changed since the counter of the request: {@code events}, {@code
+   *     log}, {@code audit}, {@code approvals} and {@code shadow}
+   */
+  record ChangeList(long counter, List<String> topics) implements Response {}
+
+  /**
+   * The ruleset in use.
+   *
+   * @param ruleset its name
+   * @param pinsChanged whether the pins now give another ruleset (a restart would use it)
+   * @param params the parameters and their values
+   * @param rules the rules in firing order
+   * @param disabled the rules that a layer turned off
+   */
+  record EffectiveView(
+      String ruleset,
+      boolean pinsChanged,
+      List<Param> params,
+      List<Rule> rules,
+      List<Disabled> disabled)
+      implements Response {
+    /** A parameter. */
+    public record Param(String name, String type, String value) {}
+
+    /**
+     * A rule and where it comes from.
+     *
+     * @param id the rule id
+     * @param layer the layer that added it
+     * @param owner the layer whose grants decide
+     * @param hash its content hash, for {@code based_on}
+     * @param history what each layer did to it
+     * @param author {@code human}, {@code ai}, {@code unverified} or {@code unknown}
+     * @param who one line: who changed it last, in which commit, and the subject
+     * @param reasoning why, from the commit message
+     * @param onTrial whether a version of it is on trial in shadow mode
+     */
+    public record Rule(
+        String id,
+        String layer,
+        String owner,
+        String hash,
+        List<String> history,
+        String author,
+        String who,
+        String reasoning,
+        boolean onTrial) {}
+
+    /** A rule that a layer turned off. */
+    public record Disabled(String rule, String layer, String reason) {}
+  }
+
+  /**
+   * The ruleset layers.
+   *
+   * @param layers bottom to top
+   */
+  record LayerList(List<Layer> layers) implements Response {
+    /**
+     * A layer.
+     *
+     * @param name the layer name
+     * @param source the repository and ref, or the directory
+     * @param pinned the commit it is pinned to, or null
+     * @param stale whether the configuration differs from the pin
+     * @param present whether the files of the pinned commit are on disk
+     * @param aiMaintained whether an AI may propose changes to it
+     */
+    public record Layer(
+        String name,
+        String source,
+        String pinned,
+        boolean stale,
+        boolean present,
+        boolean aiMaintained) {}
+  }
+
+  /**
+   * The report of an operation, as text.
+   *
+   * @param ok whether it was done
+   * @param lines what it says
+   */
+  record Lines(boolean ok, List<String> lines) implements Response {}
+
+  /**
+   * The result of the checks on a ruleset or a candidate.
+   *
+   * @param candidate whether it is a candidate and not the ruleset in use
+   * @param ruleset its name
+   * @param rules how many rules it has
+   * @param errors the number of errors
+   * @param warnings the number of warnings
+   * @param findings what was found, errors first
+   * @param tier for a candidate: {@code APPROVAL}, {@code SHADOW} or {@code AUTOMATIC}, else null
+   * @param decisions for a candidate: one per rule that is new, changed or removed
+   * @param replay the replay, or null
+   */
+  record Verification(
+      boolean candidate,
+      String ruleset,
+      int rules,
+      long errors,
+      long warnings,
+      List<Finding> findings,
+      String tier,
+      List<Decision> decisions,
+      Replay replay)
+      implements Response {
+    /** One thing the checks found. */
+    public record Finding(String severity, String check, String where, String message) {}
+
+    /** What a change needs for one rule. */
+    public record Decision(String rule, String change, String tier, List<String> reasons) {}
+
+    /**
+     * The replay of stored events.
+     *
+     * @param events how many were replayed
+     * @param differences the events that are treated differently, at most 20
+     * @param more how many more there are
+     */
+    public record Replay(int events, List<Difference> differences, int more) {}
+
+    /** An event that the two rulesets treat differently. */
+    public record Difference(String event, String type, List<String> now, List<String> candidate) {}
+  }
+
+  /**
+   * The branches of AI-maintained layers that are not merged or decided.
+   *
+   * @param proposals the proposals
+   * @param note a hint if there are none because no layer is AI-maintained, else null
+   */
+  record ProposalList(List<Proposal> proposals, String note) implements Response {
+    /**
+     * A proposal.
+     *
+     * @param name {@code <layer>@<branch>}
+     * @param layer the layer
+     * @param branch the branch
+     * @param commit the commit the branch leads to
+     * @param commits the commits that the layer does not have, newest first
+     */
+    public record Proposal(
+        String name, String layer, String branch, String commit, List<Commit> commits) {}
+
+    /**
+     * A commit of a proposal.
+     *
+     * @param commit the commit id
+     * @param author the author's name
+     * @param authorKind {@code human}, {@code ai}, {@code unverified}
+     * @param signed whether git found the signature good
+     * @param signer the signing key, or empty
+     * @param subject the first line of the message
+     * @param reasoning the rest of the message without trailers
+     */
+    public record Commit(
+        String commit,
+        String author,
+        String authorKind,
+        boolean signed,
+        String signer,
+        String subject,
+        String reasoning) {}
+  }
+
+  /**
+   * One proposal with the checks on it.
+   *
+   * @param proposal the proposal
+   * @param verification the checks, the tier and the replay
+   */
+  record ProposalDetail(ProposalList.Proposal proposal, Verification verification)
+      implements Response {}
 
   /** The daemon is shutting down. */
   record Stopped() implements Response {}

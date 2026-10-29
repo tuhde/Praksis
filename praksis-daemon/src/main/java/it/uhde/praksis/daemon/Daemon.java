@@ -66,6 +66,8 @@ public final class Daemon implements AutoCloseable {
   private Engine engine;
   private Approvals approvals;
   private Shadows shadows;
+  private Screens screens;
+  private final Topics topics = new Topics();
   private ApiServer api;
 
   private Daemon(DaemonConfig config) {
@@ -115,6 +117,7 @@ public final class Daemon implements AutoCloseable {
       ruleset = effective.ruleset();
       GrantPolicy access = accessPolicy(config, modules.catalog(), effective);
       store = Store.open(config.database());
+      store.onChange(topics::bump);
       auditPolicy(config, store);
       auditRules(effective, layers, compiler, modules.catalog(), store, Admin.trust(config));
       modules.useCredentials(new CredentialResolver(access::policy, store, clock)::forComponent);
@@ -134,6 +137,16 @@ public final class Daemon implements AutoCloseable {
                   access, new StoreAuditLog(store), clock, config.dryRun(), approvals));
       approvals.bind(engine);
       shadows.bind(engine);
+      screens =
+          new Screens(
+              config,
+              layers,
+              new GitCli(config.gitCache()),
+              store,
+              modules,
+              compiler,
+              effective,
+              engine);
       approvals.sync();
       engine.recover();
       api = new ApiServer(config.socket(), this::handle, this::requestStop);
@@ -290,12 +303,36 @@ public final class Daemon implements AutoCloseable {
         case Request.Shadow s -> shadows.list();
         case Request.ShadowPromote p -> new Response.Done(shadows.promote(p.rule()));
         case Request.ShadowReset r -> new Response.Done(shadows.reset(r.rule()));
+        case Request.Changes c -> topics.changes(c.since(), c.waitMillis());
+        case Request.Effective e -> screens.effective();
+        case Request.Layers l -> screens.layerList();
+        case Request.LayersUpdate u -> screens.update(u);
+        case Request.Verify v -> screens.verify(v);
+        case Request.Proposals p -> screens.proposals();
+        case Request.ProposalShow p -> screens.proposalDetail(p.name());
+        case Request.ProposalApprove a -> {
+          java.util.List<String> args =
+              new java.util.ArrayList<>(java.util.List.of("approve", a.name(), a.commit()));
+          if (a.withoutShadow()) {
+            args.add("--without-shadow");
+          }
+          yield screens.decide(args);
+        }
+        case Request.ProposalReject r ->
+            screens.decide(
+                java.util.List.of(
+                    "reject",
+                    r.name(),
+                    r.reason() == null || r.reason().isBlank() ? "-" : r.reason()));
         case Request.Stop s -> new Response.Stopped();
       };
-    } catch (Injection.Invalid | Approvals.Failure | Shadows.Failure e) {
+    } catch (Injection.Invalid | Approvals.Failure | Shadows.Failure | DaemonException e) {
       return new Response.Error(e.getMessage());
     } catch (StoreException e) {
       return new Response.Error("store: " + e.getMessage());
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return new Response.Error("interrupted");
     }
   }
 
@@ -381,6 +418,7 @@ public final class Daemon implements AutoCloseable {
       return;
     }
     stopped.countDown();
+    topics.close();
     if (modules != null) {
       modules.stopSources();
     }

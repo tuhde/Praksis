@@ -337,6 +337,27 @@ final class Admin {
    */
   static Checked check(DaemonConfig config, Layers layers, Check.Options options, PrintWriter err)
       throws DaemonException {
+    try (LoadedModules modules =
+        ModuleLoader.load(
+            config.modules(),
+            config.lockfile(),
+            config.moduleSettings(),
+            config.enabledModules())) {
+      return check(config, layers, options, err, modules);
+    } catch (ModuleLoadException ex) {
+      err.println("cannot check the ruleset against the modules: " + ex.getMessage());
+      return null;
+    }
+  }
+
+  /** As above, with the modules of the caller (the daemon uses the ones it has loaded). */
+  static Checked check(
+      DaemonConfig config,
+      Layers layers,
+      Check.Options options,
+      PrintWriter err,
+      LoadedModules modules)
+      throws DaemonException {
     boolean isCandidate = options.candidate();
     LayerStack.Effective current;
     Layers.Candidate candidate;
@@ -355,12 +376,7 @@ final class Admin {
     Replay.Report replayed = null;
     Tiers.Verdict verdict = null;
     List<Verifier.Finding> findings;
-    try (LoadedModules modules =
-        ModuleLoader.load(
-            config.modules(),
-            config.lockfile(),
-            config.moduleSettings(),
-            config.enabledModules())) {
+    {
       findings =
           new ArrayList<>(
               new Verifier(Daemon.compiler(config), modules.catalog())
@@ -408,9 +424,6 @@ final class Admin {
           return null;
         }
       }
-    } catch (ModuleLoadException ex) {
-      err.println("cannot check the ruleset against the modules: " + ex.getMessage());
-      return null;
     }
     return new Checked(
         isCandidate, current, candidate, new Verifier.Report(findings), verdict, replayed);

@@ -57,6 +57,73 @@ class WireTest {
   }
 
   @Test
+  void theMessagesOfTheScreensSurviveTheRoundTrip() throws Exception {
+    for (Request r :
+        List.of(
+            new Request.Changes(7, 1000),
+            new Request.Effective(),
+            new Request.Layers(),
+            new Request.LayersUpdate(true, false, List.of("mine")),
+            new Request.LayersUpdate(false, true, null),
+            new Request.Verify(true, 50, false, Map.of("mine", "@ai-change")),
+            new Request.Verify(false, 0, true, null),
+            new Request.Proposals(),
+            new Request.ProposalShow("mine@ai-change"),
+            new Request.ProposalApprove("mine@ai-change", "0123456", true),
+            new Request.ProposalReject("mine@ai-change", "no"))) {
+      assertThat(Wire.decodeRequest(Wire.encode(r))).isEqualTo(r);
+    }
+    var finding = new Response.Verification.Finding("ERROR", "test", "x", "y");
+    var commit = new Response.ProposalList.Commit("c", "Test", "ai", false, "", "s", "why");
+    var proposal = new Response.ProposalList.Proposal("mine@b", "mine", "b", "c", List.of(commit));
+    for (Response r :
+        List.of(
+            new Response.ChangeList(3, List.of("log", "shadow")),
+            new Response.EffectiveView(
+                "t",
+                true,
+                List.of(new Response.EffectiveView.Param("p", "string", "v")),
+                List.of(
+                    new Response.EffectiveView.Rule(
+                        "r",
+                        "mail",
+                        "mine",
+                        "sha256:1",
+                        List.of("mail: add"),
+                        "ai",
+                        "who",
+                        "why",
+                        false)),
+                List.of(new Response.EffectiveView.Disabled("d", "mine", ""))),
+            new Response.LayerList(
+                List.of(
+                    new Response.LayerList.Layer("mail", "g @ main", null, false, true, false))),
+            new Response.Lines(false, List.of("a", "b")),
+            new Response.Verification(
+                true,
+                "t",
+                2,
+                1,
+                0,
+                List.of(finding),
+                "SHADOW",
+                List.of(new Response.Verification.Decision("r", "new", "SHADOW", List.of("x"))),
+                new Response.Verification.Replay(
+                    3,
+                    List.of(
+                        new Response.Verification.Difference("e", "t", List.of(), List.of("c"))),
+                    0)),
+            new Response.Verification(false, "t", 0, 0, 0, List.of(), null, null, null),
+            new Response.ProposalList(List.of(proposal), null),
+            new Response.ProposalDetail(
+                proposal,
+                new Response.Verification(
+                    true, "t", 1, 0, 0, List.of(), "AUTOMATIC", List.of(), null)))) {
+      assertThat(Wire.decodeResponse(Wire.encode(r))).isEqualTo(r);
+    }
+  }
+
+  @Test
   void rejectsWhatItDoesNotUnderstand() {
     for (String bad :
         new String[] {

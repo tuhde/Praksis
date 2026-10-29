@@ -319,4 +319,22 @@ class StoreTest {
       assertThat(store.promoted()).isEmpty();
     }
   }
+
+  @Test
+  void everyWriteTellsTheListenerItsTopic() throws Exception {
+    List<String> topics = new java.util.concurrent.CopyOnWriteArrayList<>();
+    try (Store store = Store.open(dir.resolve("praksis.db"))) {
+      store.onChange(topics::add);
+      store.append(event("e1", Optional.empty(), Map.of()));
+      store.log(
+          new LogEntry(T0, "e1", Optional.empty(), Optional.empty(), LogEntry.Outcome.OK, "m"));
+      store.markDone("e1");
+      store.audit(AuditEntry.of(T0, AuditEntry.Kind.POLICY, Optional.empty(), "p", Map.of()));
+      store.openApproval(T0, "a", "mail", "mail.move", Map.of(), "e1");
+      store.promote(new Promoted("a", "h", T0, "{}"));
+      assertThat(topics).containsExactly("events", "log", "events", "audit", "approvals", "shadow");
+      store.pending(); // reading says nothing
+      assertThat(topics).hasSize(6);
+    }
+  }
 }

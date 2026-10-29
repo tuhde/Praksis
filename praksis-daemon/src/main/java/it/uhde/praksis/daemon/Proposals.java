@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package it.uhde.praksis.daemon;
 
+import it.uhde.praksis.engine.LoadedModules;
 import it.uhde.praksis.git.GitSource;
 import it.uhde.praksis.ruleset.Trust;
 import it.uhde.praksis.store.AuditEntry;
@@ -36,21 +37,69 @@ final class Proposals {
   static int run(
       DaemonConfig config, GitSource git, List<String> args, PrintWriter out, PrintWriter err)
       throws DaemonException {
-    String command = args.isEmpty() ? "list" : args.get(0);
-    List<String> rest = args.isEmpty() ? List.of() : args.subList(1, args.size());
     try (Store store = Store.open(config.database())) {
-      Layers layers = new Layers(config, git);
-      return switch (command) {
-        case "list" -> list(config, layers, git, store, out, err);
-        case "show" ->
-            rest.size() == 1 ? show(config, layers, git, store, rest.get(0), out, err) : usage(err);
-        case "approve" -> approve(config, layers, git, store, rest, out, err);
-        case "reject" -> rest.isEmpty() ? usage(err) : reject(config, git, store, rest, out, err);
-        default -> usage(err);
-      };
+      return run(config, git, args, out, err, store, null);
     } catch (StoreException e) {
       throw new DaemonException(e.getMessage(), e);
     }
+  }
+
+  /**
+   * As above, with the store and the modules of the caller (the daemon uses its own; the command
+   * line passes null for modules and loads them when it needs them).
+   */
+  static int run(
+      DaemonConfig config,
+      GitSource git,
+      List<String> args,
+      PrintWriter out,
+      PrintWriter err,
+      Store store,
+      LoadedModules modules)
+      throws DaemonException {
+    String command = args.isEmpty() ? "list" : args.get(0);
+    List<String> rest = args.isEmpty() ? List.of() : args.subList(1, args.size());
+    Layers layers = new Layers(config, git);
+    return switch (command) {
+      case "list" -> list(config, layers, git, store, out, err);
+      case "show" ->
+          rest.size() == 1
+              ? show(config, layers, git, store, rest.get(0), out, err, modules)
+              : usage(err);
+      case "approve" -> approve(config, layers, git, store, rest, out, err, modules);
+      case "reject" -> rest.isEmpty() ? usage(err) : reject(config, git, store, rest, out, err);
+      default -> usage(err);
+    };
+  }
+
+  /** Runs the checks with the given modules, or loads them if there are none. */
+  private static Admin.Checked checked(
+      LoadedModules modules,
+      DaemonConfig config,
+      Layers layers,
+      Admin.Check.Options options,
+      PrintWriter err)
+      throws DaemonException {
+    return modules == null
+        ? Admin.check(config, layers, options, err)
+        : Admin.check(config, layers, options, err, modules);
+  }
+
+  /** Every proposal of the AI-maintained layers, with the reason there may be none. */
+  static List<Proposal> pending(DaemonConfig config, Layers layers, GitSource git, Store store)
+      throws Exception {
+    List<Proposal> out = new ArrayList<>();
+    for (LayerConfig layer : maintained(config)) {
+      out.addAll(proposalsOf(layer, layers, git, store));
+    }
+    return out;
+  }
+
+  /** The proposal {@code layer@branch}, or null with the reason printed to {@code err}. */
+  static Proposal lookup(
+      String name, DaemonConfig config, Layers layers, GitSource git, Store store, PrintWriter err)
+      throws Exception {
+    return find(name, config, layers, git, store, err);
   }
 
   private static int usage(PrintWriter err) {
@@ -206,7 +255,8 @@ final class Proposals {
       Store store,
       String name,
       PrintWriter out,
-      PrintWriter err)
+      PrintWriter err,
+      LoadedModules modules)
       throws DaemonException {
     try {
       Proposal p = find(name, config, layers, git, store, err);
@@ -230,7 +280,8 @@ final class Proposals {
         out.println("  (nothing that the layer does not have already)");
       }
       Admin.Checked checked =
-          Admin.check(
+          checked(
+              modules,
               config,
               layers,
               Admin.Check.Options.of(Map.of(p.layer(), "@" + p.commit()), true),
@@ -261,7 +312,8 @@ final class Proposals {
       Store store,
       List<String> args,
       PrintWriter out,
-      PrintWriter err)
+      PrintWriter err,
+      LoadedModules modules)
       throws DaemonException {
     boolean withoutShadow = args.contains("--without-shadow");
     List<String> positional = args.stream().filter(a -> !a.startsWith("--")).toList();
@@ -283,7 +335,8 @@ final class Proposals {
         return 1;
       }
       Admin.Checked checked =
-          Admin.check(
+          checked(
+              modules,
               config,
               layers,
               Admin.Check.Options.of(Map.of(p.layer(), "@" + p.commit()), true),
