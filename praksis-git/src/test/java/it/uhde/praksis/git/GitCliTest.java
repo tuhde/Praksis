@@ -270,4 +270,34 @@ class GitCliTest {
     git.resolve("mail", url(), "main");
     assertThat(git.lastChange("mail", signed, "rules/x.toml").orElseThrow().signed()).isFalse();
   }
+
+  @Test
+  void listsBranchesAndTheCommitsOfOneThatAreNotInAnother() throws Exception {
+    String base = commit("Base", "ruleset.toml", "a");
+    git(upstream, "checkout", "--quiet", "-b", "ai-change");
+    commit("First step\n\nBecause.", "rules/x.toml", "one");
+    String tip = commit("Second step", "rules/x.toml", "two");
+    git(upstream, "checkout", "--quiet", "main");
+
+    var branches = git.branches("mail", url());
+
+    assertThat(branches)
+        .extracting(GitSource.Branch::name)
+        .containsExactlyInAnyOrder("main", "ai-change");
+    assertThat(
+            branches.stream().filter(b -> b.name().equals("ai-change")).findFirst().get().commit())
+        .isEqualTo(tip);
+    var commits = git.commits("mail", base, tip, 10);
+    assertThat(commits)
+        .extracting(GitSource.Change::subject)
+        .containsExactly("Second step", "First step");
+    assertThat(commits.get(1).body()).isEqualTo("Because.");
+    assertThat(git.commits("mail", tip, base, 10)).isEmpty();
+    assertThat(git.commits("mail", "", base, 10)).hasSize(1);
+
+    assertThat(git.isAncestor("mail", base, tip)).isTrue();
+    assertThat(git.isAncestor("mail", tip, base)).isFalse();
+    assertThat(git.isAncestor("mail", tip, tip)).isTrue();
+    assertThatThrownBy(() -> git.isAncestor("mail", "main", tip)).isInstanceOf(GitException.class);
+  }
 }

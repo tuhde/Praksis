@@ -41,7 +41,9 @@ public record AuditEntry(
      * A version of a rule seen for the first time at a start: its hash as the subject, and who
      * wrote it, why, and how it was verified.
      */
-    RULE
+    RULE,
+    /** A proposed change to a layer was approved or rejected: layer, branch, commit, why. */
+    PROPOSAL
   }
 
   /** The line for a capability call. */

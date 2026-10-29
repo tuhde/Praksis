@@ -40,7 +40,8 @@ import picocli.CommandLine.Spec;
       Praksis.AuditCommand.class,
       Praksis.Approvals.class,
       Praksis.GrantsCommand.class,
-      Praksis.ShadowCommand.class
+      Praksis.ShadowCommand.class,
+      Praksis.Proposals.class
     })
 public final class Praksis {
   static final int EXIT_FAILED = 1;
@@ -414,6 +415,105 @@ public final class Praksis {
       @Override
       public Integer call() {
         return print(send(new Request.Missed(rule, "discard")));
+      }
+    }
+  }
+
+  @Command(
+      name = "proposals",
+      description =
+          "Changes that an AI proposes as branches of a layer with ai_maintained = true. Without"
+              + " a subcommand it lists the branches that are not part of the layer yet. Praksis"
+              + " never merges or pushes: approving pins the layer to the commit you looked at.",
+      subcommands = {
+        Praksis.Proposals.Show.class,
+        Praksis.Proposals.Approve.class,
+        Praksis.Proposals.Reject.class
+      })
+  static final class Proposals extends Base {
+    @Override
+    public Integer call() throws InterruptedException {
+      return runDaemonCommand("--admin", "proposals", "list");
+    }
+
+    @Command(
+        name = "show",
+        description =
+            "Shows who changed what and why in a branch, runs the checks, the tests and the replay"
+                + " on it, and says what it needs: your approval, shadow mode, or nothing more.")
+    static final class Show extends Base {
+      @CommandLine.Parameters(
+          index = "0",
+          paramLabel = "<layer>@<branch>",
+          description = "The proposal.")
+      String proposal;
+
+      @Override
+      public Integer call() throws InterruptedException {
+        return runDaemonCommand("--admin", "proposals", "show", proposal);
+      }
+    }
+
+    @Command(
+        name = "approve",
+        description =
+            "Pins the layer to the commit of the branch, if the checks find no errors. You name the"
+                + " commit you looked at, so a branch that moved since is not approved. Restart the"
+                + " daemon afterwards; with shadow mode on, new and changed rules are observed first.")
+    static final class Approve extends Base {
+      @CommandLine.Parameters(
+          index = "0",
+          paramLabel = "<layer>@<branch>",
+          description = "The proposal.")
+      String proposal;
+
+      @CommandLine.Parameters(
+          index = "1",
+          paramLabel = "<commit>",
+          description = "The commit you looked at (7 characters at least).")
+      String commit;
+
+      @Option(
+          names = "--without-shadow",
+          description = "Approve although shadow mode is off, so new rules run at once.")
+      boolean withoutShadow;
+
+      @Override
+      public Integer call() throws InterruptedException {
+        java.util.List<String> args =
+            new java.util.ArrayList<>(
+                java.util.List.of("--admin", "proposals", "approve", proposal, commit));
+        if (withoutShadow) {
+          args.add("--without-shadow");
+        }
+        return runDaemonCommand(args.toArray(String[]::new));
+      }
+    }
+
+    @Command(
+        name = "reject",
+        description =
+            "Records that you do not want this branch. It is not listed again unless it changes.")
+    static final class Reject extends Base {
+      @CommandLine.Parameters(
+          index = "0",
+          paramLabel = "<layer>@<branch>",
+          description = "The proposal.")
+      String proposal;
+
+      @CommandLine.Parameters(
+          index = "1..*",
+          paramLabel = "<reason>",
+          description = "Why, for the audit log.")
+      java.util.List<String> reason = new java.util.ArrayList<>();
+
+      @Override
+      public Integer call() throws InterruptedException {
+        java.util.List<String> args =
+            new java.util.ArrayList<>(
+                java.util.List.of("--admin", "proposals", "reject", proposal));
+        args.addAll(reason);
+        return runDaemonCommand(args.toArray(String[]::new));
       }
     }
   }

@@ -203,6 +203,23 @@ final class Layers {
     return pins;
   }
 
+  /**
+   * Pins a git layer to a commit, keeping the other pins. The pin keeps the configured address and
+   * ref, so the layer runs this commit until the next {@code layers update} moves it to the latest
+   * commit of the ref.
+   */
+  void pin(String layerName, String commit) throws DaemonException {
+    LayerConfig layer =
+        config.layers().stream()
+            .filter(l -> l.name().equals(layerName) && l.isGit())
+            .findFirst()
+            .orElseThrow(
+                () -> new DaemonException("there is no git layer named '" + layerName + "'"));
+    Map<String, Pin> pins = new LinkedHashMap<>(readLock());
+    pins.put(layerName, new Pin(layer.git().get(), layer.ref().get(), commit));
+    writeLock(pins);
+  }
+
   private void writeLock(Map<String, Pin> pins) throws DaemonException {
     StringBuilder text =
         new StringBuilder(

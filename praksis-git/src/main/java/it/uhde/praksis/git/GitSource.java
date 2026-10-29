@@ -70,4 +70,31 @@ public interface GitSource {
       return signature.equals("G") || signature.equals("U");
     }
   }
+
+  /**
+   * The branches of the repository, after fetching it.
+   *
+   * @return the branch names and the commits they lead to
+   */
+  default java.util.List<Branch> branches(String name, String url) throws GitException {
+    return java.util.List.of();
+  }
+
+  /** A branch and the commit it leads to. */
+  record Branch(String name, String commit) {}
+
+  /**
+   * The commits that are in {@code tip} and not in {@code base}, newest first, from the local copy.
+   *
+   * @param limit the most commits to return
+   */
+  default java.util.List<Change> commits(String name, String base, String tip, int limit)
+      throws GitException {
+    return java.util.List.of();
+  }
+
+  /** Whether {@code ancestor} is {@code descendant} or one of its ancestors, in the local copy. */
+  default boolean isAncestor(String name, String ancestor, String descendant) throws GitException {
+    return false;
+  }
 }

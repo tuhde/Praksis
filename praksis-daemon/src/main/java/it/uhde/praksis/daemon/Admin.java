@@ -89,6 +89,9 @@ final class Admin {
       if (args.equals(List.of("effective"))) {
         return effective(config, layers, out, err);
       }
+      if (!args.isEmpty() && args.get(0).equals("proposals")) {
+        return Proposals.run(config, git, args.subList(1, args.size()), out, err);
+      }
       if (!args.isEmpty() && args.get(0).equals("verify")) {
         return verify(config, layers, args.subList(1, args.size()), out, err);
       }
@@ -100,7 +103,7 @@ final class Admin {
       return 1;
     }
     err.println(
-        "usage: layers status | layers update [--dry-run] [--accept-new-access] [name...] | effective | verify [--replay] [-n N] [--update] [--layer name=dir|@ref] | test");
+        "usage: layers status | layers update [--dry-run] [--accept-new-access] [name...] | proposals [...] | effective | verify [--replay] [-n N] [--update] [--layer name=dir|@ref] | test");
     return 2;
   }
 
@@ -234,68 +237,131 @@ final class Admin {
   private static int verify(
       DaemonConfig config, Layers layers, List<String> options, PrintWriter out, PrintWriter err)
       throws DaemonException {
-    boolean replay = false;
-    boolean update = false;
-    int count = 200;
-    java.util.Map<String, String> replacements = new java.util.LinkedHashMap<>();
-    for (int i = 0; i < options.size(); i++) {
-      String o = options.get(i);
-      switch (o) {
-        case "--replay" -> replay = true;
-        case "--update" -> update = true;
-        case "-n", "--layer" -> {
-          if (i + 1 >= options.size()) {
-            err.println("usage: verify [--replay] [-n N] [--update] [--layer name=dir|@ref]");
-            return 2;
-          }
-          String value = options.get(++i);
-          if (o.equals("-n")) {
-            try {
-              count = Integer.parseInt(value);
-            } catch (NumberFormatException ex) {
-              err.println("-n needs a number: " + value);
-              return 2;
+    Check.Options parsed = Check.Options.parse(options, err);
+    if (parsed == null) {
+      return 2;
+    }
+    Checked checked = check(config, layers, parsed, err);
+    if (checked == null) {
+      return 1;
+    }
+    print(checked, out);
+    return checked.report().ok() ? 0 : 1;
+  }
+
+  /** What the checks found. */
+  record Checked(
+      boolean candidate,
+      LayerStack.Effective current,
+      Layers.Candidate layers,
+      Verifier.Report report,
+      Tiers.Verdict verdict,
+      Replay.Report replayed) {}
+
+  /** Namespace for the options of the checks. */
+  static final class Check {
+    private Check() {}
+
+    /**
+     * @param replay whether to replay stored events
+     * @param update whether the pins move to the latest commits first
+     * @param count how many events to replay
+     * @param replacements layer name to a directory or {@code @ref}
+     */
+    record Options(
+        boolean replay, boolean update, int count, java.util.Map<String, String> replacements) {
+      private static final String USAGE =
+          "usage: verify [--replay] [-n N] [--update] [--layer name=dir|@ref]";
+
+      static Options of(java.util.Map<String, String> replacements, boolean replay) {
+        return new Options(replay, false, 200, replacements);
+      }
+
+      /**
+       * Reads the options of the command line; null, with the reason printed, if they are wrong.
+       */
+      static Options parse(List<String> options, PrintWriter err) {
+        boolean replay = false;
+        boolean update = false;
+        int count = 200;
+        java.util.Map<String, String> replacements = new java.util.LinkedHashMap<>();
+        for (int i = 0; i < options.size(); i++) {
+          String o = options.get(i);
+          switch (o) {
+            case "--replay" -> replay = true;
+            case "--update" -> update = true;
+            case "-n", "--layer" -> {
+              if (i + 1 >= options.size()) {
+                err.println(USAGE);
+                return null;
+              }
+              String value = options.get(++i);
+              if (o.equals("-n")) {
+                try {
+                  count = Integer.parseInt(value);
+                } catch (NumberFormatException ex) {
+                  err.println("-n needs a number: " + value);
+                  return null;
+                }
+              } else {
+                int eq = value.indexOf('=');
+                if (eq < 1) {
+                  err.println("--layer needs name=directory or name=@ref: " + value);
+                  return null;
+                }
+                replacements.put(value.substring(0, eq), value.substring(eq + 1));
+              }
             }
-          } else {
-            int eq = value.indexOf('=');
-            if (eq < 1) {
-              err.println("--layer needs name=directory or name=@ref: " + value);
-              return 2;
+            default -> {
+              err.println(USAGE);
+              return null;
             }
-            replacements.put(value.substring(0, eq), value.substring(eq + 1));
           }
         }
-        default -> {
-          err.println("usage: verify [--replay] [-n N] [--update] [--layer name=dir|@ref]");
-          return 2;
-        }
+        return new Options(replay, update, count, replacements);
+      }
+
+      boolean candidate() {
+        return update || !replacements.isEmpty();
       }
     }
-    boolean isCandidate = update || !replacements.isEmpty();
+  }
+
+  /**
+   * Runs the checks on the ruleset that would run, or on a candidate, with its tests and
+   * policy.toml. For a candidate, access that is new compared with the ruleset in use and that no
+   * grant covers is an error, and the tier of the change is worked out. With replay, stored events
+   * go through both rulesets.
+   *
+   * @return the result, or null if the checks could not be run (the reason is printed)
+   */
+  static Checked check(DaemonConfig config, Layers layers, Check.Options options, PrintWriter err)
+      throws DaemonException {
+    boolean isCandidate = options.candidate();
     LayerStack.Effective current;
     Layers.Candidate candidate;
     try {
       current = layers.effective();
       candidate =
           isCandidate
-              ? layers.candidate(replacements, update)
+              ? layers.candidate(options.replacements(), options.update())
               : new Layers.Candidate(layers.sources(layers.readLock()), current, layers.commits());
     } catch (RulesetException ex) {
       err.println("The layers cannot be put together:");
       ex.problems().forEach(p -> err.println("  " + p));
-      return 1;
+      return null;
     }
     LayerStack.Effective e = candidate.effective();
-    Verifier.Report report;
     Replay.Report replayed = null;
     Tiers.Verdict verdict = null;
+    List<Verifier.Finding> findings;
     try (LoadedModules modules =
         ModuleLoader.load(
             config.modules(),
             config.lockfile(),
             config.moduleSettings(),
             config.enabledModules())) {
-      List<Verifier.Finding> findings =
+      findings =
           new ArrayList<>(
               new Verifier(Daemon.compiler(config), modules.catalog())
                   .verify(e.ruleset())
@@ -336,20 +402,29 @@ final class Admin {
         ex.problems().forEach(p -> findings.add(policyFinding(p)));
       }
       findings.addAll(testFindings(config, candidate.sources(), e, modules));
-      report = new Verifier.Report(findings);
-      if (replay) {
-        replayed = replay(config, current, e, count, modules, err);
+      if (options.replay()) {
+        replayed = replay(config, current, e, options.count(), modules, err);
         if (replayed == null) {
-          return 1;
+          return null;
         }
       }
     } catch (ModuleLoadException ex) {
       err.println("cannot check the ruleset against the modules: " + ex.getMessage());
-      return 1;
+      return null;
     }
+    return new Checked(
+        isCandidate, current, candidate, new Verifier.Report(findings), verdict, replayed);
+  }
+
+  /** Prints what the checks found: findings, the tier of a change, the replay. */
+  static void print(Checked checked, PrintWriter out) {
+    LayerStack.Effective e = checked.layers().effective();
+    Verifier.Report report = checked.report();
+    Tiers.Verdict verdict = checked.verdict();
+    Replay.Report replayed = checked.replayed();
     out.printf(
         "%s %s (%d rules): %d error(s), %d warning(s)%n",
-        isCandidate ? "Candidate" : "Ruleset",
+        checked.candidate() ? "Candidate" : "Ruleset",
         e.ruleset().name(),
         e.ruleset().rules().size(),
         report.errors(),
@@ -393,7 +468,6 @@ final class Admin {
         }
       }
     }
-    return report.ok() ? 0 : 1;
   }
 
   /** Stored events through the ruleset in use and the candidate; null (reported) if impossible. */

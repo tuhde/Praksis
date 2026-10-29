@@ -142,16 +142,15 @@ public final class GitCli implements GitSource {
     if (!has(repo, commit)) {
       return Optional.empty();
     }
-    String out =
-        run(
-            repo,
-            "log",
-            "-1",
-            "--format=%H%x00%an%x00%ae%x00%aI%x00%s%x00%G?%x00%GF%x00%GK%x00%b",
-            commit,
-            "--",
-            path);
-    String[] f = out.split("\0", 9);
+    String out = run(repo, "log", "-1", "--format=" + CHANGE_FORMAT, commit, "--", path);
+    return out.isBlank() ? Optional.empty() : parseChange(out);
+  }
+
+  private static final String CHANGE_FORMAT =
+      "%H%x00%an%x00%ae%x00%aI%x00%s%x00%G?%x00%GF%x00%GK%x00%b";
+
+  private static Optional<Change> parseChange(String record) {
+    String[] f = record.split("\0", 9);
     if (f.length < 9 || f[0].isBlank()) {
       return Optional.empty();
     }
@@ -165,6 +164,62 @@ public final class GitCli implements GitSource {
             f[8].strip(),
             f[5].isBlank() ? "N" : f[5].strip(),
             f[6].isBlank() ? f[7].strip() : f[6].strip()));
+  }
+
+  @Override
+  public List<Branch> branches(String name, String url) throws GitException {
+    Path repo = repository(name);
+    fetch(repo, url, null);
+    List<Branch> out = new ArrayList<>();
+    for (String line :
+        run(repo, "for-each-ref", "--format=%(refname:short)%00%(objectname)", "refs/heads")
+            .split("\n")) {
+      String[] f = line.split("\0");
+      if (f.length == 2 && COMMIT.matcher(f[1].strip()).matches()) {
+        out.add(new Branch(f[0], f[1].strip()));
+      }
+    }
+    return out;
+  }
+
+  @Override
+  public List<Change> commits(String name, String base, String tip, int limit) throws GitException {
+    if (!COMMIT.matcher(tip).matches() || (!base.isEmpty() && !COMMIT.matcher(base).matches())) {
+      throw new GitException(
+          "not a full commit id: " + (COMMIT.matcher(tip).matches() ? base : tip));
+    }
+    Path repo = repository(name);
+    if (!has(repo, tip) || (!base.isEmpty() && !has(repo, base))) {
+      return List.of();
+    }
+    String range = base.isEmpty() ? tip : base + ".." + tip;
+    String out =
+        run(
+            repo,
+            "log",
+            "-" + Math.max(1, Math.min(limit, 200)),
+            "--format=" + CHANGE_FORMAT + "%x1e",
+            range,
+            "--");
+    List<Change> changes = new ArrayList<>();
+    for (String record : out.split("\u001e")) {
+      parseChange(record.strip()).ifPresent(changes::add);
+    }
+    return changes;
+  }
+
+  @Override
+  public boolean isAncestor(String name, String ancestor, String descendant) throws GitException {
+    if (!COMMIT.matcher(ancestor).matches() || !COMMIT.matcher(descendant).matches()) {
+      throw new GitException("not a full commit id");
+    }
+    Path repo = repository(name);
+    try {
+      run(repo, "merge-base", "--is-ancestor", ancestor, descendant);
+      return true;
+    } catch (GitException e) {
+      return false;
+    }
   }
 
   private Path repository(String name) throws GitException {
