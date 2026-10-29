@@ -55,6 +55,11 @@ public final class LoadedModules implements AutoCloseable {
     sources.forEach(source -> source.useCredentials(perComponent.apply(source.name())));
   }
 
+  /** Tells every capability where the files are that a person chose to attach. */
+  public void useUploadsDirectory(java.nio.file.Path directory) {
+    capabilities.values().forEach(capability -> capability.useUploadsDirectory(directory));
+  }
+
   /**
    * Gives every capability and event source the directory of its module below {@code root} ({@code
    * root/<module name>}), which is made if it is missing. A module that cannot be given a directory
@@ -87,7 +92,7 @@ public final class LoadedModules implements AutoCloseable {
   public synchronized void startSources(EventSink sink) throws CapabilityException {
     try {
       for (EventSource source : sources) {
-        source.start(sink);
+        ModuleCalls.start(source, sink);
         started.add(source);
       }
     } catch (CapabilityException | RuntimeException e) {

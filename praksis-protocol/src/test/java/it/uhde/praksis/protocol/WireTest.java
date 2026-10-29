@@ -89,7 +89,10 @@ class WireTest {
             new Request.RunCommand("mail.file", null, null),
             new Request.Outcome("e1"),
             new Request.Fetch("mail.reader", "mail.attachment", Map.of("name", "a.pdf"), "a.pdf"),
-            new Request.Fetch("v", "c", null, null))) {
+            new Request.Fetch("v", "c", null, null),
+            new Request.Upload(),
+            new Request.Lookup("mail.compose", "contacts.search", Map.of("query", "ann")),
+            new Request.Lookup("v", "c", null))) {
       assertThat(Wire.decodeRequest(Wire.encode(r))).isEqualTo(r);
     }
     var finding = new Response.Verification.Finding("ERROR", "test", "x", "y");
@@ -150,6 +153,10 @@ class WireTest {
                     0)),
             new Response.Verification(false, "t", 0, 0, 0, List.of(), null, null, null),
             new Response.ProposalList(List.of(proposal), null),
+            new Response.Suggestions(
+                List.of(Map.of("name", "Anna", "address", "anna@example.org"))),
+            new Response.Uploaded(
+                "7c2d1d2e-0000-4000-8000-000000000001", "/home/me/.praksis/uploads/x.part"),
             new Response.Fetched(
                 "/home/me/.praksis/downloads/x.part", "a.pdf", "application/pdf", 12),
             new Response.ResolvedView(
@@ -193,6 +200,28 @@ class WireTest {
                             2,
                             "images")),
                     new Response.ViewComponent(
+                        "form",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        new Response.ViewComponent.Form(
+                            "mail.write",
+                            "Write",
+                            "Send",
+                            List.of(
+                                new Response.ViewComponent.FormField(
+                                    "to", "string", false, null, "", "recipients")),
+                            List.of(new Response.ViewComponent.Submit("Save draft", "mail.draft")),
+                            new Response.ViewComponent.Lookup("contacts.search", "query")),
+                        null,
+                        null),
+                    new Response.ViewComponent(
                         "table",
                         null,
                         null,
@@ -205,6 +234,14 @@ class WireTest {
                                 List.of("a.pdf"),
                                 null,
                                 List.of(
+                                    new Response.ViewComponent.Action(
+                                        "Reply",
+                                        "",
+                                        Map.of(),
+                                        null,
+                                        null,
+                                        new Response.ViewComponent.Opens(
+                                            "mail.compose", Map.of("reply_to", "m1"))),
                                     new Response.ViewComponent.Action(
                                         "Save",
                                         "",

@@ -412,4 +412,46 @@ class RuleTestRunnerTest {
         .contains("content=ZHJhZnQ=")
         .doesNotContain("[B@");
   }
+
+  @Test
+  void aTestOfARuleThatNeedsAModuleThatIsNotThereIsSkippedNotFailed() throws Exception {
+    write("base/ruleset.toml", "format_version = 1\nname = \"base\"\n");
+    write(
+        "base/rules/mail.send.toml",
+        """
+        id = "mail.send"
+        effect = "external"
+        needs = ["mail.send"]
+        requires_modules = ["smtp"]
+
+        [trigger]
+        kind = "command"
+        title = "Send"
+
+        [[action]]
+        id = "send"
+        capability = "mail.send"
+        args = { to = "a@example.org" }
+        """);
+    write(
+        "base/tests/mail.send.toml",
+        """
+        format_version = 1
+        [[test]]
+        name = "sends"
+        [test.event]
+        type = "command.mail.send"
+        data = {}
+        [[test.call]]
+        capability = "mail.send"
+        args = { to = "a@example.org" }
+        """);
+
+    RuleTestRunner.Report report = run("base");
+
+    assertThat(report.ok()).as(report.toString()).isTrue();
+    assertThat(report.results())
+        .singleElement()
+        .satisfies(r -> assertThat(r.message()).startsWith("skipped"));
+  }
 }

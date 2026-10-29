@@ -267,4 +267,19 @@ class SanitizerTest {
   private static List<Map<String, Object>> children(Map<String, Object> block) {
     return (List<Map<String, Object>>) block.get("children");
   }
+
+  @Test
+  void theDescriptionCanBeReadBackAsPlainText() {
+    String html =
+        """
+        <h1>Title</h1><p>One <b>two</b><br>three</p>
+        <ul><li>a</li><li>b<ul><li>nested</li></ul></li></ul>
+        <blockquote><p>quoted</p><blockquote>deeper</blockquote></blockquote><hr><p>end</p>
+        """;
+
+    assertThat(Sanitizer.plain(clean(html).blocks()))
+        .isEqualTo(
+            "Title\n\nOne two\nthree\n\n- a\n- b\n  - nested\n\n> quoted\n> \n>> deeper\n\n----\n\nend");
+    assertThat(Sanitizer.plain(List.of())).isEmpty();
+  }
 }

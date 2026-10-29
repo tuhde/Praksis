@@ -61,7 +61,8 @@ public final class RuleTests {
       t.problem("has no [[test]]");
     }
     for (Table e : entries) {
-      e.onlyKeys(Set.of("name", "event", "params", "mock", "call"));
+      e.onlyKeys(
+          Set.of("name", "event", "params", "mock", "call", "when_modules", "without_modules"));
       String testName = e.string("name", true).orElse("?");
       if (!names.add(testName)) {
         e.problem("test name '" + testName + "' is used twice");
@@ -111,7 +112,9 @@ public final class RuleTests {
               data,
               params,
               mocks,
-              calls));
+              calls,
+              e.strings("when_modules"),
+              e.strings("without_modules")));
     }
   }
 

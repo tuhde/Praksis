@@ -619,10 +619,17 @@ public abstract class ImapRead implements Capability {
         out.put("date", m.getHeader("Date") == null ? "" : m.getHeader("Date")[0]);
         out.put("time", instant(m));
         out.put("message_id", id.messageId());
-        out.put("text", cut(body.text));
-        out.put("html", cut(body.html));
+        out.put("reply_to", ImapSource.header(m, "Reply-To"));
+        out.put("references", ImapSource.header(m, "References"));
         Sanitizer.Result safe =
             Sanitizer.sanitize(cut(body.html), Boolean.TRUE.equals(args.get("images")));
+        // a mail with only HTML still has a text, which a reply quotes
+        out.put(
+            "text",
+            body.text.isEmpty() && !safe.blocks().isEmpty()
+                ? cut(Sanitizer.plain(safe.blocks()))
+                : cut(body.text));
+        out.put("html", cut(body.html));
         out.put("blocks", safe.blocks());
         out.put("blocked", (long) safe.blockedImages());
         out.put("attachments", body.attachments);

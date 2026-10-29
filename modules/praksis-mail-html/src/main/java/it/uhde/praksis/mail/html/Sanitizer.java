@@ -119,6 +119,75 @@ public final class Sanitizer {
           "body",
           "html");
 
+  /**
+   * The text of a description as plain text, for a mail that has no plain-text part: paragraphs and
+   * headings separated by blank lines, items behind "- ", quotes behind "&gt; ".
+   */
+  public static String plain(List<Map<String, Object>> blocks) {
+    StringBuilder out = new StringBuilder();
+    plain(blocks, "", out);
+    return out.toString().strip();
+  }
+
+  @SuppressWarnings("unchecked")
+  private static void plain(List<Map<String, Object>> blocks, String indent, StringBuilder out) {
+    for (Map<String, Object> b : blocks) {
+      StringBuilder text = new StringBuilder();
+      for (Map<String, Object> run : (List<Map<String, Object>>) b.get("runs")) {
+        text.append(run.get("text"));
+      }
+      String kind = (String) b.get("kind");
+      List<Map<String, Object>> children = (List<Map<String, Object>>) b.get("children");
+      switch (kind) {
+        case "rule" -> out.append(indent).append("----\n\n");
+        case "quote" -> {
+          StringBuilder inner = new StringBuilder();
+          if (!text.isEmpty()) {
+            inner.append(text).append("\n\n");
+          }
+          plain(children, "", inner);
+          for (String line : inner.toString().stripTrailing().split("\n", -1)) {
+            out.append(indent).append(line.startsWith(">") ? ">" : "> ").append(line).append('\n');
+          }
+          out.append('\n');
+        }
+        case "list" -> {
+          plain(children, indent, out);
+          out.append('\n');
+        }
+        case "item" -> {
+          StringBuilder inner = new StringBuilder();
+          if (!text.isEmpty()) {
+            inner.append(text.toString().replace("\n", " ")).append('\n');
+          }
+          plain(children, "", inner);
+          String[] lines = inner.toString().strip().split("\n", -1);
+          for (int i = 0; i < lines.length; i++) {
+            if (lines[i].isEmpty() && i + 1 < lines.length && lines[i + 1].startsWith("- ")) {
+              continue; // a nested list follows its item without a gap
+            }
+            out.append(indent);
+            if (i == 0) {
+              out.append("- ").append(lines[i]);
+            } else if (!lines[i].isEmpty()) {
+              out.append("  ").append(lines[i]);
+            }
+            out.append('\n');
+          }
+        }
+        default -> {
+          if (!text.isEmpty()) {
+            for (String line : text.toString().split("\n", -1)) {
+              out.append(indent).append(line).append('\n');
+            }
+            out.append('\n');
+          }
+          plain(children, indent, out);
+        }
+      }
+    }
+  }
+
   /** What came out of a page. */
   public record Result(List<Map<String, Object>> blocks, int blockedImages) {}
 

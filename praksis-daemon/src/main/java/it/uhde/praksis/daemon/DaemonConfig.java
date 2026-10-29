@@ -138,6 +138,11 @@ public record DaemonConfig(
     return home.resolve("downloads");
   }
 
+  /** Where the files wait that a person chose to attach to something they send. */
+  public Path uploadsDirectory() {
+    return home.resolve("uploads");
+  }
+
   /** Where the modules keep their own files: {@code <home>/data/<module>}. */
   public Path dataDirectory() {
     return home.resolve("data");

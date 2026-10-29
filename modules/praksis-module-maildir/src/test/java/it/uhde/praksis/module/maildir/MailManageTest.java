@@ -278,6 +278,8 @@ class MailManageTest {
 
     Map<String, Object> blocked = call(get, "message", file.toString());
     assertThat(blocked).containsEntry("blocked", 1L);
+    // there is no plain part, so the text is made from the HTML, which a reply can quote
+    assertThat((String) blocked.get("text")).contains("Hello world").doesNotContain("alert");
     assertThat(blocked.get("blocks").toString())
         .contains("Hello", "world", "[image: logo]")
         .doesNotContain("alert")
@@ -286,5 +288,21 @@ class MailManageTest {
     Map<String, Object> allowed = call(get, "message", file.toString(), "images", true);
     assertThat(allowed).containsEntry("blocked", 0L);
     assertThat(allowed.get("blocks").toString()).contains("image=https://t.example/p.png");
+  }
+
+  @Test
+  void getReturnsTheHeadersThatAnAnswerNeeds() throws Exception {
+    Path file = root.resolve("cur/9.a.host:2,S");
+    Files.writeString(
+        file,
+        "From: a@x\nReply-To: Boss <boss@x>\nSubject: s\nMessage-ID: <9@x>\n"
+            + "References: <1@x>\n <2@x>\n\nbody\n");
+
+    Map<String, Object> got = call(make(new MailGet()), "message", file.toString());
+
+    assertThat(got)
+        .containsEntry("reply_to", "Boss <boss@x>")
+        .containsEntry("references", "<1@x> <2@x>")
+        .containsEntry("message_id", "<9@x>");
   }
 }

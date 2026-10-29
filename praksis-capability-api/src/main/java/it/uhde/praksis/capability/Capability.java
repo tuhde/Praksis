@@ -34,6 +34,15 @@ public interface Capability {
   default void useDataDirectory(java.nio.file.Path directory) {}
 
   /**
+   * Hands over the directory where a person's files wait to be attached to something, once, after
+   * {@link #configure}. A person puts a file there by choosing it in the frontend; it is named by a
+   * random token, readable by this user alone, and removed after a day. The implementation may only
+   * read it, and only the files whose token it is given, so that nothing a rule says can make it
+   * read a file the person did not choose. The default does nothing.
+   */
+  default void useUploadsDirectory(java.nio.file.Path directory) {}
+
+  /**
    * Releases what the implementation holds, e.g. connections and their threads. Called once when
    * the daemon shuts down, after the last call.
    */

@@ -36,6 +36,8 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.Views.class, name = "views"),
   @JsonSubTypes.Type(value = Request.ViewResolve.class, name = "view"),
   @JsonSubTypes.Type(value = Request.Fetch.class, name = "fetch"),
+  @JsonSubTypes.Type(value = Request.Upload.class, name = "upload"),
+  @JsonSubTypes.Type(value = Request.Lookup.class, name = "lookup"),
   @JsonSubTypes.Type(value = Request.Stop.class, name = "stop")
 })
 public sealed interface Request {
@@ -257,6 +259,31 @@ public sealed interface Request {
       implements Request {
     public ViewResolve {
       params = params == null ? java.util.Map.of() : params;
+    }
+  }
+
+  /**
+   * Asks for a place to put a file that a person chose to attach to a mail. Answered with {@link
+   * Response.Uploaded}: an empty file that only this user can read, and its token. The client
+   * copies the file into it and gives the token (never the path) to the command; a module reads
+   * exactly the files whose tokens it is given. What waits longer than a day is removed.
+   */
+  record Upload() implements Request {}
+
+  /**
+   * Asks for suggestions for what a person is typing into a field of a form of a view, such as the
+   * addresses that match the start of a name. The view must have a lookup with this capability; the
+   * daemon reads it under the grants of the layer that owns the view. Answered with {@link
+   * Response.Suggestions} (at most 20), or with an error.
+   *
+   * @param view the view id
+   * @param capability the capability of the lookup
+   * @param args its arguments, as the description of the view gave them plus the typed text
+   */
+  record Lookup(String view, String capability, java.util.Map<String, Object> args)
+      implements Request {
+    public Lookup {
+      args = args == null ? java.util.Map.of() : args;
     }
   }
 

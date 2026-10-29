@@ -56,6 +56,12 @@ class ViewResolverTest {
                               new FieldDescriptor("blocks", ValueType.LIST, true, false),
                               new FieldDescriptor("blocked", ValueType.INT, true, false))),
                       new CapabilityDescriptor(
+                          "contacts.search",
+                          EffectClass.READ_ONLY,
+                          true,
+                          List.of(new FieldDescriptor("query", ValueType.STRING, true, false)),
+                          List.of(new FieldDescriptor("items", ValueType.LIST, true, false))),
+                      new CapabilityDescriptor(
                           "mail.attachment",
                           EffectClass.READ_ONLY,
                           true,
@@ -133,6 +139,7 @@ class ViewResolverTest {
 
         @Override
         public Map<String, Object> invoke(CapabilityContext c, Map<String, Object> args) {
+          gets.add((String) args.get("message"));
           Map<String, Object> bad = new java.util.LinkedHashMap<>();
           bad.put("kind", "script"); // not a kind
           bad.put("runs", List.of(Map.of("text", "evil")));
@@ -167,6 +174,7 @@ class ViewResolverTest {
         }
       };
 
+  private final List<String> gets = new ArrayList<>();
   private final Map<String, Object> asked = new java.util.LinkedHashMap<>();
   private final List<String> allowedCalls = new ArrayList<>();
 
@@ -185,7 +193,40 @@ class ViewResolverTest {
         }
       };
 
+  private final List<String> searched = new ArrayList<>();
+
+  /** The address book: matches by the start of the name. */
+  private final Capability contacts =
+      new Capability() {
+        @Override
+        public String name() {
+          return "contacts.search";
+        }
+
+        @Override
+        public Map<String, Object> invoke(CapabilityContext c, Map<String, Object> args) {
+          searched.add((String) args.get("query"));
+          List<Object> items = new ArrayList<>();
+          for (int i = 0; i < 30; i++) {
+            items.add(
+                Map.of(
+                    "name",
+                    "Anna " + i,
+                    "address",
+                    "anna" + i + "@example.org",
+                    "count",
+                    (long) i));
+          }
+          return Map.of("items", items);
+        }
+      };
+
   private ViewResolver resolver(String view, String command) throws IOException, Exception {
+    return resolverWith(view, command == null ? Map.of() : Map.of("mail.file", command));
+  }
+
+  private ViewResolver resolverWith(String view, Map<String, String> commands)
+      throws IOException, Exception {
     Path layer = dir.resolve("l" + System.nanoTime());
     Files.createDirectories(layer.resolve("views"));
     Files.createDirectories(layer.resolve("rules"));
@@ -193,8 +234,8 @@ class ViewResolverTest {
         layer.resolve("ruleset.toml"),
         "format_version = 1\nname = \"t\"\n[param.limit]\ntype = \"int\"\ndefault = 5\n");
     Files.writeString(layer.resolve("views/v.toml"), view);
-    if (command != null) {
-      Files.writeString(layer.resolve("rules/mail.file.toml"), command);
+    for (var rule : commands.entrySet()) {
+      Files.writeString(layer.resolve("rules/" + rule.getKey() + ".toml"), rule.getValue());
     }
     LayerStack.Effective e =
         LayerStack.resolve(List.of(new LayerStack.Source("mine", layer)), Map.of());
@@ -203,7 +244,11 @@ class ViewResolverTest {
         Map.of("v", "mine"),
         CATALOG,
         Expressions.compiler(),
-        Map.of("mail.list", list, "mail.get", get, "mail.attachment", attachment),
+        Map.of(
+            "mail.list", list,
+            "mail.get", get,
+            "mail.attachment", attachment,
+            "contacts.search", contacts),
         (rule, capability, args) ->
             allow
                 ? AccessPolicy.Decision.allow()
@@ -711,5 +756,133 @@ class ViewResolverTest {
     assertThat(Downloads.cleanName("   ")).isEqualTo("download");
     assertThat(Downloads.cleanName(null)).isEqualTo("download");
     assertThat(Downloads.cleanName("x".repeat(300) + ".pdf")).hasSize(120).endsWith(".pdf");
+  }
+
+  private static final String WRITE =
+      """
+      id = "mail.write"
+      effect = "local-write"
+      needs = ["mail.move"]
+      [trigger]
+      kind = "command"
+      title = "Write"
+      [[trigger.param]]
+      name = "to"
+      type = "string"
+      default = ""
+      widget = "recipients"
+      [[trigger.param]]
+      name = "text"
+      type = "string"
+      default = ""
+      widget = "multiline"
+      [[trigger.param]]
+      name = "attachments"
+      type = "list"
+      default = []
+      widget = "files"
+      [[action]]
+      id = "move"
+      capability = "mail.move"
+      args = { message = { cel = "event.data.text" }, folder = "Drafts" }
+      """;
+
+  private static final String DRAFT =
+      WRITE
+          .replace("mail.write", "mail.draft")
+          .replace("title = \"Write\"", "title = \"Save a draft\"");
+
+  private static final String COMPOSE =
+      """
+      title = "Write"
+      [param.reply_to]
+      type = "string"
+      default = ""
+      [[component]]
+      type = "form"
+      command = "mail.write"
+      submit_label = "Send"
+      also = [ { label = "Save draft", command = "mail.draft" } ]
+      lookup = { capability = "contacts.search", arg = "query" }
+      [component.defaults]
+      to = { cel = "view.reply_to" }
+      """;
+
+  @Test
+  void aFormTellsHowToDrawItsFieldsWhichOtherButtonsItHasAndWhereSuggestionsComeFrom()
+      throws Exception {
+    ViewResolver resolver = resolverWith(COMPOSE, Map.of("mail.write", WRITE, "mail.draft", DRAFT));
+
+    Response.ResolvedView r =
+        (Response.ResolvedView) resolver.resolve("v", Map.of("reply_to", "anna@example.org"), 1);
+
+    ViewComponent.Form form = r.components().get(0).form();
+    assertThat(form.command()).isEqualTo("mail.write");
+    assertThat(form.submit()).isEqualTo("Send");
+    assertThat(form.fields())
+        .extracting(ViewComponent.FormField::widget)
+        .containsExactly("recipients", "multiline", "files");
+    assertThat(form.fields().get(0).value()).isEqualTo("anna@example.org");
+    assertThat(form.others()).containsExactly(new ViewComponent.Submit("Save draft", "mail.draft"));
+    assertThat(form.lookup()).isEqualTo(new ViewComponent.Lookup("contacts.search", "query"));
+    assertThat(searched).isEmpty(); // nothing is looked up until a person types
+  }
+
+  @Test
+  void aLookupAsksTheCapabilityOfTheViewUnderItsGrantsAndNothingElse() throws Exception {
+    ViewResolver resolver = resolverWith(COMPOSE, Map.of("mail.write", WRITE, "mail.draft", DRAFT));
+
+    Response answer = resolver.lookup("v", "contacts.search", Map.of("query", "ann"));
+
+    Response.Suggestions suggestions = (Response.Suggestions) answer;
+    assertThat(suggestions.items()).hasSize(20); // at most
+    assertThat(suggestions.items().get(0)).containsEntry("address", "anna0@example.org");
+    assertThat(searched).containsExactly("ann");
+
+    // the view cannot be used to ask anything else, or about views that do not exist
+    assertThat(resolver.lookup("v", "mail.list", Map.of("folder", "INBOX")))
+        .isEqualTo(new Response.Error("view 'v' has no lookup of 'mail.list'"));
+    assertThat(resolver.lookup("nope", "contacts.search", Map.of()))
+        .isEqualTo(new Response.Error("there is no view 'nope'"));
+    assertThat(resolver.lookup("v", "contacts.search", Map.of("nope", "x")))
+        .isInstanceOf(Response.Error.class);
+    assertThat(reads).isEmpty();
+
+    allow = false;
+    assertThat(resolver.lookup("v", "contacts.search", Map.of("query", "x")))
+        .isEqualTo(new Response.Error("layer 'mine' has no grant"));
+    assertThat(searched).containsExactly("ann");
+    assertThat(this.denied).anyMatch(d -> d.startsWith("view:v contacts.search"));
+  }
+
+  @Test
+  void aSourceCanUseTheOnesBeforeItAndAnActionOpensAViewWithItsState() throws Exception {
+    String view =
+        """
+        title = "Reply"
+        [param.m]
+        type = "string"
+        default = "m1"
+        [source.first]
+        capability = "mail.get"
+        args = { message = { cel = "view.m" } }
+        [source.second]
+        capability = "mail.get"
+        args = { message = { cel = "'blocks:' + string(size(source.first.blocks))" } }
+
+        [[component]]
+        type = "button"
+        label = "Reply"
+        opens = { view = "v", params = { m = { cel = "view.m + '!'" } } }
+        """;
+
+    Response.ResolvedView r =
+        (Response.ResolvedView) resolver(view, null).resolve("v", Map.of(), 1);
+
+    assertThat(gets).containsExactly("m1", "blocks:3"); // in the order of the file
+    assertThat(r.warnings()).isEmpty();
+    ViewComponent.Action action = r.components().get(0).actions().get(0);
+    assertThat(action.opens()).isEqualTo(new ViewComponent.Opens("v", Map.of("m", "m1!")));
+    assertThat(action.command()).isEmpty();
   }
 }

@@ -77,6 +77,12 @@
       <artifactId>jsoup</artifactId>
       <scope>runtime</scope>
     </dependency>
+    <dependency>
+      <groupId>it.uhde</groupId>
+      <artifactId>praksis-module-contacts</artifactId>
+      <version>${project.version}</version>
+      <scope>runtime</scope>
+    </dependency>
     <!-- Like the IMAP module: its Angus Mail jars go to its own directory. -->
     <dependency>
       <groupId>it.uhde</groupId>
@@ -101,7 +107,7 @@
             <configuration>
               <outputDirectory>${project.build.directory}/mp</outputDirectory>
               <includeScope>runtime</includeScope>
-              <excludeArtifactIds>praksis-expression-cel,praksis-module-maildir,praksis-module-imap,praksis-module-smtp,praksis-mail-html,jsoup,angus-mail,jakarta.mail-api,jakarta.activation-api,angus-activation</excludeArtifactIds>
+              <excludeArtifactIds>praksis-expression-cel,praksis-module-maildir,praksis-module-imap,praksis-module-smtp,praksis-module-contacts,praksis-mail-html,jsoup,angus-mail,jakarta.mail-api,jakarta.activation-api,angus-activation</excludeArtifactIds>
             </configuration>
           </execution>
           <execution>
@@ -114,6 +120,18 @@
               <outputDirectory>${project.build.directory}/imap</outputDirectory>
               <includeScope>runtime</includeScope>
               <includeArtifactIds>praksis-module-imap,praksis-mail-html,jsoup,angus-mail,jakarta.mail-api,jakarta.activation-api,angus-activation</includeArtifactIds>
+            </configuration>
+          </execution>
+          <execution>
+            <id>contacts-module</id>
+            <phase>package</phase>
+            <goals>
+              <goal>copy-dependencies</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/contacts</outputDirectory>
+              <includeScope>runtime</includeScope>
+              <includeArtifactIds>praksis-module-contacts,angus-mail,jakarta.mail-api,jakarta.activation-api,angus-activation</includeArtifactIds>
             </configuration>
           </execution>
           <execution>
@@ -200,6 +218,11 @@
                 <copy todir="${image.dir}/lib/praksis/modules/imap">
                   <fileset dir="${project.build.directory}/imap" includes="*.jar"/>
                   <fileset dir="${project.basedir}/../modules/praksis-module-imap" includes="module.toml"/>
+                </copy>
+                <mkdir dir="${image.dir}/lib/praksis/modules/contacts"/>
+                <copy todir="${image.dir}/lib/praksis/modules/contacts">
+                  <fileset dir="${project.build.directory}/contacts" includes="*.jar"/>
+                  <fileset dir="${project.basedir}/../modules/praksis-module-contacts" includes="module.toml"/>
                 </copy>
                 <mkdir dir="${image.dir}/lib/praksis/modules/smtp"/>
                 <copy todir="${image.dir}/lib/praksis/modules/smtp">

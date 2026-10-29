@@ -104,6 +104,8 @@ results = [
   { name = "date", type = "string", required = true },
   { name = "time", type = "timestamp", required = true },
   { name = "message_id", type = "string", required = true },
+  { name = "reply_to", type = "string", required = true },
+  { name = "references", type = "string", required = true },
   { name = "text", type = "string", required = true },
   { name = "html", type = "string", required = true },
   { name = "blocks", type = "list", required = true },

@@ -36,6 +36,8 @@ import java.util.Objects;
  *     layers, not with the values in the local configuration
  * @param mocks results by capability name
  * @param calls the calls the rule must make, in order
+ * @param whenModules modules that must be there for the test to run
+ * @param withoutModules modules that must not be there for the test to run
  */
 public record RuleTest(
     String rule,
@@ -45,7 +47,9 @@ public record RuleTest(
     Map<String, Object> eventData,
     Map<String, Object> params,
     Map<String, Map<String, Object>> mocks,
-    List<ExpectedCall> calls) {
+    List<ExpectedCall> calls,
+    List<String> whenModules,
+    List<String> withoutModules) {
   public RuleTest {
     Objects.requireNonNull(rule, "rule");
     Objects.requireNonNull(name, "name");
@@ -53,6 +57,30 @@ public record RuleTest(
     params = Map.copyOf(params);
     mocks = Map.copyOf(mocks);
     calls = List.copyOf(calls);
+    whenModules = List.copyOf(whenModules);
+    withoutModules = List.copyOf(withoutModules);
+  }
+
+  /** A test that runs wherever the rule is. */
+  public RuleTest(
+      String rule,
+      String name,
+      String where,
+      String eventType,
+      Map<String, Object> eventData,
+      Map<String, Object> params,
+      Map<String, Map<String, Object>> mocks,
+      List<ExpectedCall> calls) {
+    this(rule, name, where, eventType, eventData, params, mocks, calls, List.of(), List.of());
+  }
+
+  /**
+   * Whether the test is meant for an installation with these modules: all of {@code whenModules}
+   * are there and none of {@code withoutModules}. A rule with steps that need a module does
+   * something else without it, and each way has its own test.
+   */
+  public boolean appliesTo(java.util.Set<String> modules) {
+    return modules.containsAll(whenModules) && withoutModules.stream().noneMatch(modules::contains);
   }
 
   /** A call that the rule is expected to make. */

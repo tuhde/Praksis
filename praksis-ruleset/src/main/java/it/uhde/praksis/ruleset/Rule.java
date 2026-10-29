@@ -24,7 +24,8 @@ public record Rule(
     List<String> needs,
     boolean required,
     Trigger trigger,
-    List<Action> actions) {
+    List<Action> actions,
+    List<String> requiresModules) {
   public Rule {
     Objects.requireNonNull(id, "id");
     Objects.requireNonNull(description, "description");
@@ -32,6 +33,58 @@ public record Rule(
     Objects.requireNonNull(trigger, "trigger");
     needs = List.copyOf(needs);
     actions = List.copyOf(actions);
+    requiresModules = List.copyOf(requiresModules);
+  }
+
+  /**
+   * The rule as it is with these modules: the steps that ask for a module that is not there are
+   * left out, and so are the capabilities that only they needed.
+   *
+   * @return the rule, or empty if no step is left
+   */
+  public Optional<Rule> available(java.util.Set<String> modules) {
+    List<Action> kept = new java.util.ArrayList<>();
+    java.util.Set<String> left = new java.util.HashSet<>();
+    java.util.Set<String> dropped = new java.util.HashSet<>();
+    for (Action a : actions) {
+      if (a instanceof Action.Call call && !modules.containsAll(call.requiresModules())) {
+        dropped.add(call.capability());
+      } else {
+        kept.add(a);
+        if (a instanceof Action.Call call) {
+          left.add(call.capability());
+        }
+      }
+    }
+    if (kept.size() == actions.size()) {
+      return Optional.of(this);
+    }
+    if (kept.stream().noneMatch(a -> a instanceof Action.Call)) {
+      return Optional.empty();
+    }
+    dropped.removeAll(left);
+    return Optional.of(
+        new Rule(
+            id,
+            description,
+            effect,
+            needs.stream().filter(n -> !dropped.contains(n)).toList(),
+            required,
+            trigger,
+            kept,
+            requiresModules));
+  }
+
+  /** A rule that does not depend on a module being there. */
+  public Rule(
+      String id,
+      Optional<String> description,
+      EffectClass effect,
+      List<String> needs,
+      boolean required,
+      Trigger trigger,
+      List<Action> actions) {
+    this(id, description, effect, needs, required, trigger, actions, List.of());
   }
 
   /**

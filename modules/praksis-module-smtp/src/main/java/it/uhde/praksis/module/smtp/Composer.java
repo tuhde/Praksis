@@ -32,10 +32,20 @@ final class Composer {
 
   private static final Session SESSION = Session.getInstance(new java.util.Properties());
 
+  private static final java.util.regex.Pattern TOKEN =
+      java.util.regex.Pattern.compile(
+          "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
+
   private final SmtpSettings settings;
+  private volatile java.nio.file.Path uploads;
 
   Composer(SmtpSettings settings) {
     this.settings = settings;
+  }
+
+  /** Where the files are that a person chose to attach; they are read by token only. */
+  void uploads(java.nio.file.Path directory) {
+    this.uploads = directory;
   }
 
   /**
@@ -99,7 +109,7 @@ final class Composer {
         message.setHeader("References", references);
       }
       message.setHeader("X-Mailer", "Praksis");
-      List<MimeBodyPart> attachments = attachments(args);
+      List<MimeBodyPart> attachments = attachments(args, uploads, settings.maxBytes());
       MimeMultipart body = bodyOf(text, html);
       if (attachments.isEmpty()) {
         if (html.isEmpty()) {
@@ -150,7 +160,14 @@ final class Composer {
     return alternative;
   }
 
-  private static List<MimeBodyPart> attachments(Map<String, Object> args)
+  /**
+   * The attachments of a call. Each has a {@code name}, an optional {@code type} and its bytes
+   * either as {@code content} (a rule that forwards what another capability returned) or as an
+   * {@code upload}: the token of a file that a person chose. A token names a file in the uploads
+   * directory and nothing else, so a call cannot read any other file.
+   */
+  private static List<MimeBodyPart> attachments(
+      Map<String, Object> args, java.nio.file.Path uploads, long maxBytes)
       throws CapabilityException, MessagingException {
     List<MimeBodyPart> out = new ArrayList<>();
     if (args.get("attachments") == null) {
@@ -159,18 +176,31 @@ final class Composer {
     if (!(args.get("attachments") instanceof List<?> list)) {
       throw new CapabilityException("attachments must be a list", false);
     }
+    long total = 0;
     for (Object o : list) {
-      if (!(o instanceof Map<?, ?> m)
-          || !(m.get("name") instanceof String name)
-          || !(m.get("content") instanceof byte[] content)) {
+      if (!(o instanceof Map<?, ?> m) || !(m.get("name") instanceof String name)) {
         throw new CapabilityException(
-            "every attachment needs a name (text) and a content (bytes)", false);
+            "every attachment needs a name and its bytes (content or upload)", false);
       }
       if (name.isBlank()
           || name.indexOf('\r') >= 0
           || name.indexOf('\n') >= 0
           || name.contains("/")) {
         throw new CapabilityException("the attachment name '" + name + "' is not allowed", false);
+      }
+      byte[] content;
+      if (m.get("content") instanceof byte[] bytes) {
+        content = bytes;
+      } else if (m.get("upload") instanceof String token) {
+        content = upload(uploads, token, name, maxBytes);
+      } else {
+        throw new CapabilityException(
+            "the attachment '" + name + "' has neither content nor an upload", false);
+      }
+      total += content.length;
+      if (total > maxBytes) {
+        throw new CapabilityException(
+            "the attachments are more than the limit of " + maxBytes + " bytes", false);
       }
       String type =
           m.get("type") instanceof String t && !t.isBlank() ? t : "application/octet-stream";
@@ -184,6 +214,32 @@ final class Composer {
       out.add(part);
     }
     return out;
+  }
+
+  private static byte[] upload(java.nio.file.Path uploads, String token, String name, long max)
+      throws CapabilityException {
+    if (uploads == null) {
+      throw new CapabilityException(
+          "attachments by upload need the uploads directory, which the daemon did not give", false);
+    }
+    if (!TOKEN.matcher(token).matches()) {
+      throw new CapabilityException("'" + token + "' is not the token of an uploaded file", false);
+    }
+    java.nio.file.Path file = uploads.resolve(token + ".part");
+    try {
+      if (!java.nio.file.Files.isRegularFile(file, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+        throw new CapabilityException(
+            "the file for '" + name + "' is not there (uploaded files are removed after a day)",
+            false);
+      }
+      if (java.nio.file.Files.size(file) > max) {
+        throw new CapabilityException(
+            "the file for '" + name + "' is more than the limit of " + max + " bytes", false);
+      }
+      return java.nio.file.Files.readAllBytes(file);
+    } catch (java.io.IOException e) {
+      throw new CapabilityException("cannot read the file for '" + name + "'", true, e);
+    }
   }
 
   private static List<InternetAddress> addresses(Map<String, Object> args, String key)

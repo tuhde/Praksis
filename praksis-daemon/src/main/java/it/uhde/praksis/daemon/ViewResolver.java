@@ -132,6 +132,7 @@ final class ViewResolver {
     Map<String, Object> dynamic = new HashMap<>();
     dynamic.put("view", state);
     Map<String, Object> sources = new LinkedHashMap<>();
+    dynamic.put("source", sources); // filled one by one: a source may use the ones before it
     String layer = owners.getOrDefault(id, "?");
     for (var source : view.sources().entrySet()) {
       sources.put(
@@ -209,7 +210,8 @@ final class ViewResolver {
     }
     try {
       Map<String, Object> result =
-          capability.invoke(new ReadContext(component + "/download"), args);
+          it.uhde.praksis.engine.ModuleCalls.invoke(
+              capability, new ReadContext(component + "/download"), args);
       if (result == null || !(result.get("content") instanceof byte[] content)) {
         return new Response.Error("'" + capabilityName + "' gave no content");
       }
@@ -229,6 +231,83 @@ final class ViewResolver {
     } catch (Exception e) {
       return new Response.Error(String.valueOf(e.getMessage()));
     }
+  }
+
+  /**
+   * Suggestions for what a person types into a field of a form: the capability of a lookup of the
+   * view, read under the grants of the layer that owns the view. A refusal is an audit line; a
+   * lookup that works is not, because it is asked for as a person types.
+   */
+  Response lookup(String id, String capabilityName, Map<String, Object> given) {
+    View view = ruleset.views().stream().filter(v -> v.id().equals(id)).findFirst().orElse(null);
+    if (view == null) {
+      return new Response.Error("there is no view '" + id + "'");
+    }
+    if (!hasLookup(view.components(), capabilityName)) {
+      return new Response.Error("view '" + id + "' has no lookup of '" + capabilityName + "'");
+    }
+    CapabilityDescriptor descriptor = catalog.capability(capabilityName).orElse(null);
+    Capability capability = capabilities.get(capabilityName);
+    if (descriptor == null || capability == null) {
+      return new Response.Error("capability '" + capabilityName + "' is not available");
+    }
+    Map<String, Object> args = new LinkedHashMap<>();
+    try {
+      for (var arg : given.entrySet()) {
+        FieldDescriptor field =
+            descriptor.params().stream()
+                .filter(p -> p.name().equals(arg.getKey()))
+                .findFirst()
+                .orElseThrow(
+                    () ->
+                        new IllegalArgumentException(
+                            "'" + capabilityName + "' has no argument '" + arg.getKey() + "'"));
+        args.put(arg.getKey(), Injection.coerce(field, arg.getValue()));
+      }
+    } catch (IllegalArgumentException e) {
+      return new Response.Error(e.getMessage());
+    }
+    String component = "view:" + view.id();
+    AccessPolicy.Decision decision = access.check(component, descriptor, args);
+    if (!decision.allowed()) {
+      audit.record(
+          clock.instant(), component, capabilityName, args, false, Optional.of(decision.reason()));
+      return new Response.Error(decision.reason());
+    }
+    try {
+      Map<String, Object> result =
+          it.uhde.praksis.engine.ModuleCalls.invoke(
+              capability, new ReadContext(component + "/lookup"), args);
+      List<Map<String, Object>> items = new ArrayList<>();
+      if (result != null && result.get("items") instanceof List<?> list) {
+        for (Object o : list) {
+          if (items.size() >= 20) {
+            break;
+          }
+          if (o instanceof Map<?, ?> m) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            m.forEach((k, v) -> item.put(String.valueOf(k), show(v)));
+            items.add(item);
+          }
+        }
+      }
+      return new Response.Suggestions(items);
+    } catch (Exception e) {
+      return new Response.Error(String.valueOf(e.getMessage()));
+    }
+  }
+
+  private static boolean hasLookup(List<View.Component> components, String capability) {
+    for (View.Component c : components) {
+      if (c.values().get("lookup.capability") instanceof Arg.Literal l
+          && String.valueOf(l.value()).equals(capability)) {
+        return true;
+      }
+      if (hasLookup(c.children(), capability)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private static boolean offers(List<View.Component> components, String capability) {
@@ -258,7 +337,7 @@ final class ViewResolver {
     }
     try {
       return Boolean.TRUE.equals(
-          evaluate(view, source.when().get(), dynamic, ruleParams, Set.of("view")));
+          evaluate(view, source.when().get(), dynamic, ruleParams, Set.of("view", "source")));
     } catch (ExpressionException e) {
       problems.add("source '" + name + "': when: " + e.getMessage());
       return false;
@@ -291,7 +370,8 @@ final class ViewResolver {
         Object value =
             switch (arg.getValue()) {
               case Arg.Literal l -> l.value();
-              case Arg.Expr e -> evaluate(view, e.source(), dynamic, ruleParams, Set.of("view"));
+              case Arg.Expr e ->
+                  evaluate(view, e.source(), dynamic, ruleParams, Set.of("view", "source"));
             };
         args.put(arg.getKey(), Injection.coerce(field, value));
       }
@@ -313,7 +393,8 @@ final class ViewResolver {
     }
     try {
       Map<String, Object> result =
-          capability.invoke(new ReadContext("view:" + view.id() + "/" + name), args);
+          it.uhde.praksis.engine.ModuleCalls.invoke(
+              capability, new ReadContext("view:" + view.id() + "/" + name), args);
       return result == null ? Map.of() : result;
     } catch (Exception e) {
       problems.add(at + ": " + e.getMessage());
@@ -637,8 +718,22 @@ final class ViewResolver {
               : p.defaultValue().orElse(null);
       fields.add(
           new ViewComponent.FormField(
-              p.name(), p.type().id(), p.required(), p.label().orElse(null), show(value)));
+              p.name(),
+              p.type().id(),
+              p.required(),
+              p.label().orElse(null),
+              show(value),
+              p.widget().orElse(null)));
     }
+    List<ViewComponent.Submit> others = new ArrayList<>();
+    for (View.Action a : c.actions()) {
+      others.add(new ViewComponent.Submit(a.label(), a.command()));
+    }
+    ViewComponent.Lookup lookup =
+        c.values().containsKey("lookup.capability")
+            ? new ViewComponent.Lookup(
+                literal(c, "lookup.capability", ""), literal(c, "lookup.arg", "query"))
+            : null;
     return new ViewComponent(
         "form",
         null,
@@ -651,7 +746,13 @@ final class ViewResolver {
         null,
         null,
         new ViewComponent.Form(
-            id, command.title(), literal(c, "submit_label", command.title()), fields),
+            id,
+            command.title(),
+            literal(c, "submit_label", command.title()),
+            fields,
+            others,
+            lookup,
+            c.values().containsKey("done") ? literal(c, "done", null) : null),
         null,
         null);
   }
@@ -663,6 +764,16 @@ final class ViewResolver {
       Map<String, Object> ruleParams,
       Set<String> names)
       throws ExpressionException {
+    if (a.opens().isPresent()) {
+      View.Opens o = a.opens().get();
+      Map<String, Object> params = new LinkedHashMap<>();
+      for (var param : o.params().entrySet()) {
+        params.put(
+            param.getKey(), show(evaluate(view, param.getValue(), dynamic, ruleParams, names)));
+      }
+      return new ViewComponent.Action(
+          a.label(), "", Map.of(), null, null, new ViewComponent.Opens(o.view(), params));
+    }
     if (a.download().isPresent()) {
       View.Download d = a.download().get();
       Map<String, Object> given = new LinkedHashMap<>();

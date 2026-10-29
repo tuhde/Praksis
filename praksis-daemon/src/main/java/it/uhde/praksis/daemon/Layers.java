@@ -67,14 +67,28 @@ final class Layers {
   private final DaemonConfig config;
   private final GitSource git;
 
+  /**
+   * The modules that a rule or view may ask for; null if they cannot be told (nothing is left out).
+   */
+  private final java.util.Set<String> modules;
+
   Layers(DaemonConfig config, GitSource git) {
     this.config = config;
     this.git = git;
+    java.util.Set<String> names;
+    try {
+      names =
+          it.uhde.praksis.engine.ModuleLoader.moduleNames(
+              config.modules(), config.enabledModules());
+    } catch (it.uhde.praksis.engine.ModuleLoadException e) {
+      names = null; // the modules are reported where they are loaded
+    }
+    this.modules = names;
   }
 
   /** The ruleset to run, from the pinned commits and the directories. */
   LayerStack.Effective effective() throws DaemonException, RulesetException {
-    return LayerStack.resolve(sources(readLock()), config.params());
+    return LayerStack.resolve(sources(readLock()), config.params(), modules);
   }
 
   /** The commit every git layer is pinned to, by layer name. */
@@ -290,7 +304,7 @@ final class Layers {
 
     LayerStack.Effective after;
     try {
-      after = LayerStack.resolve(sources(next), config.params());
+      after = LayerStack.resolve(sources(next), config.params(), modules);
     } catch (RulesetException e) {
       return new Update(false, List.of(), e.problems());
     }
@@ -441,7 +455,7 @@ final class Layers {
       }
     }
     return new Candidate(
-        List.copyOf(sources), LayerStack.resolve(sources, config.params()), commits);
+        List.copyOf(sources), LayerStack.resolve(sources, config.params(), modules), commits);
   }
 
   /** A layer put in place of another: its files, and the commit if it came from git. */

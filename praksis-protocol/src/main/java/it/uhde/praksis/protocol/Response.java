@@ -29,6 +29,8 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Response.ViewList.class, name = "views"),
   @JsonSubTypes.Type(value = Response.ResolvedView.class, name = "view"),
   @JsonSubTypes.Type(value = Response.Fetched.class, name = "fetched"),
+  @JsonSubTypes.Type(value = Response.Uploaded.class, name = "uploaded"),
+  @JsonSubTypes.Type(value = Response.Suggestions.class, name = "suggestions"),
   @JsonSubTypes.Type(value = Response.Done.class, name = "done"),
   @JsonSubTypes.Type(value = Response.Stopped.class, name = "stopped"),
   @JsonSubTypes.Type(value = Response.Error.class, name = "error")
@@ -456,9 +458,21 @@ public sealed interface Response {
      * @param required whether it must be given
      * @param defaultValue the default as text, or null
      * @param label what to show next to the field, or null
+     * @param widget {@code multiline}, {@code recipients}, {@code files} or {@code hidden} (carried
+     *     along, not shown), or null for the usual field of the type
      */
     public record Param(
-        String name, String type, boolean required, String defaultValue, String label) {}
+        String name,
+        String type,
+        boolean required,
+        String defaultValue,
+        String label,
+        String widget) {
+      /** A parameter with the usual field of its type. */
+      public Param(String name, String type, boolean required, String defaultValue, String label) {
+        this(name, type, required, defaultValue, label, null);
+      }
+    }
   }
 
   /**
@@ -503,6 +517,22 @@ public sealed interface Response {
     /** A parameter of a view. */
     public record Param(String name, String type, Object value) {}
   }
+
+  /**
+   * What a lookup found, best first.
+   *
+   * @param items the suggestions, each a map of text values
+   */
+  record Suggestions(List<java.util.Map<String, Object>> items) implements Response {}
+
+  /**
+   * A place for a file that a person attaches: write the file to {@code path}, and give {@code
+   * token} to the command. Only this user can read the file.
+   *
+   * @param token what names the file in a command
+   * @param path the empty file to write to
+   */
+  record Uploaded(String token, String path) implements Response {}
 
   /**
    * A file that a download fetched. The daemon put it in its private downloads directory, which
@@ -691,13 +721,30 @@ public sealed interface Response {
         String command,
         java.util.Map<String, Object> args,
         String confirm,
-        Download download) {
+        Download download,
+        Opens opens) {
+      /** A download. */
+      public Action(
+          String label,
+          String command,
+          java.util.Map<String, Object> args,
+          String confirm,
+          Download download) {
+        this(label, command, args, confirm, download, null);
+      }
+
       /** A command. */
       public Action(
           String label, String command, java.util.Map<String, Object> args, String confirm) {
-        this(label, command, args, confirm, null);
+        this(label, command, args, confirm, null, null);
       }
     }
+
+    /**
+     * Another view to show, with this state (for example the reply to a mail opens the view for
+     * writing with the mail it answers).
+     */
+    public record Opens(String view, java.util.Map<String, Object> params) {}
 
     /**
      * A file to download instead of a command: ask the daemon to {@link Request.Fetch} it, and let
@@ -748,12 +795,58 @@ public sealed interface Response {
      * @param title the title of the command
      * @param submit what the button says
      * @param fields the arguments with the given defaults
+     * @param others more buttons, which start other commands with the fields they have
+     * @param lookup where the suggestions for recipients come from, or null
+     * @param done the view to show after one of the buttons has worked, or null to stay
      */
-    public record Form(String command, String title, String submit, List<FormField> fields) {}
+    public record Form(
+        String command,
+        String title,
+        String submit,
+        List<FormField> fields,
+        List<Submit> others,
+        Lookup lookup,
+        String done) {
+      /** A form that stays where it is. */
+      public Form(
+          String command,
+          String title,
+          String submit,
+          List<FormField> fields,
+          List<Submit> others,
+          Lookup lookup) {
+        this(command, title, submit, fields, others, lookup, null);
+      }
 
-    /** An argument of a form. */
+      /** A form with one button and no suggestions. */
+      public Form(String command, String title, String submit, List<FormField> fields) {
+        this(command, title, submit, fields, List.of(), null, null);
+      }
+    }
+
+    /** Another button of a form: it starts this command with the fields that the command has. */
+    public record Submit(String label, String command) {}
+
+    /**
+     * Where the fields of the widget {@code recipients} get suggestions from: ask the daemon with
+     * {@link Request.Lookup}, with the text typed so far as the argument {@code arg}. Each
+     * suggestion has at least {@code address}, and may have {@code name}.
+     */
+    public record Lookup(String capability, String arg) {}
+
+    /**
+     * An argument of a form.
+     *
+     * @param widget {@code multiline}, {@code recipients} or {@code files}, or null for the usual
+     *     field of the type
+     */
     public record FormField(
-        String name, String type, boolean required, String label, Object value) {}
+        String name, String type, boolean required, String label, Object value, String widget) {
+      /** A field of the usual kind. */
+      public FormField(String name, String type, boolean required, String label, Object value) {
+        this(name, type, required, label, value, null);
+      }
+    }
   }
 
   /** The daemon is shutting down. */

@@ -64,7 +64,8 @@ final class ViewValidator {
         out.add(new Problem(where, "parameter '" + p.name() + "' declared twice"));
       }
     }
-    Scope sourceScope = new Scope(Optional.empty(), params, Map.of(), Set.of("view"));
+    // a source may use the sources declared before it, which is how a reply is made from the mail
+    Scope sourceScope = new Scope(Optional.empty(), params, Map.of(), Set.of("view", "source"));
     Scope screen = new Scope(Optional.empty(), params, Map.of(), Set.of("view", "source"));
     Scope row = new Scope(Optional.empty(), params, Map.of(), Set.of("view", "source", "item"));
 
@@ -155,7 +156,12 @@ final class ViewValidator {
     }
     boolean perRow = c.type().equals("table") || c.type().equals("list");
     for (View.Action a : c.actions()) {
-      if (a.download().isPresent()) {
+      if (c.type().equals("form")) {
+        break; // the extra buttons of a form are checked with the form
+      }
+      if (a.opens().isPresent()) {
+        opens(a.opens().get(), perRow ? row : screen, ruleset, at, out);
+      } else if (a.download().isPresent()) {
         download(a.download().get(), perRow ? row : screen, at, out);
       } else {
         command(a.command(), a.args(), perRow ? row : screen, ruleset, at, out);
@@ -217,8 +223,97 @@ final class ViewValidator {
         }
       }
     }
+    if (c.type().equals("form")) {
+      formExtras(c, ruleset, at, out);
+    }
     for (View.Component child : c.children()) {
       component(child, where, view, ruleset, screen, row, viewParams, out);
+    }
+  }
+
+  /**
+   * The extra buttons of a form start commands with the fields of the form, so every argument they
+   * need must be a field of the form; and the lookup must be a capability that only reads.
+   */
+  private void formExtras(View.Component c, Ruleset ruleset, String at, List<Problem> out) {
+    if (c.values().get("done") instanceof Arg.Literal d
+        && ruleset.views().stream().noneMatch(v -> v.id().equals(String.valueOf(d.value())))) {
+      out.add(new Problem(at, "done: there is no view '" + d.value() + "'"));
+    }
+    Arg primary = c.values().get("command");
+    Optional<Trigger.OnCommand> main =
+        commandOf(ruleset, primary instanceof Arg.Literal l ? String.valueOf(l.value()) : "");
+    for (View.Action a : c.actions()) {
+      Optional<Trigger.OnCommand> other = commandOf(ruleset, a.command());
+      if (other.isEmpty()) {
+        out.add(new Problem(at, "there is no command '" + a.command() + "'"));
+        continue;
+      }
+      for (Trigger.CommandParam p : other.get().params()) {
+        boolean given =
+            main.isPresent()
+                && main.get().params().stream()
+                    .anyMatch(m -> m.name().equals(p.name()) && m.type() == p.type());
+        if (p.required() && !given) {
+          out.add(
+              new Problem(
+                  at,
+                  "the button '"
+                      + a.label()
+                      + "' needs '"
+                      + p.name()
+                      + "' ("
+                      + p.type().id()
+                      + "), which the form does not have"));
+        }
+      }
+    }
+    if (c.values().get("lookup.capability") instanceof Arg.Literal l) {
+      String name = String.valueOf(l.value());
+      Optional<CapabilityDescriptor> capability = catalog.capability(name);
+      String where = at + ", lookup";
+      if (capability.isEmpty()) {
+        out.add(new Problem(where, "unknown capability '" + name + "'"));
+        return;
+      }
+      if (capability.get().effect() != EffectClass.READ_ONLY) {
+        out.add(new Problem(where, "'" + name + "' does not only read"));
+      }
+      String arg = String.valueOf(((Arg.Literal) c.values().get("lookup.arg")).value());
+      if (capability.get().params().stream()
+          .noneMatch(
+              p ->
+                  p.name().equals(arg)
+                      && p.type() == it.uhde.praksis.capability.ValueType.STRING)) {
+        out.add(new Problem(where, "'" + name + "' has no text argument '" + arg + "'"));
+      }
+      if (capability.get().results().stream()
+          .noneMatch(
+              r ->
+                  r.name().equals("items")
+                      && r.type() == it.uhde.praksis.capability.ValueType.LIST)) {
+        out.add(new Problem(where, "'" + name + "' does not answer with 'items' (a list)"));
+      }
+    }
+  }
+
+  /** Opening a view names a view that exists and parameters that it declares. */
+  private void opens(View.Opens o, Scope scope, Ruleset ruleset, String at, List<Problem> out) {
+    String where = at + ", opens";
+    View target =
+        ruleset.views().stream().filter(v -> v.id().equals(o.view())).findFirst().orElse(null);
+    if (target == null) {
+      out.add(new Problem(where, "there is no view '" + o.view() + "'"));
+      return;
+    }
+    for (var param : o.params().entrySet()) {
+      if (target.params().stream().noneMatch(p -> p.name().equals(param.getKey()))) {
+        out.add(
+            new Problem(
+                where, "view '" + o.view() + "' has no parameter '" + param.getKey() + "'"));
+      } else if (param.getValue() instanceof Arg.Expr e) {
+        expression(e.source(), scope, where + ", parameter '" + param.getKey() + "'", out);
+      }
     }
   }
 

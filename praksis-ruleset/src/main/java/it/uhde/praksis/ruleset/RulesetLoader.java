@@ -131,7 +131,16 @@ public final class RulesetLoader {
   }
 
   static Optional<Rule> rule(Table t, String fileId) {
-    t.onlyKeys(Set.of("id", "description", "effect", "needs", "required", "trigger", "action"));
+    t.onlyKeys(
+        Set.of(
+            "id",
+            "description",
+            "effect",
+            "needs",
+            "required",
+            "trigger",
+            "action",
+            "requires_modules"));
     String id = t.string("id", true).orElse(fileId);
     if (!ID.matcher(id).matches()) {
       t.problem("rule id '" + id + "' must match " + ID.pattern());
@@ -161,7 +170,16 @@ public final class RulesetLoader {
     if (effect == null || trigger == null || effectId.isEmpty() || id.isEmpty()) {
       return Optional.empty();
     }
-    return Optional.of(new Rule(id, description, effect, needs, required, trigger, actions));
+    return Optional.of(
+        new Rule(
+            id,
+            description,
+            effect,
+            needs,
+            required,
+            trigger,
+            actions,
+            t.strings("requires_modules")));
   }
 
   private static final Pattern PARAM_NAME = Pattern.compile("[a-z][a-z0-9_]*");
@@ -191,10 +209,29 @@ public final class RulesetLoader {
     List<Trigger.CommandParam> params = new ArrayList<>();
     Set<String> names = new java.util.HashSet<>();
     for (Table p : t.tables("param")) {
-      p.onlyKeys(Set.of("name", "type", "required", "default", "label"));
+      p.onlyKeys(Set.of("name", "type", "required", "default", "label", "widget"));
       Optional<String> name = p.string("name", true);
       Optional<ValueType> type = type(p);
       Optional<String> label = p.string("label", false);
+      Optional<String> widget = p.string("widget", false);
+      if (widget.isPresent()) {
+        ValueType wanted = Trigger.CommandParam.WIDGETS.get(widget.get());
+        if (widget.get().equals(Trigger.CommandParam.HIDDEN)) {
+          wanted = type.orElse(null);
+        } else if (wanted == null) {
+          p.problem(
+              "unknown widget '"
+                  + widget.get()
+                  + "'; use one of "
+                  + new java.util.TreeSet<>(
+                      java.util.stream.Stream.concat(
+                              Trigger.CommandParam.WIDGETS.keySet().stream(),
+                              java.util.stream.Stream.of(Trigger.CommandParam.HIDDEN))
+                          .toList()));
+        } else if (type.isPresent() && type.get() != wanted) {
+          p.problem("the widget '" + widget.get() + "' is for a " + wanted.id());
+        }
+      }
       if (name.isPresent()) {
         if (!PARAM_NAME.matcher(name.get()).matches()) {
           p.problem("parameter name '" + name.get() + "' must match " + PARAM_NAME.pattern());
@@ -214,7 +251,8 @@ public final class RulesetLoader {
         p.problem("a parameter with a default cannot be required");
       }
       if (name.isPresent() && type.isPresent()) {
-        params.add(new Trigger.CommandParam(name.get(), type.get(), required, value, label));
+        params.add(
+            new Trigger.CommandParam(name.get(), type.get(), required, value, label, widget));
       }
     }
     return title.<Trigger>map(ti -> new Trigger.OnCommand(ti, description, params)).orElse(null);
@@ -228,7 +266,7 @@ public final class RulesetLoader {
       }
       return Optional.of(new Action.Stop());
     }
-    t.onlyKeys(Set.of("id", "capability", "args"));
+    t.onlyKeys(Set.of("id", "capability", "args", "requires_modules"));
     Optional<String> id = t.string("id", true);
     Optional<String> capability = t.string("capability", true);
     Map<String, Arg> args = new LinkedHashMap<>();
@@ -244,7 +282,8 @@ public final class RulesetLoader {
     if (!IDENTIFIER.matcher(id.get()).matches()) {
       t.problem("action id '" + id.get() + "' must be an identifier");
     }
-    return Optional.of(new Action.Call(id.get(), capability.get(), args));
+    return Optional.of(
+        new Action.Call(id.get(), capability.get(), args, t.strings("requires_modules")));
   }
 
   static Arg arg(Table table, String name, Object value) {

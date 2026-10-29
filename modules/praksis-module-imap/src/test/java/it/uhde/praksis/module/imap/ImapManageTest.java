@@ -280,11 +280,32 @@ class ImapManageTest {
 
     Map<String, Object> blocked = get.invoke(context(false), args("message", id));
     assertThat(blocked).containsEntry("blocked", 1L);
+    // there is no plain part, so the text is made from the HTML, which a reply can quote
+    assertThat((String) blocked.get("text")).contains("Hello world").doesNotContain("alert");
     assertThat(blocked.get("blocks").toString())
         .contains("Hello", "world", "[image: logo]")
         .doesNotContain("alert")
         .doesNotContain("javascript");
     assertThat(get.invoke(context(false), args("message", id, "images", true)))
         .containsEntry("blocked", 0L);
+  }
+
+  @Test
+  void getReturnsTheHeadersThatAnAnswerNeeds() throws Exception {
+    server.deliverRaw(
+        true,
+        "From: a@x\nReply-To: Boss <boss@x>\nSubject: s\nMessage-ID: <9@x>\n"
+            + "References: <1@x>\n <2@x>\n\nbody\n");
+    var list = make(new ImapRead.Listing());
+    var get = make(new ImapRead.Get());
+    String id =
+        (String) items(list.invoke(context(false), args("folder", "INBOX"))).get(0).get("id");
+
+    Map<String, Object> got = get.invoke(context(false), args("message", id));
+
+    assertThat(got)
+        .containsEntry("reply_to", "Boss <boss@x>")
+        .containsEntry("references", "<1@x> <2@x>")
+        .containsEntry("message_id", "<9@x>");
   }
 }

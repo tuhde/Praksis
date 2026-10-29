@@ -53,6 +53,12 @@ class ViewTest {
                               new FieldDescriptor("name", ValueType.STRING, true, false)),
                           List.of(new FieldDescriptor("content", ValueType.BYTES, true, false))),
                       new CapabilityDescriptor(
+                          "contacts.search",
+                          EffectClass.READ_ONLY,
+                          true,
+                          List.of(new FieldDescriptor("query", ValueType.STRING, true, false)),
+                          List.of(new FieldDescriptor("items", ValueType.LIST, true, false))),
+                      new CapabilityDescriptor(
                           "mail.move",
                           EffectClass.LOCAL_WRITE,
                           true,
@@ -500,5 +506,208 @@ class ViewTest {
             COMMAND);
     assertThatThrownBy(() -> LayerStack.resolve(List.of(new Source("c", blocks)), Map.of()))
         .hasMessageContaining("missing 'blocks'");
+  }
+
+  private static final String WRITE_COMMAND =
+      """
+      id = "mail.write"
+      effect = "local-write"
+      needs = ["mail.move"]
+
+      [trigger]
+      kind = "command"
+      title = "Write"
+      [[trigger.param]]
+      name = "message"
+      type = "string"
+      widget = "multiline"
+      [[trigger.param]]
+      name = "to"
+      type = "string"
+      default = ""
+      widget = "recipients"
+      [[trigger.param]]
+      name = "attachments"
+      type = "list"
+      default = []
+      widget = "files"
+
+      [[action]]
+      id = "move"
+      capability = "mail.move"
+      args = { message = { cel = "event.data.message" }, folder = "Drafts" }
+      """;
+
+  private static final String DRAFT_COMMAND =
+      """
+      id = "mail.draft"
+      effect = "local-write"
+      needs = ["mail.move"]
+
+      [trigger]
+      kind = "command"
+      title = "Save a draft"
+      [[trigger.param]]
+      name = "message"
+      type = "string"
+      [[trigger.param]]
+      name = "to"
+      type = "string"
+      default = ""
+
+      [[action]]
+      id = "move"
+      capability = "mail.move"
+      args = { message = { cel = "event.data.message" }, folder = "Drafts" }
+      """;
+
+  private static final String COMPOSE =
+      """
+      title = "Write"
+      [[component]]
+      type = "form"
+      command = "mail.write"
+      submit_label = "Send"
+      also = [ { label = "Save draft", command = "mail.draft" } ]
+      lookup = { capability = "contacts.search", arg = "query" }
+      """;
+
+  /** A layer with this view and these rules, each in a file of its own. */
+  private Path layerOf(String view, String write, String draft) throws Exception {
+    Path l = layer("w" + System.nanoTime(), Map.of("mail.inbox", view));
+    Files.writeString(l.resolve("rules/mail.write.toml"), write);
+    if (draft != null) {
+      Files.writeString(l.resolve("rules/mail.draft.toml"), draft);
+    }
+    return l;
+  }
+
+  private List<Problem> composeProblems(String view, String draft) throws Exception {
+    Path l = layerOf(view, WRITE_COMMAND, draft);
+    Ruleset ruleset = LayerStack.resolve(List.of(new Source("w", l)), Map.of()).ruleset();
+    return new RulesetValidator(Expressions.compiler(), CATALOG).validate(ruleset);
+  }
+
+  @Test
+  void aFormCanHaveMoreButtonsAndALookupAndParametersHaveWidgets() throws Exception {
+    assertThat(composeProblems(COMPOSE, DRAFT_COMMAND)).isEmpty();
+    Path l = layerOf(COMPOSE, WRITE_COMMAND, DRAFT_COMMAND);
+    var ruleset = LayerStack.resolve(List.of(new Source("w", l)), Map.of()).ruleset();
+    View.Component form = ruleset.views().get(0).components().get(0);
+    assertThat(form.actions()).extracting(View.Action::command).containsExactly("mail.draft");
+    assertThat(form.actions()).extracting(View.Action::label).containsExactly("Save draft");
+    assertThat(form.values()).containsKeys("lookup.capability", "lookup.arg");
+    var write = ruleset.rules().stream().filter(r -> r.id().equals("mail.write")).findFirst().get();
+    assertThat(((Trigger.OnCommand) write.trigger()).params())
+        .extracting(p -> p.widget().orElse(""))
+        .containsExactly("multiline", "recipients", "files");
+
+    // what cannot work is said
+    assertThat(
+            composeProblems(
+                COMPOSE.replace("command = \"mail.draft\"", "command = \"mail.nope\""),
+                DRAFT_COMMAND))
+        .anyMatch(p -> p.message().contains("there is no command 'mail.nope'"));
+    String needsMore =
+        DRAFT_COMMAND.replace(
+            "name = \"to\"\ntype = \"string\"\ndefault = \"\"",
+            "name = \"nope\"\ntype = \"string\"");
+    assertThat(composeProblems(COMPOSE, needsMore))
+        .anyMatch(p -> p.message().contains("needs 'nope' (string), which the form does not have"));
+    assertThat(composeProblems(COMPOSE.replace("contacts.search", "mail.move"), DRAFT_COMMAND))
+        .anyMatch(p -> p.message().contains("'mail.move' does not only read"))
+        .anyMatch(p -> p.message().contains("no text argument 'query'"))
+        .anyMatch(p -> p.message().contains("does not answer with 'items'"));
+    assertThat(composeProblems(COMPOSE.replace("contacts.search", "mail.nope"), DRAFT_COMMAND))
+        .anyMatch(p -> p.message().contains("unknown capability 'mail.nope'"));
+    assertThat(composeProblems(COMPOSE.replace("arg = \"query\"", "arg = \"nope\""), DRAFT_COMMAND))
+        .anyMatch(p -> p.message().contains("no text argument 'nope'"));
+  }
+
+  @Test
+  void aWidgetMustSuitTheTypeAndBeKnown() throws Exception {
+    Path wrong =
+        layerOf(
+            COMPOSE,
+            WRITE_COMMAND.replace("widget = \"files\"", "widget = \"multiline\""),
+            DRAFT_COMMAND);
+    assertThatThrownBy(() -> LayerStack.resolve(List.of(new Source("w", wrong)), Map.of()))
+        .hasMessageContaining("the widget 'multiline' is for a string");
+    Path unknown =
+        layerOf(
+            COMPOSE,
+            WRITE_COMMAND.replace("widget = \"files\"", "widget = \"sparkles\""),
+            DRAFT_COMMAND);
+    assertThatThrownBy(() -> LayerStack.resolve(List.of(new Source("w", unknown)), Map.of()))
+        .hasMessageContaining("unknown widget 'sparkles'");
+  }
+
+  private static final String CHAIN =
+      """
+      title = "T"
+      [param.m]
+      type = "string"
+      default = ""
+      [source.first]
+      capability = "mail.get"
+      args = { message = { cel = "view.m" } }
+      [source.second]
+      capability = "mail.get"
+      args = { message = { cel = "string(source.first.blocked)" } }
+      when = { cel = "view.m != ''" }
+
+      [[component]]
+      type = "button"
+      label = "Reply"
+      opens = { view = "mail.inbox", params = { m = { cel = "view.m" } } }
+
+      [[component]]
+      type = "table"
+      rows = { cel = "[{'id': 'x'}]" }
+      columns = [ { title = "Id", value = { cel = "item.id" } } ]
+      [[component.row_action]]
+      label = "Open"
+      opens = { view = "mail.inbox", params = { m = { cel = "item.id" } } }
+      """;
+
+  @Test
+  void aSourceMayUseTheOnesBeforeItAndAnActionCanOpenAnotherViewWithState() throws Exception {
+    assertThat(problems(CHAIN)).isEmpty();
+    Path l = layer("o" + System.nanoTime(), Map.of("mail.inbox", CHAIN), COMMAND);
+    View v = LayerStack.resolve(List.of(new Source("o", l)), Map.of()).ruleset().views().get(0);
+    assertThat(v.sources().keySet()).containsExactly("first", "second"); // in the order written
+    View.Opens opens = v.components().get(0).actions().get(0).opens().get();
+    assertThat(opens.view()).isEqualTo("mail.inbox");
+    assertThat(opens.params()).containsKey("m");
+    assertThat(v.components().get(1).actions().get(0).opens()).isPresent();
+
+    assertThat(
+            problems(
+                CHAIN.replace(
+                    "view = \"mail.inbox\", params = { m = { cel = \"view.m\" } }",
+                    "view = \"mail.nope\", params = {}")))
+        .anyMatch(p -> p.message().contains("there is no view 'mail.nope'"));
+    assertThat(
+            problems(
+                CHAIN.replace("params = { m = { cel = \"view.m\" } }", "params = { other = 1 }")))
+        .anyMatch(p -> p.message().contains("has no parameter 'other'"));
+    assertThat(
+            problems(
+                CHAIN.replace(
+                    "params = { m = { cel = \"item.id\" } }",
+                    "params = { m = { cel = \"nope.id\" } }")))
+        .anyMatch(p -> p.location().contains("opens"));
+    assertThat(
+            problems(CHAIN.replace("string(source.first.blocked)", "string(other.first.blocked)")))
+        .anyMatch(p -> p.message().contains("other"));
+    Path both =
+        layer(
+            "p" + System.nanoTime(),
+            Map.of(
+                "mail.inbox",
+                CHAIN.replace("label = \"Reply\"", "label = \"Reply\"\ncommand = \"mail.file\"")),
+            COMMAND);
+    assertThatThrownBy(() -> LayerStack.resolve(List.of(new Source("p", both)), Map.of()))
+        .hasMessageContaining("only one");
   }
 }

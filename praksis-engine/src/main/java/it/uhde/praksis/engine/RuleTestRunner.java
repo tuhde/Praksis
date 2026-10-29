@@ -107,7 +107,7 @@ public final class RuleTestRunner {
       }
       LayerStack.Effective effective;
       try {
-        effective = LayerStack.resolve(layers.subList(0, i + 1), params);
+        effective = LayerStack.resolve(layers.subList(0, i + 1), params, catalog.moduleNames());
       } catch (RulesetException e) {
         problems.addAll(e.problems());
         continue;
@@ -118,7 +118,7 @@ public final class RuleTestRunner {
           Map<String, Object> values = new java.util.HashMap<>(params);
           values.putAll(test.params());
           try {
-            used = LayerStack.resolve(layers.subList(0, i + 1), values);
+            used = LayerStack.resolve(layers.subList(0, i + 1), values, catalog.moduleNames());
           } catch (RulesetException e) {
             results.add(
                 new Result(
@@ -137,6 +137,15 @@ public final class RuleTestRunner {
   }
 
   private Result run(String layer, LayerStack.Effective effective, RuleTest test) {
+    if (!test.appliesTo(catalog.moduleNames())) {
+      return new Result(
+          layer, test, true, "skipped: the test is for another set of modules", Set.of());
+    }
+    if (effective.skipped().stream()
+        .anyMatch(k -> k.kind().equals("rule") && k.id().equals(test.rule()))) {
+      return new Result(
+          layer, test, true, "skipped: the rule needs a module that is not there", Set.of());
+    }
     if (effective.ruleset().rules().stream().noneMatch(r -> r.id().equals(test.rule()))) {
       return new Result(
           layer,

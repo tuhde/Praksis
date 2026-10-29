@@ -138,7 +138,8 @@ final class Screens {
                                 p.type().id(),
                                 p.required(),
                                 p.defaultValue().map(String::valueOf).orElse(null),
-                                p.label().orElse(null)))
+                                p.label().orElse(null),
+                                p.widget().orElse(null)))
                     .toList()));
       }
     }

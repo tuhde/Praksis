@@ -14,10 +14,12 @@ public final class ModuleCatalog {
   private final Map<String, CapabilityDescriptor> capabilities = new HashMap<>();
   private final Map<String, EventTypeDescriptor> eventTypes = new HashMap<>();
   private final java.util.Set<String> sources = new java.util.HashSet<>();
+  private final java.util.Set<String> moduleNames = new java.util.TreeSet<>();
 
   /** Builds the catalog. Fails if two modules declare the same capability or event type. */
   public ModuleCatalog(List<ModuleDescriptor> modules) {
     for (ModuleDescriptor module : modules) {
+      moduleNames.add(module.name());
       sources.addAll(module.sources());
       for (CapabilityDescriptor c : module.capabilities()) {
         if (capabilities.putIfAbsent(c.name(), c) != null) {
@@ -30,6 +32,11 @@ public final class ModuleCatalog {
         }
       }
     }
+  }
+
+  /** The names of the modules that are loaded, which a rule or view may ask for. */
+  public java.util.Set<String> moduleNames() {
+    return java.util.Set.copyOf(moduleNames);
   }
 
   /** Whether a module provides an event source with this name. */

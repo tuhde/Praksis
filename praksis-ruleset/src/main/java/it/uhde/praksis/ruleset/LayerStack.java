@@ -60,19 +60,50 @@ public final class LayerStack {
    * @param origins where each of its rules comes from, in firing order
    * @param disabled the rules that are turned off
    * @param viewOrigins where each view of the ruleset comes from
+   * @param skipped the rules and views that are left out because they ask for a module that is not
+   *     there
    */
   public record Effective(
       Ruleset ruleset,
       List<Origin> origins,
       List<Disabled> disabled,
-      List<ViewOrigin> viewOrigins) {
+      List<ViewOrigin> viewOrigins,
+      List<Skipped> skipped) {
     public Effective {
       viewOrigins = List.copyOf(viewOrigins);
+      skipped = List.copyOf(skipped);
+    }
+
+    /** An effective ruleset in which nothing was left out. */
+    public Effective(
+        Ruleset ruleset,
+        List<Origin> origins,
+        List<Disabled> disabled,
+        List<ViewOrigin> viewOrigins) {
+      this(ruleset, origins, disabled, viewOrigins, List.of());
     }
 
     /** An effective ruleset without views. */
     public Effective(Ruleset ruleset, List<Origin> origins, List<Disabled> disabled) {
-      this(ruleset, origins, disabled, List.of());
+      this(ruleset, origins, disabled, List.of(), List.of());
+    }
+  }
+
+  /**
+   * A rule or a view that is left out because it asks for modules that are not there.
+   *
+   * @param kind {@code rule} or {@code view}
+   * @param id its id
+   * @param missing the modules it asks for that are not there
+   */
+  public record Skipped(String kind, String id, List<String> missing) {
+    public Skipped {
+      missing = List.copyOf(missing);
+    }
+
+    /** As a sentence. */
+    public String describe() {
+      return kind + " " + id + " needs the module " + String.join(", ", missing);
     }
   }
 
@@ -94,6 +125,20 @@ public final class LayerStack {
    * @throws RulesetException with every problem found in the layers and in putting them together
    */
   public static Effective resolve(List<Source> layers, Map<String, Object> params)
+      throws RulesetException {
+    return resolve(layers, params, null);
+  }
+
+  /**
+   * As {@link #resolve(List, Map)}, for a Praksis that has these modules. A rule or a view with
+   * {@code requires_modules} that names a module that is not there is left out, and so is a part of
+   * a view that does, so that a ruleset can offer more (writing mail) than every installation has
+   * the modules for. What was left out is in {@link Effective#skipped()}.
+   *
+   * @param modules the names of the modules that are loaded; null leaves nothing out
+   */
+  public static Effective resolve(
+      List<Source> layers, Map<String, Object> params, java.util.Set<String> modules)
       throws RulesetException {
     List<Problem> problems = new ArrayList<>();
     List<Layer> loaded = new ArrayList<>();
@@ -122,8 +167,33 @@ public final class LayerStack {
       throw new RulesetException(problems);
     }
 
-    List<Entry> ordered =
-        rules.values().stream().sorted(Comparator.comparing(e -> e.rule().id())).toList();
+    List<Skipped> skipped = new ArrayList<>();
+    List<Entry> ordered = new ArrayList<>();
+    for (Entry e :
+        rules.values().stream().sorted(Comparator.comparing(x -> x.rule().id())).toList()) {
+      List<String> missing = missing(e.rule().requiresModules(), modules);
+      if (!missing.isEmpty()) {
+        skipped.add(new Skipped("rule", e.rule().id(), missing));
+        continue;
+      }
+      Optional<Rule> available =
+          modules == null ? Optional.of(e.rule()) : e.rule().available(modules);
+      if (available.isEmpty()) {
+        skipped.add(new Skipped("rule", e.rule().id(), stepModules(e.rule(), modules)));
+        continue;
+      }
+      ordered.add(new Entry(available.get(), e.layer(), e.owner(), e.history()));
+    }
+    List<View> kept = new ArrayList<>();
+    for (ViewEntry entry :
+        views.values().stream().sorted(Comparator.comparing(v -> v.view().id())).toList()) {
+      List<String> missing = missing(entry.view().requiresModules(), modules);
+      if (!missing.isEmpty()) {
+        skipped.add(new Skipped("view", entry.view().id(), missing));
+      } else {
+        kept.add(modules == null ? entry.view() : entry.view().available(modules).orElseThrow());
+      }
+    }
     String name = String.join("+", loaded.stream().map(l -> l.header().name()).toList());
     Ruleset ruleset =
         new Ruleset(
@@ -131,16 +201,17 @@ public final class LayerStack {
             name,
             List.copyOf(declared.values()),
             ordered.stream().map(Entry::rule).toList(),
-            views.values().stream()
-                .sorted(Comparator.comparing(v -> v.view().id()))
-                .map(ViewEntry::view)
-                .toList());
+            kept);
     List<Origin> origins =
         ordered.stream()
             .map(
                 e ->
                     new Origin(
-                        e.rule().id(), e.layer(), e.owner(), RuleView.hash(e.rule()), e.history()))
+                        e.rule().id(),
+                        e.layer(),
+                        e.owner(),
+                        RuleView.hash(rules.get(e.rule().id()).rule()), // as written
+                        e.history()))
             .toList();
     List<ViewOrigin> viewOrigins =
         ruleset.views().stream()
@@ -150,7 +221,21 @@ public final class LayerStack {
                   return new ViewOrigin(v.id(), e.layer(), e.owner(), v.hash());
                 })
             .toList();
-    return new Effective(ruleset, origins, List.copyOf(disabled.values()), viewOrigins);
+    return new Effective(ruleset, origins, List.copyOf(disabled.values()), viewOrigins, skipped);
+  }
+
+  /** The modules that the steps of a rule ask for and that are not there. */
+  private static List<String> stepModules(Rule rule, java.util.Set<String> modules) {
+    return rule.actions().stream()
+        .filter(a -> a instanceof Action.Call)
+        .flatMap(a -> missing(((Action.Call) a).requiresModules(), modules).stream())
+        .distinct()
+        .toList();
+  }
+
+  /** The modules in the list that are not there; none if the modules are not known. */
+  private static List<String> missing(List<String> wanted, java.util.Set<String> modules) {
+    return modules == null ? List.of() : wanted.stream().filter(m -> !modules.contains(m)).toList();
   }
 
   private record ViewEntry(View view, String layer, String owner) {}

@@ -115,6 +115,13 @@ public final class Daemon implements AutoCloseable {
       ExpressionCompiler compiler = compiler(config);
       Layers layers = new Layers(config, new GitCli(config.gitCache()));
       LayerStack.Effective effective = layers.effective();
+      if (!effective.skipped().isEmpty()) {
+        LOG.log(
+            System.Logger.Level.INFO,
+            "left out, because a module is not loaded: "
+                + String.join(
+                    "; ", effective.skipped().stream().map(LayerStack.Skipped::describe).toList()));
+      }
       ruleset = effective.ruleset();
       GrantPolicy access = accessPolicy(config, modules.catalog(), effective);
       store = Store.open(config.database());
@@ -124,6 +131,8 @@ public final class Daemon implements AutoCloseable {
       modules.useCredentials(new CredentialResolver(access::policy, store, clock)::forComponent);
       modules.useDataDirectory(config.dataDirectory());
       Downloads.cleanup(config.downloadsDirectory(), clock.instant());
+      Uploads.cleanup(config.uploadsDirectory(), clock.instant());
+      modules.useUploadsDirectory(config.uploadsDirectory());
       approvals = new Approvals(config, store, access, modules.catalog(), clock);
       Map<String, Capability> capabilities = modules.capabilities();
       shadows = new Shadows(config, store, clock, effective);
@@ -345,6 +354,8 @@ public final class Daemon implements AutoCloseable {
         case Request.Outcome o -> screens.outcome(o.event());
         case Request.Views v -> views.list();
         case Request.ViewResolve v -> views.resolve(v.view(), v.params(), v.maxSchema());
+        case Request.Lookup l -> views.lookup(l.view(), l.capability(), l.args());
+        case Request.Upload u -> Uploads.ticket(config.uploadsDirectory(), clock.instant());
         case Request.Fetch f ->
             views.fetch(
                 f.view(), f.capability(), f.args(), f.filename(), config.downloadsDirectory());

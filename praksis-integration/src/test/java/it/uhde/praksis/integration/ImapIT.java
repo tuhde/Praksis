@@ -270,4 +270,80 @@ class ImapIT {
       h.stop(daemon);
     }
   }
+
+  @Test
+  void aMultipartMailCanBeReadInTheImage() throws Exception {
+    try (Server server = new Server();
+        Harness h = new Harness()) {
+      useImap(h, server, true, "\"imap.inbox\", \"mail.list\", \"mail.get\"");
+      Files.createDirectories(h.home.resolve("ruleset/views"));
+      Files.writeString(
+          h.home.resolve("ruleset/views/reader.toml"),
+          """
+          title = "Reader"
+          [source.list]
+          capability = "mail.list"
+          args = { folder = "INBOX" }
+          # a source may use the one before it
+          [source.mail]
+          capability = "mail.get"
+          args = { message = { cel = "source.list.items[0].id" } }
+
+          [[component]]
+          type = "text"
+          value = { cel = "source.mail.subject + ': ' + source.mail.text" }
+
+          [[component]]
+          type = "table"
+          rows = { cel = "source.mail.attachments" }
+          columns = [ { title = "Attachment", value = { cel = "item.name" } } ]
+          """);
+      Files.writeString(
+          h.home.resolve("policy.toml"),
+          Files.readString(h.home.resolve("policy.toml"))
+              + """
+
+              [[grant]]
+              id = "list"
+              layer = "ruleset"
+              capability = "mail.list"
+              [[grant]]
+              id = "get"
+              layer = "ruleset"
+              capability = "mail.get"
+              """);
+      // the mail goes to a folder that no rule empties: the rule of the harness moves the INBOX
+      server.deliver(
+          "multipart",
+          "MIME-Version: 1.0",
+          "Content-Type: multipart/mixed; boundary=\"b\"",
+          "",
+          "--b",
+          "Content-Type: multipart/alternative; boundary=\"a\"",
+          "",
+          "--a",
+          "Content-Type: text/plain",
+          "",
+          "the plain text",
+          "--a",
+          "Content-Type: text/html",
+          "",
+          "<p>the html</p>",
+          "--a--",
+          "--b",
+          "Content-Type: application/pdf; name=\"report.pdf\"",
+          "Content-Disposition: attachment; filename=\"report.pdf\"",
+          "Content-Transfer-Encoding: base64",
+          "",
+          "AAECAw==",
+          "--b--");
+      Files.delete(h.home.resolve("ruleset/rules/mail.archive.toml"));
+      Process daemon = h.startDaemon();
+
+      String shown = h.cli("view", "reader").output();
+
+      assertThat(shown).contains("multipart: ").contains("the plain text").contains("report.pdf");
+      h.stop(daemon);
+    }
+  }
 }

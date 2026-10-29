@@ -65,8 +65,13 @@ class MailSendTest {
     MailSend s = new MailSend();
     s.configure(server.settings(extra));
     s.useDataDirectory(data);
+    s.useUploadsDirectory(uploads());
     opened.add(s);
     return s;
+  }
+
+  private Path uploads() throws Exception {
+    return java.nio.file.Files.createDirectories(data.resolve("uploads-dir"));
   }
 
   private static Map<String, Object> args(Object... kv) {
@@ -343,5 +348,113 @@ class MailSendTest {
     // the checks that matter are the same
     assertThatThrownBy(() -> compose.invoke(context("c", false), args("to", "a@b.c\r\nBcc: x@y.z")))
         .hasMessageContaining("line break");
+  }
+
+  @Test
+  void aFileThatAPersonChoseIsAttachedByItsTokenAndNothingElseCanBeRead() throws Exception {
+    MailSend s = send();
+    String token = java.util.UUID.randomUUID().toString();
+    java.nio.file.Files.write(uploads().resolve(token + ".part"), new byte[] {9, 8, 7});
+    // a file outside of the uploads directory that a rule might want to attach
+    Path secret = java.nio.file.Files.writeString(data.resolve("secret.txt"), "top secret");
+
+    go(
+        s,
+        "to",
+        "anna@example.org",
+        "subject",
+        "with file",
+        "text",
+        "see attached",
+        "attachments",
+        List.of(Map.of("name", "notes.txt", "type", "text/plain", "upload", token)));
+    jakarta.mail.Multipart parts = (jakarta.mail.Multipart) server.received()[0].getContent();
+    assertThat(parts.getBodyPart(1).getFileName()).isEqualTo("notes.txt");
+    assertThat(parts.getBodyPart(1).getInputStream().readAllBytes()).containsExactly(9, 8, 7);
+
+    for (String bad :
+        List.of(
+            "../secret",
+            secret.toString(),
+            "../../etc/passwd",
+            token + "/../x",
+            token.toUpperCase().replace("-", "_"),
+            "")) {
+      assertThatThrownBy(
+              () ->
+                  go(
+                      s,
+                      "to",
+                      "anna@example.org",
+                      "subject",
+                      "x",
+                      "text",
+                      "x",
+                      "attachments",
+                      List.of(Map.of("name", "a.txt", "upload", bad))))
+          .as(bad)
+          .isInstanceOf(CapabilityException.class)
+          .hasMessageContaining("not the token");
+    }
+    // a token of a file that is not there, a link, and a file that is too big
+    assertThatThrownBy(
+            () ->
+                go(
+                    s,
+                    "to",
+                    "anna@example.org",
+                    "subject",
+                    "x",
+                    "text",
+                    "x",
+                    "attachments",
+                    List.of(
+                        Map.of("name", "a.txt", "upload", java.util.UUID.randomUUID().toString()))))
+        .hasMessageContaining("is not there");
+    String linked = java.util.UUID.randomUUID().toString();
+    java.nio.file.Files.createSymbolicLink(uploads().resolve(linked + ".part"), secret);
+    assertThatThrownBy(
+            () ->
+                go(
+                    s,
+                    "to",
+                    "anna@example.org",
+                    "subject",
+                    "x",
+                    "text",
+                    "x",
+                    "attachments",
+                    List.of(Map.of("name", "a.txt", "upload", linked))))
+        .hasMessageContaining("is not there");
+    String big = java.util.UUID.randomUUID().toString();
+    java.nio.file.Files.write(uploads().resolve(big + ".part"), new byte[5000]);
+    MailSend small = send("max_bytes", 2048L);
+    assertThatThrownBy(
+            () ->
+                go(
+                    small,
+                    "to",
+                    "anna@example.org",
+                    "subject",
+                    "x",
+                    "text",
+                    "x",
+                    "attachments",
+                    List.of(Map.of("name", "a.bin", "upload", big))))
+        .hasMessageContaining("more than the limit of 2048");
+    assertThat(server.received()).hasSize(1);
+    assertThatThrownBy(
+            () ->
+                go(
+                    s,
+                    "to",
+                    "anna@example.org",
+                    "subject",
+                    "x",
+                    "text",
+                    "x",
+                    "attachments",
+                    List.of(Map.of("name", "a.bin"))))
+        .hasMessageContaining("neither content nor an upload");
   }
 }

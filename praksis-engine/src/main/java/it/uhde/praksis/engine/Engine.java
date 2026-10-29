@@ -601,7 +601,8 @@ public final class Engine implements EventSink, AutoCloseable {
     CapabilityContext context =
         new Context(options.dryRun(), event.id() + "/" + ruleId + "/" + call.id(), event);
     try {
-      Map<String, Object> out = capabilities.get(call.capability()).invoke(context, args);
+      Map<String, Object> out =
+          ModuleCalls.invoke(capabilities.get(call.capability()), context, args);
       options
           .auditLog()
           .record(

@@ -52,6 +52,13 @@ public final class MailSend implements Capability {
   private Outbox outbox;
 
   @Override
+  public void useUploadsDirectory(java.nio.file.Path directory) {
+    if (composer != null) {
+      composer.uploads(directory);
+    }
+  }
+
+  @Override
   public String name() {
     return "mail.send";
   }

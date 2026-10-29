@@ -69,7 +69,8 @@ public record View(
     Map<String, Source> sources,
     List<Component> components,
     Optional<String> basedOn,
-    Map<String, Object> raw) {
+    Map<String, Object> raw,
+    List<String> requiresModules) {
   /** The version of the vocabulary that this Praksis understands. */
   public static final int SUPPORTED_SCHEMA = 1;
 
@@ -162,13 +163,33 @@ public record View(
       String command,
       Map<String, Arg> args,
       Optional<String> confirm,
-      Optional<Download> download) {
+      Optional<Download> download,
+      Optional<Opens> opens) {
     public Action {
       args = Map.copyOf(args);
     }
 
+    public Action(
+        String label,
+        String command,
+        Map<String, Arg> args,
+        Optional<String> confirm,
+        Optional<Download> download) {
+      this(label, command, args, confirm, download, Optional.empty());
+    }
+
     public Action(String label, String command, Map<String, Arg> args, Optional<String> confirm) {
-      this(label, command, args, confirm, Optional.empty());
+      this(label, command, args, confirm, Optional.empty(), Optional.empty());
+    }
+  }
+
+  /**
+   * Another view to show, with this state: how a reply opens the view for writing with the mail it
+   * answers. The parameters must be declared by that view.
+   */
+  public record Opens(String view, Map<String, Arg> params) {
+    public Opens {
+      params = Map.copyOf(params);
     }
   }
 
@@ -202,6 +223,62 @@ public record View(
     }
   }
 
+  /**
+   * The view as it is with these modules, or empty if the whole view needs a module that is not
+   * there. A part (any component) that asks for a module that is not there is left out, with what
+   * is inside it.
+   */
+  public Optional<View> available(Set<String> modules) {
+    if (!modules.containsAll(requiresModules)) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        new View(
+            id,
+            title,
+            description,
+            schema,
+            params,
+            sources,
+            availableParts(components, modules),
+            basedOn,
+            raw,
+            requiresModules));
+  }
+
+  /** Whether a part asks only for modules that are there. */
+  private static boolean wanted(Component c, Set<String> modules) {
+    return !(c.values().get("requires_modules") instanceof Arg.Literal l
+            && l.value() instanceof List<?> list)
+        || modules.containsAll(list.stream().map(String::valueOf).toList());
+  }
+
+  private static List<Component> availableParts(List<Component> parts, Set<String> modules) {
+    List<Component> out = new ArrayList<>();
+    for (Component c : parts) {
+      if (wanted(c, modules)) {
+        Map<String, Arg> values = c.values();
+        // the suggestions of a form are dropped, and the form stays, if their module is not there
+        if (values.get("lookup.requires_modules") instanceof Arg.Literal l
+            && l.value() instanceof List<?> list
+            && !modules.containsAll(list.stream().map(String::valueOf).toList())) {
+          values = new LinkedHashMap<>(values);
+          values.keySet().removeIf(k -> k.startsWith("lookup."));
+        }
+        out.add(
+            new Component(
+                c.type(),
+                values,
+                c.columns(),
+                c.fields(),
+                c.actions(),
+                c.select(),
+                availableParts(c.children(), modules)));
+      }
+    }
+    return out;
+  }
+
   /** {@code sha256:<hex>} of the view\'s content, without {@code based_on}. */
   public String hash() {
     return hashOf(raw);
@@ -230,7 +307,8 @@ public record View(
             "based_on",
             "param",
             "source",
-            "component"));
+            "component",
+            "requires_modules"));
     String id = t.string("id", false).orElse(fileId);
     if (!ID.matcher(id).matches()) {
       t.problem("view id '" + id + "' must match " + ID.pattern());
@@ -309,7 +387,17 @@ public record View(
       return Optional.empty();
     }
     return Optional.of(
-        new View(id, title.get(), description, schema, params, sources, components, basedOn, raw));
+        new View(
+            id,
+            title.get(),
+            description,
+            schema,
+            params,
+            sources,
+            components,
+            basedOn,
+            raw,
+            t.strings("requires_modules")));
   }
 
   private static Map<String, Arg> args(Table t) {
@@ -342,6 +430,10 @@ public record View(
       return Optional.empty();
     }
     Map<String, Arg> values = new LinkedHashMap<>();
+    List<String> requires = t.strings("requires_modules");
+    if (!requires.isEmpty()) {
+      values.put("requires_modules", new Arg.Literal(requires));
+    }
     value(t, "visible", false, values);
     width(t, values);
     List<Map<String, Arg>> columns = new ArrayList<>();
@@ -351,7 +443,7 @@ public record View(
     List<Component> children = new ArrayList<>();
     switch (type.get()) {
       case "text" -> {
-        t.onlyKeys(Set.of("type", "value", "style", "visible", "width"));
+        t.onlyKeys(Set.of("type", "value", "style", "visible", "width", "requires_modules"));
         value(t, "value", true, values);
         literal(t, "style", STYLES, values);
       }
@@ -366,7 +458,8 @@ public record View(
                 "row_action",
                 "emphasis",
                 "visible",
-                "width"));
+                "width",
+                "requires_modules"));
         value(t, "emphasis", false, values);
         value(t, "rows", true, values);
         literal(t, "empty", null, values);
@@ -386,7 +479,8 @@ public record View(
                 "row_action",
                 "emphasis",
                 "visible",
-                "width"));
+                "width",
+                "requires_modules"));
         value(t, "emphasis", false, values);
         value(t, "items", true, values);
         value(t, "title", true, values);
@@ -396,7 +490,7 @@ public record View(
         select = select(t, "select");
       }
       case "detail" -> {
-        t.onlyKeys(Set.of("type", "data", "fields", "visible", "width"));
+        t.onlyKeys(Set.of("type", "data", "fields", "visible", "width", "requires_modules"));
         value(t, "data", false, values);
         fields.addAll(entries(t, "fields", Set.of("label", "value", "format"), true));
       }
@@ -411,13 +505,28 @@ public record View(
                 "confirm",
                 "sets",
                 "download",
+                "opens",
                 "visible",
-                "width"));
+                "width",
+                "requires_modules"));
         literal(t, "label", null, values);
         value(t, "enabled", false, values);
         select = select(t, "sets");
         Optional<Download> download = download(t);
-        if (download.isPresent()) {
+        Optional<Opens> opens = opens(t);
+        if (opens.isPresent()) {
+          if (t.has("command") || download.isPresent()) {
+            t.problem("a button starts a command, downloads a file or opens a view: only one");
+          }
+          actions.add(
+              new Action(
+                  t.string("label", false).orElse("Open"),
+                  "",
+                  Map.of(),
+                  Optional.empty(),
+                  Optional.empty(),
+                  opens));
+        } else if (download.isPresent()) {
           if (t.has("command")) {
             t.problem("a button starts a command or downloads a file, not both");
           }
@@ -441,13 +550,21 @@ public record View(
         }
       }
       case "richtext" -> {
-        t.onlyKeys(Set.of("type", "blocks", "blocked", "images_param", "visible", "width"));
+        t.onlyKeys(
+            Set.of(
+                "type",
+                "blocks",
+                "blocked",
+                "images_param",
+                "visible",
+                "width",
+                "requires_modules"));
         value(t, "blocks", true, values);
         value(t, "blocked", false, values);
         literal(t, "images_param", null, values);
       }
       case "input" -> {
-        t.onlyKeys(Set.of("type", "param", "placeholder", "visible", "width"));
+        t.onlyKeys(Set.of("type", "param", "placeholder", "visible", "width", "requires_modules"));
         literal(t, "param", null, values);
         literal(t, "placeholder", null, values);
         if (!t.has("param")) {
@@ -455,9 +572,43 @@ public record View(
         }
       }
       case "form" -> {
-        t.onlyKeys(Set.of("type", "command", "defaults", "submit_label", "visible", "width"));
+        t.onlyKeys(
+            Set.of(
+                "type",
+                "command",
+                "defaults",
+                "submit_label",
+                "also",
+                "lookup",
+                "done",
+                "visible",
+                "width",
+                "requires_modules"));
         literal(t, "command", null, values);
         literal(t, "submit_label", null, values);
+        literal(t, "done", null, values); // the view to show after a button worked
+        // more buttons that start other commands with the same fields
+        for (Table a : t.tables("also")) {
+          a.onlyKeys(Set.of("label", "command"));
+          Optional<String> label = a.string("label", true);
+          Optional<String> command = a.string("command", true);
+          if (label.isPresent() && command.isPresent()) {
+            actions.add(new Action(label.get(), command.get(), Map.of(), Optional.empty()));
+          }
+        }
+        // where the fields with the widget "recipients" get their suggestions from
+        t.table("lookup", false)
+            .ifPresent(
+                l -> {
+                  l.onlyKeys(Set.of("capability", "arg", "requires_modules"));
+                  List<String> lookupNeeds = l.strings("requires_modules");
+                  if (!lookupNeeds.isEmpty()) {
+                    values.put("lookup.requires_modules", new Arg.Literal(lookupNeeds));
+                  }
+                  Optional<String> capability = l.string("capability", true);
+                  capability.ifPresent(c -> values.put("lookup.capability", new Arg.Literal(c)));
+                  values.put("lookup.arg", new Arg.Literal(l.string("arg", false).orElse("query")));
+                });
         t.table("defaults", false)
             .ifPresent(
                 d ->
@@ -470,7 +621,7 @@ public record View(
         }
       }
       default -> {
-        t.onlyKeys(Set.of("type", "children", "visible", "width"));
+        t.onlyKeys(Set.of("type", "children", "visible", "width", "requires_modules"));
         if (depth >= MAX_DEPTH) {
           t.problem("containers are nested at most " + MAX_DEPTH + " deep");
         } else {
@@ -579,8 +730,17 @@ public record View(
 
   private static void rowActions(Table t, List<Action> out) {
     for (Table a : t.tables("row_action")) {
-      a.onlyKeys(Set.of("label", "command", "args", "confirm", "download"));
+      a.onlyKeys(Set.of("label", "command", "args", "confirm", "download", "opens"));
       Optional<String> label = a.string("label", true);
+      Optional<Opens> opens = opens(a);
+      if (opens.isPresent()) {
+        if (a.has("command") || a.has("download")) {
+          a.problem("an action starts a command, downloads a file or opens a view: only one");
+        }
+        label.ifPresent(
+            l -> out.add(new Action(l, "", Map.of(), Optional.empty(), Optional.empty(), opens)));
+        continue;
+      }
       Optional<Download> download = download(a);
       if (download.isPresent()) {
         if (a.has("command")) {
@@ -595,6 +755,24 @@ public record View(
         out.add(new Action(label.get(), command.get(), args(a), a.string("confirm", false)));
       }
     }
+  }
+
+  /** The {@code opens = { view, params }} of an action, if it has one. */
+  private static Optional<Opens> opens(Table t) {
+    Optional<Table> o = t.table("opens", false);
+    if (o.isEmpty()) {
+      return Optional.empty();
+    }
+    o.get().onlyKeys(Set.of("view", "params"));
+    Optional<String> view = o.get().string("view", true);
+    Map<String, Arg> params = new LinkedHashMap<>();
+    o.get()
+        .table("params", false)
+        .ifPresent(
+            p ->
+                p.rawEntries()
+                    .forEach((name, value) -> params.put(name, RulesetLoader.arg(p, name, value))));
+    return view.map(v -> new Opens(v, params));
   }
 
   /** The {@code download = { capability, args, filename }} of an action, if it has one. */

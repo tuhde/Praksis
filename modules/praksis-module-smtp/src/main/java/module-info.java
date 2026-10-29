@@ -10,5 +10,7 @@ module it.uhde.praksis.module.smtp {
 
   provides it.uhde.praksis.capability.Capability with
       it.uhde.praksis.module.smtp.MailCompose,
+      it.uhde.praksis.module.smtp.MailForward,
+      it.uhde.praksis.module.smtp.MailReply,
       it.uhde.praksis.module.smtp.MailSend;
 }

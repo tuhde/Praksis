@@ -65,9 +65,16 @@ public final class MailGet implements Capability {
       out.put("date", headers.getOrDefault("date", ""));
       out.put("time", time(headers.getOrDefault("date", ""), file));
       out.put("message_id", headers.getOrDefault("message-id", ""));
-      out.put("text", body.text());
-      out.put("html", body.html());
+      out.put("reply_to", headers.getOrDefault("reply-to", ""));
+      out.put("references", headers.getOrDefault("references", ""));
       Sanitizer.Result safe = Sanitizer.sanitize(body.html(), images);
+      // a mail with only HTML still has a text, which a reply quotes
+      out.put(
+          "text",
+          body.text().isEmpty() && !safe.blocks().isEmpty()
+              ? Sanitizer.plain(safe.blocks())
+              : body.text());
+      out.put("html", body.html());
       out.put("blocks", safe.blocks());
       out.put("blocked", (long) safe.blockedImages());
       List<Object> attachments = new ArrayList<>();

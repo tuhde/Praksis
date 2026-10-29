@@ -49,3 +49,54 @@ results = [
   { name = "raw", type = "bytes", required = true },
   { name = "recipients", type = "int", required = true },
 ]
+
+# The starting point of an answer: who to write to, the subject, the threading headers and the text
+# with the mail quoted. The arguments are the fields of mail.get. Nothing is read or sent.
+[[capability]]
+name = "mail.reply"
+effect = "read-only"
+dry_run = true
+params = [
+  { name = "from", type = "string", required = false, scopable = false },
+  { name = "to", type = "string", required = false, scopable = false },
+  { name = "cc", type = "string", required = false, scopable = false },
+  { name = "subject", type = "string", required = false, scopable = false },
+  { name = "date", type = "string", required = false, scopable = false },
+  { name = "message_id", type = "string", required = false, scopable = false },
+  { name = "text", type = "string", required = false, scopable = false },
+  { name = "signature", type = "string", required = false, scopable = false },
+  { name = "reply_to", type = "string", required = false, scopable = false },
+  { name = "references", type = "string", required = false, scopable = false },
+  { name = "all", type = "bool", required = false, scopable = false },
+]
+results = [
+  { name = "to", type = "string", required = true },
+  { name = "cc", type = "string", required = true },
+  { name = "subject", type = "string", required = true },
+  { name = "text", type = "string", required = true },
+  { name = "in_reply_to", type = "string", required = true },
+  { name = "references", type = "string", required = true },
+]
+
+[[capability]]
+name = "mail.forward"
+effect = "read-only"
+dry_run = true
+params = [
+  { name = "from", type = "string", required = false, scopable = false },
+  { name = "to", type = "string", required = false, scopable = false },
+  { name = "cc", type = "string", required = false, scopable = false },
+  { name = "subject", type = "string", required = false, scopable = false },
+  { name = "date", type = "string", required = false, scopable = false },
+  { name = "message_id", type = "string", required = false, scopable = false },
+  { name = "text", type = "string", required = false, scopable = false },
+  { name = "signature", type = "string", required = false, scopable = false },
+]
+results = [
+  { name = "to", type = "string", required = true },
+  { name = "cc", type = "string", required = true },
+  { name = "subject", type = "string", required = true },
+  { name = "text", type = "string", required = true },
+  { name = "in_reply_to", type = "string", required = true },
+  { name = "references", type = "string", required = true },
+]

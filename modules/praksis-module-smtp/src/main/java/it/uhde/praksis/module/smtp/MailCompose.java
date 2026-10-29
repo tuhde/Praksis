@@ -16,6 +16,13 @@ public final class MailCompose implements Capability {
   private Composer composer;
 
   @Override
+  public void useUploadsDirectory(java.nio.file.Path directory) {
+    if (composer != null) {
+      composer.uploads(directory);
+    }
+  }
+
+  @Override
   public String name() {
     return "mail.compose";
   }

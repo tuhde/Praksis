@@ -163,6 +163,24 @@ public final class ModuleLoader {
     return new LoadedModules(descriptors, capabilities, sources);
   }
 
+  /**
+   * The names of the modules that would be loaded, read from their {@code module.toml} without
+   * loading anything. This is what a rule or view that {@code requires_modules} is checked against.
+   *
+   * @param enabled the modules to load; empty means every module in the directory
+   */
+  public static Set<String> moduleNames(Path modulesDir, Set<String> enabled)
+      throws ModuleLoadException {
+    Set<String> names = new java.util.TreeSet<>();
+    for (Path dir : moduleDirs(modulesDir)) {
+      String name = ModuleDescriptorReader.read(dir.resolve("module.toml")).descriptor().name();
+      if (enabled.isEmpty() || enabled.contains(name)) {
+        names.add(name);
+      }
+    }
+    return names;
+  }
+
   /** Records the current hash of every module directory, accepting new and changed modules. */
   public static void lock(Path modulesDir, Path lockfile) throws ModuleLoadException {
     Lockfile locked = Lockfile.read(lockfile);

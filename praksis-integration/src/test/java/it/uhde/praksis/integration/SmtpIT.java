@@ -33,11 +33,16 @@ class SmtpIT {
       [[trigger.param]]
       name = "text"
       type = "string"
+      [[trigger.param]]
+      name = "attachments"
+      type = "list"
+      default = []
+      widget = "files"
 
       [[action]]
       id = "send"
       capability = "mail.send"
-      args = { to = { cel = "event.data.to" }, subject = { cel = "event.data.subject" }, text = { cel = "event.data.text" } }
+      args = { to = { cel = "event.data.to" }, subject = { cel = "event.data.subject" }, text = { cel = "event.data.text" }, attachments = { cel = "event.data.attachments" } }
 
       [[action]]
       id = "keep"
@@ -192,6 +197,80 @@ class SmtpIT {
           h.cli("run", "mail.send-message", "to=anna@example.org", "subject=Three", "text=3");
       assertThat(third.output()).contains("limit of 1 mails per hour");
       assertThat(smtp.getReceivedMessages()).hasSize(1);
+      h.stop(daemon);
+    } finally {
+      smtp.stop();
+    }
+  }
+
+  @Test
+  void aFileThePersonChoseIsAttachedByItsTokenAndNoPathCanBeSmuggledIn() throws Exception {
+    GreenMail smtp = server();
+    try (Harness h = new Harness()) {
+      configure(h, smtp, "", true);
+      Process daemon = h.startDaemon();
+      Path secret = Files.writeString(h.home.resolve("secret.txt"), "top secret");
+
+      try (it.uhde.praksis.protocol.Client client =
+          it.uhde.praksis.protocol.Client.connect(h.home.resolve("praksis.sock"))) {
+        // the frontend asks for a place, copies the chosen file there and keeps the token
+        var ticket =
+            (it.uhde.praksis.protocol.Response.Uploaded)
+                client.send(new it.uhde.praksis.protocol.Request.Upload());
+        Files.writeString(Path.of(ticket.path()), "the notes");
+        assertThat(Path.of(ticket.path()).getParent()).isEqualTo(h.home.resolve("uploads"));
+
+        var started =
+            (it.uhde.praksis.protocol.Response.CommandStarted)
+                client.send(
+                    new it.uhde.praksis.protocol.Request.RunCommand(
+                        "mail.send-message",
+                        java.util.Map.of(
+                            "to",
+                            "anna@example.org",
+                            "subject",
+                            "With a file",
+                            "text",
+                            "see attached",
+                            "attachments",
+                            java.util.List.of(
+                                java.util.Map.of("name", "notes.txt", "upload", ticket.token()))),
+                        "test"));
+        try {
+          Harness.await("the mail to be sent", () -> smtp.getReceivedMessages().length == 1);
+        } catch (AssertionError e) {
+          throw new AssertionError(e.getMessage() + "\n" + h.log(), e);
+        }
+        jakarta.mail.Multipart parts =
+            (jakarta.mail.Multipart) smtp.getReceivedMessages()[0].getContent();
+        assertThat(parts.getBodyPart(1).getFileName()).isEqualTo("notes.txt");
+        assertThat(new String(parts.getBodyPart(1).getInputStream().readAllBytes()))
+            .isEqualTo("the notes");
+        assertThat(started.event()).isNotEmpty();
+
+        // a path instead of a token reads nothing
+        client.send(
+            new it.uhde.praksis.protocol.Request.RunCommand(
+                "mail.send-message",
+                java.util.Map.of(
+                    "to",
+                    "anna@example.org",
+                    "subject",
+                    "Smuggled",
+                    "text",
+                    "x",
+                    "attachments",
+                    java.util.List.of(
+                        java.util.Map.of("name", "secret.txt", "upload", secret.toString()))),
+                "test"));
+        Thread.sleep(1500);
+        assertThat(smtp.getReceivedMessages()).hasSize(1);
+        assertThat(
+                h.log().stream()
+                    .map(l -> l.message())
+                    .collect(java.util.stream.Collectors.joining()))
+            .contains("not the token of an uploaded file");
+      }
       h.stop(daemon);
     } finally {
       smtp.stop();
