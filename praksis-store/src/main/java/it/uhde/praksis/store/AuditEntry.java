@@ -43,7 +43,9 @@ public record AuditEntry(
      */
     RULE,
     /** A proposed change to a layer was approved or rejected: layer, branch, commit, why. */
-    PROPOSAL
+    PROPOSAL,
+    /** A person started a command: the command, the arguments, the event and the client. */
+    COMMAND
   }
 
   /** The line for a capability call. */

@@ -76,7 +76,8 @@ final class Screens {
               who.author(trust).label(),
               who.describe(trust),
               who.reasoning(),
-              onTrial.contains(o.ruleId())));
+              onTrial.contains(o.ruleId()),
+              triggerText(inUse.ruleset().rules(), o.ruleId())));
     }
     List<Response.EffectiveView.Param> params = new ArrayList<>();
     inUse
@@ -99,6 +100,97 @@ final class Screens {
                         d.ruleId(), d.layer(), d.reason().orElse(""))));
     return new Response.EffectiveView(
         inUse.ruleset().name(), pinsChanged(), params, rules, disabled);
+  }
+
+  private static String triggerText(List<it.uhde.praksis.ruleset.Rule> rules, String id) {
+    for (it.uhde.praksis.ruleset.Rule r : rules) {
+      if (r.id().equals(id)) {
+        return switch (r.trigger()) {
+          case it.uhde.praksis.ruleset.Trigger.OnEvent e -> "event " + e.type();
+          case it.uhde.praksis.ruleset.Trigger.OnCommand c -> "command " + c.title();
+        };
+      }
+    }
+    return "";
+  }
+
+  /** The commands that a person can start. */
+  Response.CommandList commands() {
+    Map<String, String> owners = new HashMap<>();
+    inUse.origins().forEach(o -> owners.put(o.ruleId(), o.owner()));
+    Map<String, String> disabled = engine.disabledRules();
+    List<Response.CommandList.Command> out = new ArrayList<>();
+    for (it.uhde.praksis.ruleset.Rule r : inUse.ruleset().rules()) {
+      if (r.trigger() instanceof it.uhde.praksis.ruleset.Trigger.OnCommand c) {
+        out.add(
+            new Response.CommandList.Command(
+                r.id(),
+                c.title(),
+                c.description().orElse(null),
+                owners.getOrDefault(r.id(), ""),
+                r.effect().id(),
+                disabled.get(r.id()),
+                c.params().stream()
+                    .map(
+                        p ->
+                            new Response.CommandList.Param(
+                                p.name(),
+                                p.type().id(),
+                                p.required(),
+                                p.defaultValue().map(String::valueOf).orElse(null),
+                                p.label().orElse(null)))
+                    .toList()));
+      }
+    }
+    return new Response.CommandList(out);
+  }
+
+  /** Starts a command: checks the arguments, hands the event to the engine and audits the start. */
+  Response run(Request.RunCommand r, java.time.Clock clock)
+      throws it.uhde.praksis.store.StoreException {
+    it.uhde.praksis.ruleset.Rule rule =
+        inUse.ruleset().rules().stream()
+            .filter(x -> x.id().equals(r.command()))
+            .findFirst()
+            .orElse(null);
+    if (rule == null || !(rule.trigger() instanceof it.uhde.praksis.ruleset.Trigger.OnCommand c)) {
+      return new Response.Error("there is no command '" + r.command() + "'");
+    }
+    it.uhde.praksis.capability.Event event;
+    try {
+      event = Injection.command(rule, c, r.args(), clock);
+    } catch (Injection.Invalid e) {
+      return new Response.Error(e.getMessage());
+    }
+    Map<String, Object> detail = new java.util.LinkedHashMap<>();
+    detail.put("event", event.id());
+    detail.put("client", r.client() == null ? "unknown" : r.client());
+    detail.put("args", String.valueOf(event.data()));
+    store.audit(
+        it.uhde.praksis.store.AuditEntry.of(
+            clock.instant(),
+            it.uhde.praksis.store.AuditEntry.Kind.COMMAND,
+            java.util.Optional.of(rule.id()),
+            rule.id(),
+            detail));
+    engine.submit(event);
+    return new Response.CommandStarted(event.id());
+  }
+
+  /** What became of an event. */
+  Response.Outcome outcome(String eventId) throws it.uhde.praksis.store.StoreException {
+    List<Response.LogLines.Line> lines = new ArrayList<>();
+    for (it.uhde.praksis.store.LogEntry e : store.logOf(eventId)) {
+      lines.add(
+          new Response.LogLines.Line(
+              e.time().toString(),
+              e.eventId(),
+              e.ruleId().orElse(null),
+              e.actionId().orElse(null),
+              e.outcome().name(),
+              e.message()));
+    }
+    return new Response.Outcome(store.isDone(eventId), lines);
   }
 
   /** Whether the pins now give another ruleset than the one the daemon runs. */

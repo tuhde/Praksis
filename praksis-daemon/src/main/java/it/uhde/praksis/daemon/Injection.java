@@ -6,6 +6,8 @@ import it.uhde.praksis.capability.EventTypeDescriptor;
 import it.uhde.praksis.capability.FieldDescriptor;
 import it.uhde.praksis.protocol.Request;
 import it.uhde.praksis.ruleset.ModuleCatalog;
+import it.uhde.praksis.ruleset.Rule;
+import it.uhde.praksis.ruleset.Trigger;
 import java.math.BigInteger;
 import java.time.Clock;
 import java.time.Instant;
@@ -39,27 +41,63 @@ final class Injection {
     if (descriptor.isEmpty()) {
       throw new Invalid(List.of("unknown event type '" + request.type() + "'"));
     }
+    return event(
+        descriptor.get(),
+        "cli",
+        request.target() == null ? "cli" : request.target(),
+        Optional.ofNullable(request.key()),
+        request.data(),
+        clock);
+  }
+
+  /** The event that starts a command: its arguments, checked against the declared parameters. */
+  static Event command(
+      Rule rule, Trigger.OnCommand command, Map<String, Object> arguments, Clock clock)
+      throws Invalid {
+    Map<String, Object> given = new HashMap<>(arguments);
+    for (Trigger.CommandParam p : command.params()) {
+      if (!given.containsKey(p.name()) && p.defaultValue().isPresent()) {
+        given.put(p.name(), p.defaultValue().get());
+      }
+    }
+    EventTypeDescriptor descriptor =
+        new EventTypeDescriptor(
+            rule.eventType(),
+            command.params().stream()
+                .map(p -> new FieldDescriptor(p.name(), p.type(), p.required(), false))
+                .toList());
+    return event(descriptor, "command", "command:" + rule.id(), Optional.empty(), given, clock);
+  }
+
+  private static Event event(
+      EventTypeDescriptor descriptor,
+      String source,
+      String target,
+      Optional<String> key,
+      Map<String, Object> raw,
+      Clock clock)
+      throws Invalid {
     List<String> problems = new ArrayList<>();
     Map<String, Object> data = new HashMap<>();
     Set<String> known = new HashSet<>();
-    for (FieldDescriptor field : descriptor.get().fields()) {
+    for (FieldDescriptor field : descriptor.fields()) {
       known.add(field.name());
-      Object raw = request.data().get(field.name());
-      if (raw == null) {
+      Object value = raw.get(field.name());
+      if (value == null) {
         if (field.required()) {
           problems.add("missing required field '" + field.name() + "'");
         }
         continue;
       }
       try {
-        data.put(field.name(), coerce(field, raw));
+        data.put(field.name(), coerce(field, value));
       } catch (IllegalArgumentException e) {
         problems.add("field '" + field.name() + "': " + e.getMessage());
       }
     }
-    for (String key : request.data().keySet()) {
-      if (!known.contains(key)) {
-        problems.add("unknown field '" + key + "' for event type '" + request.type() + "'");
+    for (String name : raw.keySet()) {
+      if (!known.contains(name)) {
+        problems.add("unknown field '" + name + "' for event type '" + descriptor.type() + "'");
       }
     }
     if (!problems.isEmpty()) {
@@ -67,11 +105,11 @@ final class Injection {
     }
     return new Event(
         UUID.randomUUID().toString(),
-        request.type(),
-        "cli",
+        descriptor.type(),
+        source,
         clock.instant(),
-        request.target() == null ? "cli" : request.target(),
-        Optional.ofNullable(request.key()),
+        target,
+        key,
         Optional.empty(),
         0,
         data);

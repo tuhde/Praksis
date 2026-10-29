@@ -33,4 +33,15 @@ public record Rule(
     needs = List.copyOf(needs);
     actions = List.copyOf(actions);
   }
+
+  /**
+   * The type of the events this rule fires for: the type it names, or for a command {@code
+   * command.<id>}.
+   */
+  public String eventType() {
+    return switch (trigger) {
+      case Trigger.OnEvent e -> e.type();
+      case Trigger.OnCommand c -> "command." + id;
+    };
+  }
 }

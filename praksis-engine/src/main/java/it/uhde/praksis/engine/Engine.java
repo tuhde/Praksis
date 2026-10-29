@@ -19,7 +19,6 @@ import it.uhde.praksis.ruleset.RuleView;
 import it.uhde.praksis.ruleset.Ruleset;
 import it.uhde.praksis.ruleset.RulesetException;
 import it.uhde.praksis.ruleset.RulesetValidator;
-import it.uhde.praksis.ruleset.Trigger;
 import it.uhde.praksis.store.LogEntry;
 import it.uhde.praksis.store.LogEntry.Outcome;
 import it.uhde.praksis.store.ShadowRun;
@@ -294,8 +293,7 @@ public final class Engine implements EventSink, AutoCloseable {
   private void handle(Event event) throws StoreException {
     for (Entry entry : timeline) {
       CompiledRule rule = entry.rule();
-      Trigger.OnEvent trigger = (Trigger.OnEvent) rule.rule().trigger();
-      if (!trigger.type().equals(event.type())) {
+      if (!rule.rule().eventType().equals(event.type())) {
         continue;
       }
       if (entry.shadow()) {

@@ -23,6 +23,9 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Response.Verification.class, name = "verification"),
   @JsonSubTypes.Type(value = Response.ProposalList.class, name = "proposals"),
   @JsonSubTypes.Type(value = Response.ProposalDetail.class, name = "proposal"),
+  @JsonSubTypes.Type(value = Response.CommandList.class, name = "commands"),
+  @JsonSubTypes.Type(value = Response.CommandStarted.class, name = "command-started"),
+  @JsonSubTypes.Type(value = Response.Outcome.class, name = "outcome"),
   @JsonSubTypes.Type(value = Response.Done.class, name = "done"),
   @JsonSubTypes.Type(value = Response.Stopped.class, name = "stopped"),
   @JsonSubTypes.Type(value = Response.Error.class, name = "error")
@@ -258,6 +261,7 @@ public sealed interface Response {
      * @param who one line: who changed it last, in which commit, and the subject
      * @param reasoning why, from the commit message
      * @param onTrial whether a version of it is on trial in shadow mode
+     * @param trigger what makes it fire: {@code event <type>} or {@code command <title>}
      */
     public record Rule(
         String id,
@@ -268,7 +272,8 @@ public sealed interface Response {
         String author,
         String who,
         String reasoning,
-        boolean onTrial) {}
+        boolean onTrial,
+        String trigger) {}
 
     /** A rule that a layer turned off. */
     public record Disabled(String rule, String layer, String reason) {}
@@ -398,6 +403,61 @@ public sealed interface Response {
    */
   record ProposalDetail(ProposalList.Proposal proposal, Verification verification)
       implements Response {}
+
+  /**
+   * The commands that a person can start.
+   *
+   * @param commands the commands, by rule id
+   */
+  record CommandList(List<Command> commands) implements Response {
+    /**
+     * A command.
+     *
+     * @param id the rule id, which starts it
+     * @param title what a person sees
+     * @param description what it does, or null
+     * @param owner the layer whose grants decide what it may do
+     * @param effect the strongest effect class of its actions
+     * @param disabled why it cannot run now (a call was denied), or null
+     * @param params the arguments, from which a form can be made
+     */
+    public record Command(
+        String id,
+        String title,
+        String description,
+        String owner,
+        String effect,
+        String disabled,
+        List<Param> params) {}
+
+    /**
+     * An argument of a command.
+     *
+     * @param name the name
+     * @param type {@code string}, {@code int}, {@code double}, {@code bool}, {@code timestamp},
+     *     {@code bytes}, {@code list} or {@code map}
+     * @param required whether it must be given
+     * @param defaultValue the default as text, or null
+     * @param label what to show next to the field, or null
+     */
+    public record Param(
+        String name, String type, boolean required, String defaultValue, String label) {}
+  }
+
+  /**
+   * A command was started.
+   *
+   * @param event the id of the event that runs it; ask {@link Request.Outcome} for the result
+   */
+  record CommandStarted(String event) implements Response {}
+
+  /**
+   * What became of an event.
+   *
+   * @param done whether it has been handled
+   * @param lines the run log of the event, oldest first
+   */
+  record Outcome(boolean done, List<LogLines.Line> lines) implements Response {}
 
   /** The daemon is shutting down. */
   record Stopped() implements Response {}

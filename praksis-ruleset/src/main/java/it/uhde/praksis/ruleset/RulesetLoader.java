@@ -164,19 +164,60 @@ public final class RulesetLoader {
     return Optional.of(new Rule(id, description, effect, needs, required, trigger, actions));
   }
 
+  private static final Pattern PARAM_NAME = Pattern.compile("[a-z][a-z0-9_]*");
+
   private static Trigger trigger(Table t) {
     Optional<String> kind = t.string("kind", true);
     if (kind.isEmpty()) {
       return null;
     }
+    if (kind.get().equals("command")) {
+      return command(t);
+    }
     if (!kind.get().equals("event")) {
-      t.problem("trigger kind '" + kind.get() + "' is not supported yet (only 'event')");
+      t.problem("trigger kind '" + kind.get() + "' is not supported yet ('event' and 'command')");
       return null;
     }
     t.onlyKeys(Set.of("kind", "type", "filter"));
     Optional<String> type = t.string("type", true);
     Optional<String> filter = t.string("filter", false);
     return type.<Trigger>map(ty -> new Trigger.OnEvent(ty, filter)).orElse(null);
+  }
+
+  private static Trigger command(Table t) {
+    t.onlyKeys(Set.of("kind", "title", "description", "param"));
+    Optional<String> title = t.string("title", true);
+    Optional<String> description = t.string("description", false);
+    List<Trigger.CommandParam> params = new ArrayList<>();
+    Set<String> names = new java.util.HashSet<>();
+    for (Table p : t.tables("param")) {
+      p.onlyKeys(Set.of("name", "type", "required", "default", "label"));
+      Optional<String> name = p.string("name", true);
+      Optional<ValueType> type = type(p);
+      Optional<String> label = p.string("label", false);
+      if (name.isPresent()) {
+        if (!PARAM_NAME.matcher(name.get()).matches()) {
+          p.problem("parameter name '" + name.get() + "' must match " + PARAM_NAME.pattern());
+        } else if (!names.add(name.get())) {
+          p.problem("parameter '" + name.get() + "' declared twice");
+        }
+      }
+      Optional<Object> value = Optional.empty();
+      if (p.has("default") && type.isPresent()) {
+        value = literal(type.get(), p.raw("default").get());
+        if (value.isEmpty()) {
+          p.problem("'default' is not a " + type.get().id());
+        }
+      }
+      boolean required = p.bool("required", value.isEmpty());
+      if (required && value.isPresent()) {
+        p.problem("a parameter with a default cannot be required");
+      }
+      if (name.isPresent() && type.isPresent()) {
+        params.add(new Trigger.CommandParam(name.get(), type.get(), required, value, label));
+      }
+    }
+    return title.<Trigger>map(ti -> new Trigger.OnCommand(ti, description, params)).orElse(null);
   }
 
   private static Optional<Action> action(Table t) {

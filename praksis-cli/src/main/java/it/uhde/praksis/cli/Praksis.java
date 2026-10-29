@@ -41,7 +41,9 @@ import picocli.CommandLine.Spec;
       Praksis.Approvals.class,
       Praksis.GrantsCommand.class,
       Praksis.ShadowCommand.class,
-      Praksis.Proposals.class
+      Praksis.Proposals.class,
+      Praksis.CommandsCommand.class,
+      Praksis.RunCommand.class
     })
 public final class Praksis {
   static final int EXIT_FAILED = 1;
@@ -415,6 +417,154 @@ public final class Praksis {
       @Override
       public Integer call() {
         return print(send(new Request.Missed(rule, "discard")));
+      }
+    }
+  }
+
+  @Command(
+      name = "commands",
+      description =
+          "Lists the commands that a person can start (rules with a command trigger), with their"
+              + " arguments. Start one with: praksis run <command> name=value ...")
+  static final class CommandsCommand extends Base {
+    @Override
+    public Integer call() {
+      Response response = send(new Request.Commands());
+      if (!(response instanceof Response.CommandList l)) {
+        return exitCodeFor(response);
+      }
+      if (l.commands().isEmpty()) {
+        out().println("No commands. A rule becomes one with trigger kind = \"command\".");
+      }
+      for (Response.CommandList.Command c : l.commands()) {
+        out()
+            .printf(
+                "%s  %s  [%s, layer %s]%s%n",
+                c.id(),
+                c.title(),
+                c.effect(),
+                c.owner(),
+                c.disabled() == null ? "" : "  DISABLED: " + c.disabled());
+        if (c.description() != null) {
+          out().printf("    %s%n", c.description());
+        }
+        for (Response.CommandList.Param p : c.params()) {
+          out()
+              .printf(
+                  "    %s (%s)%s%s%n",
+                  p.name(),
+                  p.type(),
+                  p.required()
+                      ? ", required"
+                      : p.defaultValue() == null ? "" : ", default " + p.defaultValue(),
+                  p.label() == null ? "" : "  " + p.label());
+        }
+      }
+      return 0;
+    }
+  }
+
+  @Command(
+      name = "run",
+      description =
+          "Starts a command and waits for its result. Arguments are name=value; the types come"
+              + " from the command. Lists and maps are given through the API, not here.")
+  static final class RunCommand extends Base {
+    @CommandLine.Parameters(index = "0", paramLabel = "<command>", description = "The command id.")
+    String command;
+
+    @CommandLine.Parameters(index = "1..*", paramLabel = "<name=value>", description = "Arguments.")
+    java.util.List<String> arguments = new java.util.ArrayList<>();
+
+    @Option(names = "--no-wait", description = "Do not wait for the result.")
+    boolean noWait;
+
+    @Override
+    public Integer call() throws InterruptedException {
+      Response listed = send(new Request.Commands());
+      if (!(listed instanceof Response.CommandList l)) {
+        return exitCodeFor(listed);
+      }
+      Response.CommandList.Command found =
+          l.commands().stream().filter(c -> c.id().equals(command)).findFirst().orElse(null);
+      if (found == null) {
+        err().println("There is no command '" + command + "'. See: praksis commands");
+        return EXIT_FAILED;
+      }
+      java.util.Map<String, Object> given = new java.util.LinkedHashMap<>();
+      for (String a : arguments) {
+        int eq = a.indexOf('=');
+        if (eq < 1) {
+          err().println("An argument is written name=value: " + a);
+          return 2;
+        }
+        String name = a.substring(0, eq);
+        String value = a.substring(eq + 1);
+        Response.CommandList.Param p =
+            found.params().stream().filter(x -> x.name().equals(name)).findFirst().orElse(null);
+        if (p == null) {
+          err().println("Command '" + command + "' has no argument '" + name + "'.");
+          return 2;
+        }
+        try {
+          given.put(name, typed(p.type(), value));
+        } catch (IllegalArgumentException e) {
+          err().println("Argument '" + name + "': " + e.getMessage());
+          return 2;
+        }
+      }
+      Response started = send(new Request.RunCommand(command, given, "praksis-cli"));
+      if (!(started instanceof Response.CommandStarted s)) {
+        return exitCodeFor(started);
+      }
+      out().println("Started " + command + " (event " + s.event() + ").");
+      if (noWait) {
+        return 0;
+      }
+      long end = System.nanoTime() + 60_000_000_000L;
+      while (System.nanoTime() < end) {
+        Response r = send(new Request.Outcome(s.event()));
+        if (!(r instanceof Response.Outcome o)) {
+          return exitCodeFor(r);
+        }
+        if (o.done()) {
+          boolean ok = true;
+          for (Response.LogLines.Line line : o.lines()) {
+            ok &= line.outcome().equals("OK");
+            out()
+                .printf(
+                    "  %-7s %s%s%n",
+                    line.outcome(),
+                    line.actionId() == null ? "" : line.actionId() + ": ",
+                    line.message());
+          }
+          if (o.lines().isEmpty()) {
+            out().println("  (nothing was done)");
+          }
+          return ok ? 0 : EXIT_FAILED;
+        }
+        Thread.sleep(50);
+      }
+      err().println("Still running after 60 seconds; see: praksis log");
+      return EXIT_FAILED;
+    }
+
+    private static Object typed(String type, String value) {
+      try {
+        return switch (type) {
+          case "int" -> Long.parseLong(value);
+          case "double" -> Double.parseDouble(value);
+          case "bool" -> {
+            if (!value.equals("true") && !value.equals("false")) {
+              throw new IllegalArgumentException("must be true or false");
+            }
+            yield Boolean.parseBoolean(value);
+          }
+          case "string", "timestamp", "bytes" -> value;
+          default -> throw new IllegalArgumentException("a " + type + " cannot be given here");
+        };
+      } catch (NumberFormatException e) {
+        throw new IllegalArgumentException("must be a " + type);
       }
     }
   }

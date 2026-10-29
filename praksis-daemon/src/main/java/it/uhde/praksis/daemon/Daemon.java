@@ -324,6 +324,9 @@ public final class Daemon implements AutoCloseable {
                     "reject",
                     r.name(),
                     r.reason() == null || r.reason().isBlank() ? "-" : r.reason()));
+        case Request.Commands c -> screens.commands();
+        case Request.RunCommand r -> screens.run(r, clock);
+        case Request.Outcome o -> screens.outcome(o.event());
         case Request.Stop s -> new Response.Stopped();
       };
     } catch (Injection.Invalid | Approvals.Failure | Shadows.Failure | DaemonException e) {

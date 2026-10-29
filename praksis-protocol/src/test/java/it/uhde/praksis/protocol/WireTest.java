@@ -70,7 +70,12 @@ class WireTest {
             new Request.Proposals(),
             new Request.ProposalShow("mine@ai-change"),
             new Request.ProposalApprove("mine@ai-change", "0123456", true),
-            new Request.ProposalReject("mine@ai-change", "no"))) {
+            new Request.ProposalReject("mine@ai-change", "no"),
+            new Request.Commands(),
+            new Request.RunCommand(
+                "mail.file", Map.of("folder", "Archive", "n", 3), "praksis-desktop"),
+            new Request.RunCommand("mail.file", null, null),
+            new Request.Outcome("e1"))) {
       assertThat(Wire.decodeRequest(Wire.encode(r))).isEqualTo(r);
     }
     var finding = new Response.Verification.Finding("ERROR", "test", "x", "y");
@@ -93,12 +98,28 @@ class WireTest {
                         "ai",
                         "who",
                         "why",
-                        false)),
+                        false,
+                        "event mail.received")),
                 List.of(new Response.EffectiveView.Disabled("d", "mine", ""))),
             new Response.LayerList(
                 List.of(
                     new Response.LayerList.Layer("mail", "g @ main", null, false, true, false))),
             new Response.Lines(false, List.of("a", "b")),
+            new Response.CommandList(
+                List.of(
+                    new Response.CommandList.Command(
+                        "mail.file",
+                        "File a mail",
+                        null,
+                        "mine",
+                        "local-write",
+                        null,
+                        List.of(
+                            new Response.CommandList.Param(
+                                "folder", "string", false, "Archive", null))))),
+            new Response.CommandStarted("e1"),
+            new Response.Outcome(
+                true, List.of(new Response.LogLines.Line("t", "e", "r", "a", "OK", "m"))),
             new Response.Verification(
                 true,
                 "t",

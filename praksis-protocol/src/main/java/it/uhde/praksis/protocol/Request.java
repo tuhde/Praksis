@@ -30,6 +30,9 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.ProposalShow.class, name = "proposal-show"),
   @JsonSubTypes.Type(value = Request.ProposalApprove.class, name = "proposal-approve"),
   @JsonSubTypes.Type(value = Request.ProposalReject.class, name = "proposal-reject"),
+  @JsonSubTypes.Type(value = Request.Commands.class, name = "commands"),
+  @JsonSubTypes.Type(value = Request.RunCommand.class, name = "run-command"),
+  @JsonSubTypes.Type(value = Request.Outcome.class, name = "outcome"),
   @JsonSubTypes.Type(value = Request.Stop.class, name = "stop")
 })
 public sealed interface Request {
@@ -205,6 +208,34 @@ public sealed interface Request {
    * @param reason why, for the audit log
    */
   record ProposalReject(String name, String reason) implements Request {}
+
+  /** Asks for the commands that a person can start. Answered with {@link Response.CommandList}. */
+  record Commands() implements Request {}
+
+  /**
+   * Starts a command. The arguments are checked against the declared parameters (defaults fill what
+   * is missing; timestamps are ISO-8601 strings and bytes Base64 strings, as in {@link Inject}).
+   * Answered with {@link Response.CommandStarted}, or an error that says what is wrong. The start
+   * is an audit line with the client name.
+   *
+   * @param command the rule id of the command
+   * @param args the arguments by parameter name
+   * @param client who asks, e.g. {@code praksis-desktop}, for the audit log; may be null
+   */
+  record RunCommand(String command, java.util.Map<String, Object> args, String client)
+      implements Request {
+    public RunCommand {
+      args = args == null ? java.util.Map.of() : args;
+    }
+  }
+
+  /**
+   * Asks what became of an event, e.g. of a command that was started. Answered with {@link
+   * Response.Outcome}.
+   *
+   * @param event the event id
+   */
+  record Outcome(String event) implements Request {}
 
   /**
    * Asks the daemon to finish what it is doing and exit. Answered with {@link Response.Stopped}.

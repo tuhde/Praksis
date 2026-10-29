@@ -36,11 +36,32 @@ public final class RuleView {
     m.put("effect", rule.effect().id());
     m.put("needs", new ArrayList<Object>(rule.needs()));
     m.put("required", rule.required());
-    Trigger.OnEvent trigger = (Trigger.OnEvent) rule.trigger();
     Map<String, Object> t = new LinkedHashMap<>();
-    t.put("kind", "event");
-    t.put("type", trigger.type());
-    trigger.filter().ifPresent(f -> t.put("filter", f));
+    switch (rule.trigger()) {
+      case Trigger.OnEvent trigger -> {
+        t.put("kind", "event");
+        t.put("type", trigger.type());
+        trigger.filter().ifPresent(f -> t.put("filter", f));
+      }
+      case Trigger.OnCommand trigger -> {
+        t.put("kind", "command");
+        t.put("title", trigger.title());
+        trigger.description().ifPresent(d -> t.put("description", d));
+        List<Object> params = new ArrayList<>();
+        for (Trigger.CommandParam p : trigger.params()) {
+          Map<String, Object> pm = new LinkedHashMap<>();
+          pm.put("name", p.name());
+          pm.put("type", p.type().id());
+          pm.put("required", p.required());
+          p.defaultValue().ifPresent(v -> pm.put("default", defaultText(v)));
+          p.label().ifPresent(l -> pm.put("label", l));
+          params.add(pm);
+        }
+        if (!params.isEmpty()) {
+          t.put("param", params);
+        }
+      }
+    }
     m.put("trigger", t);
     List<Object> actions = new ArrayList<>();
     for (Action action : rule.actions()) {
@@ -68,6 +89,11 @@ public final class RuleView {
     }
     m.put("action", actions);
     return m;
+  }
+
+  /** A default value as TOML and JSON hold it: timestamps as text. */
+  private static Object defaultText(Object value) {
+    return value instanceof java.time.Instant i ? i.toString() : value;
   }
 
   /** The rule as JSON, in the shape of {@link #toMap}; {@link #fromJson} reads it back. */

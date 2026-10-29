@@ -83,18 +83,34 @@ public final class RulesetValidator {
 
   private CompiledRule rule(
       Rule rule, String where, List<FieldDescriptor> params, List<Problem> out) {
-    Trigger.OnEvent trigger = (Trigger.OnEvent) rule.trigger();
-    Optional<EventTypeDescriptor> eventType = catalog.eventType(trigger.type());
+    Optional<EventTypeDescriptor> eventType;
     Optional<Expression> filter = Optional.empty();
     List<CompiledRule.CompiledAction> actions = new ArrayList<>();
-    if (eventType.isEmpty()) {
-      out.add(new Problem(where + ", trigger", "unknown event type '" + trigger.type() + "'"));
-    } else if (trigger.filter().isPresent()) {
-      Scope scope = new Scope(eventType, params, Map.of());
-      filter =
-          Optional.ofNullable(
-              check(
-                  trigger.filter().get(), scope, ValueType.BOOL, where + ", trigger filter", out));
+    if (rule.trigger() instanceof Trigger.OnCommand command) {
+      // the arguments of a command are the data of an event of its own type
+      eventType =
+          Optional.of(
+              new EventTypeDescriptor(
+                  rule.eventType(),
+                  command.params().stream()
+                      .map(p -> new FieldDescriptor(p.name(), p.type(), p.required(), false))
+                      .toList()));
+    } else {
+      Trigger.OnEvent trigger = (Trigger.OnEvent) rule.trigger();
+      eventType = catalog.eventType(trigger.type());
+      if (eventType.isEmpty()) {
+        out.add(new Problem(where + ", trigger", "unknown event type '" + trigger.type() + "'"));
+      } else if (trigger.filter().isPresent()) {
+        Scope scope = new Scope(eventType, params, Map.of());
+        filter =
+            Optional.ofNullable(
+                check(
+                    trigger.filter().get(),
+                    scope,
+                    ValueType.BOOL,
+                    where + ", trigger filter",
+                    out));
+      }
     }
 
     Set<String> used = new HashSet<>();

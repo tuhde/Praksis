@@ -518,6 +518,19 @@ public final class Store implements AutoCloseable {
     }
   }
 
+  /** Whether the event was handled; false if it is still pending or unknown. */
+  public synchronized boolean isDone(String eventId) throws StoreException {
+    try (PreparedStatement s =
+        connection.prepareStatement("SELECT state FROM event WHERE id = ?")) {
+      s.setString(1, eventId);
+      try (ResultSet r = s.executeQuery()) {
+        return r.next() && "done".equals(r.getString(1));
+      }
+    } catch (SQLException e) {
+      throw new StoreException("cannot read event " + eventId, e);
+    }
+  }
+
   /** The newest stored events, whatever their state, returned oldest first. */
   public synchronized List<Event> recentEvents(int limit) throws StoreException {
     List<Event> out = new ArrayList<>();

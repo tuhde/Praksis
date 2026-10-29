@@ -116,8 +116,12 @@ final class Tiers {
                 + author.label()
                 + ")");
       }
-      Tier tier = approval ? Tier.APPROVAL : rules.shadowFirst() ? Tier.SHADOW : Tier.AUTOMATIC;
-      if (!approval) {
+      boolean command = rule.trigger() instanceof it.uhde.praksis.ruleset.Trigger.OnCommand;
+      Tier tier =
+          approval ? Tier.APPROVAL : rules.shadowFirst() && !command ? Tier.SHADOW : Tier.AUTOMATIC;
+      if (!approval && command) {
+        reasons.add("a command: it runs only when you start it, so there is nothing to observe");
+      } else if (!approval) {
         reasons.add(
             rules.shadowFirst()
                 ? "within the grants and without a destructive or external effect: runs in shadow"

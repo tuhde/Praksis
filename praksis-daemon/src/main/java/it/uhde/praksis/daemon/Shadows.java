@@ -10,6 +10,7 @@ import it.uhde.praksis.ruleset.Rule;
 import it.uhde.praksis.ruleset.RuleView;
 import it.uhde.praksis.ruleset.Ruleset;
 import it.uhde.praksis.ruleset.RulesetException;
+import it.uhde.praksis.ruleset.Trigger;
 import it.uhde.praksis.store.LogEntry;
 import it.uhde.praksis.store.Promoted;
 import it.uhde.praksis.store.ShadowRule;
@@ -92,7 +93,9 @@ final class Shadows {
     Set<String> trialVersions = new LinkedHashSet<>();
     for (Rule rule : all.rules()) {
       String hash = RuleView.hash(rule);
-      if (promotedVersions.contains(rule.id() + " " + hash)) {
+      // a command only runs when a person starts it, so there is nothing to observe
+      if (rule.trigger() instanceof Trigger.OnCommand
+          || promotedVersions.contains(rule.id() + " " + hash)) {
         live.add(rule);
         continue;
       }

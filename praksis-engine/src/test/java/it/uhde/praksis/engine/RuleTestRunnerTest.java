@@ -233,4 +233,46 @@ class RuleTestRunnerTest {
     var rules = it.uhde.praksis.ruleset.RulesetLoader.load(dir.resolve("hash")).rules();
     return it.uhde.praksis.ruleset.RuleView.hash(rules.get(0));
   }
+
+  @Test
+  void aCommandIsTestedWithAnEventOfItsOwnType() throws Exception {
+    write("base/ruleset.toml", "format_version = 1\nname = \"base\"\n");
+    write(
+        "base/rules/mail.file.toml",
+        """
+        id = "mail.file"
+        effect = "local-write"
+        needs = ["mail.move"]
+
+        [trigger]
+        kind = "command"
+        title = "File a mail"
+        [[trigger.param]]
+        name = "message"
+        type = "string"
+
+        [[action]]
+        id = "move"
+        capability = "mail.move"
+        args = { message = { cel = "event.data.message" }, folder = "Archive" }
+        """);
+    write(
+        "base/tests/mail.file.toml",
+        """
+        format_version = 1
+        [[test]]
+        name = "files the mail"
+        [test.event]
+        type = "command.mail.file"
+        data = { message = "m1" }
+        [[test.call]]
+        capability = "mail.move"
+        args = { message = "m1", folder = "Archive" }
+        """);
+
+    RuleTestRunner.Report report = run("base");
+
+    assertThat(report.ok()).as(report.toString()).isTrue();
+    assertThat(report.covered(Map.of("mail.file", "base"))).containsExactly("mail.file");
+  }
 }

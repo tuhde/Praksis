@@ -700,4 +700,62 @@ class EngineTest {
         .contains("no grant");
     assertThat(calls).containsExactly("record:b", "record:b");
   }
+
+  @Test
+  void aCommandRunsForTheEventOfItsOwnTypeAndNothingElse() throws Exception {
+    Path rules = dir.resolve("ruleset/rules");
+    Files.createDirectories(rules);
+    Files.writeString(dir.resolve("ruleset/ruleset.toml"), "format_version = 1\nname = \"t\"\n");
+    Files.writeString(
+        rules.resolve("c.toml"),
+        """
+        id = "c"
+        effect = "local-write"
+        needs = ["test.record"]
+
+        [trigger]
+        kind = "command"
+        title = "Say it"
+        [[trigger.param]]
+        name = "name"
+        type = "string"
+
+        [[action]]
+        id = "x"
+        capability = "test.record"
+        args = { value = { cel = "'cmd-' + event.data.name" } }
+        """);
+    Files.writeString(
+        rules.resolve("d.toml"),
+        """
+        id = "d"
+        effect = "local-write"
+        needs = ["test.record"]
+
+        [trigger]
+        kind = "event"
+        type = "test.event"
+
+        [[action]]
+        id = "x"
+        capability = "test.record"
+        args = { value = { cel = "'event-' + event.data.name" } }
+        """);
+    try (Engine engine = engine()) {
+      run(engine, event("t", "plain"));
+      run(
+          engine,
+          new Event(
+              "cmd1",
+              "command.c",
+              "command",
+              Instant.parse("2026-01-01T00:00:00Z"),
+              "command:c",
+              Optional.empty(),
+              Optional.empty(),
+              0,
+              Map.of("name", "now")));
+    }
+    assertThat(calls).containsExactly("record:event-plain", "record:cmd-now");
+  }
 }
