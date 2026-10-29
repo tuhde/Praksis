@@ -57,6 +57,18 @@ class WireTest {
   }
 
   @Test
+  void aStatusSaysWhichProtocolTheDaemonSpeaksAndAnOldOneSaysNothing() throws Exception {
+    var status = new Response.StatusReport(1, "t", "mail", 2, List.of(), 0);
+    assertThat(status.protocol()).isEqualTo(Wire.PROTOCOL_VERSION);
+    assertThat(Wire.encode(status)).contains("\"protocol\":" + Wire.PROTOCOL_VERSION);
+    var old =
+        Wire.decodeResponse(
+            "{\"type\":\"status\",\"pid\":1,\"startedAt\":\"t\",\"ruleset\":\"m\",\"rules\":0,"
+                + "\"modules\":[],\"pending\":0}");
+    assertThat(((Response.StatusReport) old).protocol()).isZero();
+  }
+
+  @Test
   void theMessagesOfTheScreensSurviveTheRoundTrip() throws Exception {
     for (Request r :
         List.of(

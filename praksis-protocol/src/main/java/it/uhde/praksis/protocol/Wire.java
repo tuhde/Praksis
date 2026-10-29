@@ -19,6 +19,14 @@ import java.util.Map;
  * and a daemon that disagree about the protocol fail loudly.
  */
 public final class Wire {
+  /**
+   * The version of the protocol: the requests and responses and what they mean. The daemon says it
+   * in its status answer, so that a client can tell that it talks to a daemon it does not
+   * understand. While Praksis is below 1.0.0 any change that an old client or daemon cannot cope
+   * with raises it, and nothing promises compatibility between two versions.
+   */
+  public static final int PROTOCOL_VERSION = 1;
+
   /** The longest line accepted, to bound what one peer can make the other buffer. */
   public static final int MAX_LINE_BYTES = 1 << 20;
 

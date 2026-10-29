@@ -139,10 +139,24 @@ public sealed interface Response {
    * @param rules the number of rules in it
    * @param modules the names of the loaded modules
    * @param pending the number of events stored but not yet handled
+   * @param protocol the version of the protocol that the daemon speaks, see {@link
+   *     Wire#PROTOCOL_VERSION}; 0 if the daemon is too old to say
    */
   record StatusReport(
-      long pid, String startedAt, String ruleset, int rules, List<String> modules, int pending)
-      implements Response {}
+      long pid,
+      String startedAt,
+      String ruleset,
+      int rules,
+      List<String> modules,
+      int pending,
+      int protocol)
+      implements Response {
+    /** A report of the protocol of this version. */
+    public StatusReport(
+        long pid, String startedAt, String ruleset, int rules, List<String> modules, int pending) {
+      this(pid, startedAt, ruleset, rules, modules, pending, Wire.PROTOCOL_VERSION);
+    }
+  }
 
   /**
    * An event was handed over.
