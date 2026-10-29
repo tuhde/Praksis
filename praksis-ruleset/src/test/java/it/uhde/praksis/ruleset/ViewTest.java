@@ -710,4 +710,110 @@ class ViewTest {
     assertThatThrownBy(() -> LayerStack.resolve(List.of(new Source("p", both)), Map.of()))
         .hasMessageContaining("only one");
   }
+
+  private static final String DRAGGING =
+      """
+      title = "Mail"
+      [param.folder]
+      type = "string"
+      default = "INBOX"
+      [source.messages]
+      capability = "mail.list"
+      args = { folder = { cel = "view.folder" } }
+
+      [[component]]
+      type = "table"
+      rows = { cel = "source.messages.items" }
+      columns = [ { title = "From", value = { cel = "item.from" } } ]
+      drag = { cel = "item.id" }
+
+      [[component]]
+      type = "list"
+      items = { cel = "[{'name': 'Archive'}]" }
+      title = { cel = "item.name" }
+      drop = { command = "mail.file", param = "message", args = { folder = { cel = "item.name" } } }
+
+      [[component]]
+      type = "button"
+      label = "Archive"
+      command = "mail.file"
+      args = { message = "x" }
+      key = "a"
+
+      [[component]]
+      type = "input"
+      param = "folder"
+      key = "/"
+      """;
+
+  @Test
+  void rowsCanBeDraggedAndAcceptDropsAndButtonsAndInputsHaveKeys() throws Exception {
+    assertThat(problems(DRAGGING)).isEmpty();
+    Path l = layer("d" + System.nanoTime(), Map.of("mail.inbox", DRAGGING), COMMAND);
+    View v = LayerStack.resolve(List.of(new Source("d", l)), Map.of()).ruleset().views().get(0);
+    assertThat(v.components().get(0).values()).containsKey("drag");
+    assertThat(v.components().get(1).values())
+        .containsKeys("drop.command", "drop.param", "drop.arg.folder");
+    assertThat(v.components().get(2).values().get("key")).isEqualTo(new Arg.Literal("a"));
+    assertThat(v.components().get(3).values().get("key")).isEqualTo(new Arg.Literal("/"));
+
+    // what cannot work is said
+    assertThat(
+            problems(
+                DRAGGING.replace(
+                    "command = \"mail.file\", param", "command = \"mail.nope\", param")))
+        .anyMatch(p -> p.message().contains("there is no command 'mail.nope'"));
+    assertThat(problems(DRAGGING.replace("param = \"message\"", "param = \"other\"")))
+        .anyMatch(p -> p.message().contains("has no parameter 'other'"));
+    // what the dragged value does not fill, the row must
+    assertThat(problems(DRAGGING.replace("param = \"message\"", "param = \"folder\"")))
+        .anyMatch(p -> p.message().contains("needs the argument 'message'"));
+    assertThat(
+            problems(
+                DRAGGING.replace(
+                    "args = { folder = { cel = \"item.name\" } }",
+                    "args = { message = \"x\", folder = \"y\" }")))
+        .anyMatch(p -> p.message().contains("is the dragged value and cannot be given too"));
+    assertThat(
+            problems(
+                DRAGGING.replace("drag = { cel = \"item.id\" }", "drag = { cel = \"nope.id\" }")))
+        .anyMatch(p -> p.message().contains("nope"));
+    assertThat(problems(DRAGGING.replace("key = \"/\"", "key = \"a\"")))
+        .anyMatch(p -> p.message().contains("the key 'a' is used by 2 parts"));
+    Path badKey =
+        layer(
+            "k" + System.nanoTime(),
+            Map.of("mail.inbox", DRAGGING.replace("key = \"a\"", "key = \"ab\"")),
+            COMMAND);
+    assertThatThrownBy(() -> LayerStack.resolve(List.of(new Source("k", badKey)), Map.of()))
+        .hasMessageContaining("key must be one character or one of");
+  }
+
+  @Test
+  void aKeyMayBeSharedByPartsThatAreShownOneAtATime() throws Exception {
+    String toggle =
+        """
+        title = "Toggle"
+        [param.on]
+        type = "bool"
+        default = false
+        [[component]]
+        type = "button"
+        label = "Turn on"
+        sets = { param = "on", value = true }
+        key = "t"
+        visible = { cel = "!view.on" }
+        [[component]]
+        type = "button"
+        label = "Turn off"
+        sets = { param = "on", value = false }
+        key = "t"
+        visible = { cel = "view.on" }
+        """;
+    assertThat(problems(toggle)).isEmpty();
+    // but one that is always there and another with the same key are two things on one key
+    assertThat(problems(toggle.replace("visible = { cel = \"view.on\" }", "")))
+        .anyMatch(p -> p.message().contains("the key 't' is used by 2 parts"))
+        .anyMatch(p -> p.message().contains("only allowed if each of them has 'visible'"));
+  }
 }

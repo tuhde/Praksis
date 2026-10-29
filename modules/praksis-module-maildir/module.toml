@@ -20,11 +20,13 @@ name = "mail.list"
 effect = "read-only"
 dry_run = true
 params = [
+  { name = "account", type = "string", required = false, scopable = true },
   { name = "folder", type = "string", required = true, scopable = true },
   { name = "limit", type = "int", required = false, scopable = false },
   { name = "offset", type = "int", required = false, scopable = false },
   { name = "sort", type = "string", required = false, scopable = false },
   { name = "reverse", type = "bool", required = false, scopable = false },
+  { name = "threaded", type = "bool", required = false, scopable = false },
 ]
 results = [
   { name = "items", type = "list", required = true },
@@ -36,6 +38,7 @@ name = "mail.search"
 effect = "read-only"
 dry_run = true
 params = [
+  { name = "account", type = "string", required = false, scopable = true },
   { name = "folder", type = "string", required = true, scopable = true },
   { name = "query", type = "string", required = true, scopable = false },
   { name = "in", type = "string", required = false, scopable = false },
@@ -84,7 +87,9 @@ results = [
 name = "mail.folders"
 effect = "read-only"
 dry_run = true
-params = []
+params = [
+  { name = "account", type = "string", required = false, scopable = true },
+]
 results = [{ name = "folders", type = "list", required = true }]
 
 [[capability]]
@@ -102,6 +107,7 @@ results = [
   { name = "subject", type = "string", required = true },
   { name = "date", type = "string", required = true },
   { name = "time", type = "timestamp", required = true },
+  { name = "account", type = "string", required = true },
   { name = "message_id", type = "string", required = true },
   { name = "reply_to", type = "string", required = true },
   { name = "references", type = "string", required = true },
@@ -118,6 +124,7 @@ name = "mail.append"
 effect = "local-write"
 dry_run = true
 params = [
+  { name = "account", type = "string", required = false, scopable = true },
   { name = "folder", type = "string", required = true, scopable = true },
   { name = "content", type = "bytes", required = true, scopable = false },
   { name = "seen", type = "bool", required = false, scopable = false },
@@ -125,10 +132,18 @@ params = [
 ]
 results = [{ name = "message", type = "string", required = true }]
 
+[[capability]]
+name = "mail.accounts"
+effect = "read-only"
+dry_run = true
+params = [{ name = "check", type = "bool", required = false, scopable = false }]
+results = [{ name = "items", type = "list", required = true }]
+
 [[event]]
 type = "mail.received"
 fields = [
   { name = "message", type = "string", required = true },
+  { name = "account", type = "string" },
   { name = "folder", type = "string", required = true },
   { name = "size", type = "int", required = true },
   { name = "from", type = "string" },

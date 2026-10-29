@@ -20,7 +20,7 @@ public final class MailAttachment implements Capability {
   static final long DEFAULT_MAX = 5L * 1024 * 1024;
   static final long LIMIT = 25L * 1024 * 1024;
 
-  private Settings settings;
+  private final Map<String, Settings> accounts = new java.util.LinkedHashMap<>();
 
   @Override
   public String name() {
@@ -29,15 +29,17 @@ public final class MailAttachment implements Capability {
 
   @Override
   public void configure(Map<String, Object> config) throws CapabilityException {
-    settings = Settings.parse(config);
+    accounts.clear();
+    accounts.putAll(Accounts.parse(config, Settings::parse));
   }
 
   @Override
   public Map<String, Object> invoke(CapabilityContext context, Map<String, Object> args)
       throws CapabilityException {
-    if (settings == null) {
+    if (accounts.isEmpty()) {
       throw new CapabilityException("mail.attachment is not configured", false);
     }
+    Settings settings = Accounts.settingsFor(accounts, args);
     long max =
         args.get("max_bytes") instanceof Number n
             ? Math.max(1, Math.min(n.longValue(), LIMIT))

@@ -1,10 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package it.uhde.praksis.module.imap;
 
-import it.uhde.praksis.capability.Capability;
-import it.uhde.praksis.capability.CapabilityContext;
 import it.uhde.praksis.capability.CapabilityException;
-import it.uhde.praksis.capability.Credentials;
 import jakarta.mail.Flags;
 import jakarta.mail.Folder;
 import jakarta.mail.Message;
@@ -14,6 +11,7 @@ import java.util.Map;
 import java.util.Optional;
 import org.eclipse.angus.mail.imap.AppendUID;
 import org.eclipse.angus.mail.imap.IMAPFolder;
+import org.eclipse.angus.mail.imap.IMAPStore;
 
 /**
  * Moves a mail to another folder of the same account.
@@ -28,15 +26,11 @@ import org.eclipse.angus.mail.imap.IMAPFolder;
  *
  * <p>Folder names use {@code /} between levels; the server's own separator is used on the wire.
  */
-public final class ImapMove implements Capability {
+public final class ImapMove extends ImapRead {
   /** Switches for tests: pretend the server lacks MOVE or UIDPLUS to exercise the fallbacks. */
   boolean useMove = true;
 
   boolean useUidplus = true;
-
-  private ImapSettings settings;
-  private Connection connection;
-  private HeaderCache cache;
 
   @Override
   public String name() {
@@ -44,64 +38,15 @@ public final class ImapMove implements Capability {
   }
 
   @Override
-  public void configure(Map<String, Object> config) throws CapabilityException {
-    settings = ImapSettings.parse(config);
-    connection = new Connection(settings);
-  }
-
-  @Override
-  public synchronized void useCredentials(Credentials credentials) {
-    if (connection != null) {
-      connection.useCredentials(credentials);
-    }
-  }
-
-  @Override
-  public synchronized void useDataDirectory(java.nio.file.Path directory) {
-    if (settings != null && settings.cache() && cache == null) {
-      try {
-        cache = HeaderCache.open(directory, settings);
-      } catch (java.sql.SQLException e) {
-        // moving works without the cache
-      }
-    }
-  }
-
-  @Override
-  public synchronized void close() {
-    if (connection != null) {
-      connection.close();
-    }
-    if (cache != null) {
-      cache.release();
-      cache = null;
-    }
-  }
-
-  @Override
-  public synchronized Map<String, Object> invoke(
-      CapabilityContext context, Map<String, Object> args) throws CapabilityException {
-    if (settings == null) {
-      throw new CapabilityException("mail.move is not configured", false);
-    }
-    String target = (String) args.get("folder");
-    MessageId id =
-        MessageId.parse((String) args.get("message"))
-            .orElseThrow(
-                () ->
-                    new CapabilityException(
-                        "'" + args.get("message") + "' is not the id of an IMAP mail", false));
-    try {
-      return move(context, id, target);
-    } catch (MessagingException e) {
-      connection.close(); // the next call opens a new connection
-      throw new CapabilityException("imap " + settings.account() + ": " + e.getMessage(), true, e);
-    }
-  }
-
-  private Map<String, Object> move(CapabilityContext context, MessageId id, String targetName)
+  Map<String, Object> read(IMAPStore store, Map<String, Object> args)
       throws MessagingException, CapabilityException {
-    var store = connection.store();
+    // the account is the one of the mail: ImapRead chose it from the id
+    MessageId id = id(args);
+    return move(store, id, (String) args.get("folder"));
+  }
+
+  private Map<String, Object> move(IMAPStore store, MessageId id, String targetName)
+      throws MessagingException, CapabilityException {
     IMAPFolder source = (IMAPFolder) store.getFolder(id.folder());
     source.open(Folder.READ_WRITE);
     try {
@@ -118,8 +63,8 @@ public final class ImapMove implements Capability {
             "mail not found: it is not in " + id.folder() + " any more and not in " + targetName,
             false);
       }
-      if (context.dryRun()) {
-        return Map.of("message", new MessageId(targetName, 0, 0, id.messageId()).encode());
+      if (dryRun) {
+        return Map.of("message", new MessageId(account, targetName, 0, 0, id.messageId()).encode());
       }
       if (!target.exists()) {
         target.create(Folder.HOLDS_MESSAGES);
@@ -145,12 +90,13 @@ public final class ImapMove implements Capability {
       if (moved != null && moved.length > 0 && moved[0] != null) {
         return Map.of(
             "message",
-            new MessageId(targetName, moved[0].uidvalidity, moved[0].uid, id.messageId()).encode());
+            new MessageId(account, targetName, moved[0].uidvalidity, moved[0].uid, id.messageId())
+                .encode());
       }
       return Map.of(
           "message",
           find(target, id.messageId())
-              .orElse(new MessageId(targetName, 0, 0, id.messageId()))
+              .orElse(new MessageId(account, targetName, 0, 0, id.messageId()))
               .encode());
     } finally {
       try {
@@ -174,6 +120,7 @@ public final class ImapMove implements Capability {
       }
       return Optional.of(
           new MessageId(
+              account,
               display(folder),
               folder.getUIDValidity(),
               folder.getUID(hits[hits.length - 1]),
@@ -181,17 +128,5 @@ public final class ImapMove implements Capability {
     } finally {
       folder.close(false);
     }
-  }
-
-  /** The folder name as a rule writes it: levels separated by {@code /}. */
-  private static String display(IMAPFolder folder) throws MessagingException {
-    char separator = folder.getSeparator();
-    return separator == '/' ? folder.getFullName() : folder.getFullName().replace(separator, '/');
-  }
-
-  /** The folder name as the server wants it. */
-  private static String serverName(String name, IMAPFolder reference) throws MessagingException {
-    char separator = reference.getSeparator();
-    return separator == '/' || separator == 0 ? name : name.replace('/', separator);
   }
 }

@@ -79,6 +79,12 @@
     </dependency>
     <dependency>
       <groupId>it.uhde</groupId>
+      <artifactId>praksis-module-notify</artifactId>
+      <version>${project.version}</version>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>it.uhde</groupId>
       <artifactId>praksis-module-contacts</artifactId>
       <version>${project.version}</version>
       <scope>runtime</scope>
@@ -107,7 +113,7 @@
             <configuration>
               <outputDirectory>${project.build.directory}/mp</outputDirectory>
               <includeScope>runtime</includeScope>
-              <excludeArtifactIds>praksis-expression-cel,praksis-module-maildir,praksis-module-imap,praksis-module-smtp,praksis-module-contacts,praksis-mail-html,jsoup,angus-mail,jakarta.mail-api,jakarta.activation-api,angus-activation</excludeArtifactIds>
+              <excludeArtifactIds>praksis-expression-cel,praksis-module-maildir,praksis-module-imap,praksis-module-smtp,praksis-module-contacts,praksis-module-notify,praksis-mail-html,jsoup,angus-mail,jakarta.mail-api,jakarta.activation-api,angus-activation</excludeArtifactIds>
             </configuration>
           </execution>
           <execution>
@@ -120,6 +126,18 @@
               <outputDirectory>${project.build.directory}/imap</outputDirectory>
               <includeScope>runtime</includeScope>
               <includeArtifactIds>praksis-module-imap,praksis-mail-html,jsoup,angus-mail,jakarta.mail-api,jakarta.activation-api,angus-activation</includeArtifactIds>
+            </configuration>
+          </execution>
+          <execution>
+            <id>notify-module</id>
+            <phase>package</phase>
+            <goals>
+              <goal>copy-dependencies</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/notify</outputDirectory>
+              <includeScope>runtime</includeScope>
+              <includeArtifactIds>praksis-module-notify</includeArtifactIds>
             </configuration>
           </execution>
           <execution>
@@ -218,6 +236,11 @@
                 <copy todir="${image.dir}/lib/praksis/modules/imap">
                   <fileset dir="${project.build.directory}/imap" includes="*.jar"/>
                   <fileset dir="${project.basedir}/../modules/praksis-module-imap" includes="module.toml"/>
+                </copy>
+                <mkdir dir="${image.dir}/lib/praksis/modules/notify"/>
+                <copy todir="${image.dir}/lib/praksis/modules/notify">
+                  <fileset dir="${project.build.directory}/notify" includes="*.jar"/>
+                  <fileset dir="${project.basedir}/../modules/praksis-module-notify" includes="module.toml"/>
                 </copy>
                 <mkdir dir="${image.dir}/lib/praksis/modules/contacts"/>
                 <copy todir="${image.dir}/lib/praksis/modules/contacts">

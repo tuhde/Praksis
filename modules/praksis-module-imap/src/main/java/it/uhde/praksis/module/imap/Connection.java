@@ -27,11 +27,20 @@ import org.eclipse.angus.mail.imap.IMAPStore;
  */
 final class Connection implements AutoCloseable {
   private final ImapSettings settings;
+  private final String account;
   private Credentials credentials;
   private IMAPStore store;
 
   Connection(ImapSettings settings) {
+    this(settings, Accounts.DEFAULT);
+  }
+
+  /**
+   * @param account the name of the account, to report how it is doing
+   */
+  Connection(ImapSettings settings, String account) {
     this.settings = settings;
+    this.account = account;
   }
 
   /** Where a credential binding's password comes from. */
@@ -65,9 +74,11 @@ final class Connection implements AutoCloseable {
     try {
       fresh.connect(settings.host(), settings.port(), settings.user(), password);
     } catch (MessagingException e) {
+      Accounts.report(account, false, e.getMessage());
       throw new CapabilityException(
           "cannot log in to " + settings.account() + ": " + e.getMessage(), true, e);
     }
+    Accounts.report(account, true, null);
     store = fresh;
     return fresh;
   }

@@ -15,7 +15,7 @@ import java.util.Map;
  * delete. A mail that is gone already is not an error, so a repeat after a crash is harmless.
  */
 public final class MailDelete implements Capability {
-  private Settings settings;
+  private final Map<String, Settings> accounts = new java.util.LinkedHashMap<>();
 
   @Override
   public String name() {
@@ -24,15 +24,17 @@ public final class MailDelete implements Capability {
 
   @Override
   public void configure(Map<String, Object> config) throws CapabilityException {
-    settings = Settings.parse(config);
+    accounts.clear();
+    accounts.putAll(Accounts.parse(config, Settings::parse));
   }
 
   @Override
   public Map<String, Object> invoke(CapabilityContext context, Map<String, Object> args)
       throws CapabilityException {
-    if (settings == null) {
+    if (accounts.isEmpty()) {
       throw new CapabilityException("mail.delete is not configured", false);
     }
+    Settings settings = Accounts.settingsFor(accounts, args);
     Path file = MailFiles.find(settings, (String) args.get("message"));
     if (file == null) {
       return Map.of("deleted", false);

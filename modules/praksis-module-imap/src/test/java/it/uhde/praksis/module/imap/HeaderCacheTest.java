@@ -283,7 +283,7 @@ class HeaderCacheTest {
     three();
     var listing = make(new ImapRead.Listing(), true, "cache_max_age_ms", 0L);
     list(listing); // synced
-    HeaderCache cache = HeaderCache.open(data, ImapSettings.parse(server.settings()));
+    HeaderCache cache = HeaderCache.open(data, ImapSettings.parse(server.settings()), "default");
     try {
       Thread.sleep(5);
       assertThat(cache.fresh("INBOX")).isFalse(); // not watched, and the age limit is 0

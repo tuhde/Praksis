@@ -2,50 +2,19 @@
 package it.uhde.praksis.module.maildir;
 
 import it.uhde.praksis.capability.CapabilityException;
-import it.uhde.praksis.capability.Event;
 import it.uhde.praksis.capability.EventSink;
 import it.uhde.praksis.capability.EventSource;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.HashMap;
-import java.util.HashSet;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
-import java.util.UUID;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-import java.util.stream.Stream;
 
 /**
- * Turns every file in the {@code new} directory of a Maildir into a {@code mail.received} event.
- *
- * <p>The idempotency key is the unique part of the file name (the part before the first colon),
- * which Maildir guarantees to be unique. A mail that is still in {@code new} after a restart is
- * announced again, and the engine drops it because the key is known.
+ * Turns the new mails of the Maildir of every account into {@code mail.received} events. Each
+ * account is watched on its own, by an {@link AccountPoller}; an event names its account.
  */
 public final class MaildirSource implements EventSource {
-  private static final System.Logger LOG = System.getLogger(MaildirSource.class.getName());
-
-  /** Event field to mail header (lower case). A header the mail does not have gives "". */
-  private static final Map<String, String> HEADER_FIELDS =
-      Map.of(
-          "from", "from",
-          "to", "to",
-          "cc", "cc",
-          "subject", "subject",
-          "message_id", "message-id",
-          "date", "date",
-          "list_id", "list-id",
-          "precedence", "precedence",
-          "x_spam_flag", "x-spam-flag");
-
-  private Settings settings;
-  private ScheduledExecutorService poller;
-  private final Set<String> announced = new HashSet<>();
+  private final Map<String, AccountPoller> pollers = new LinkedHashMap<>();
 
   @Override
   public String name() {
@@ -54,96 +23,30 @@ public final class MaildirSource implements EventSource {
 
   @Override
   public void configure(Map<String, Object> config) throws CapabilityException {
-    settings = Settings.parse(config);
+    pollers.clear();
+    Accounts.parse(config, Settings::parse)
+        .forEach((name, settings) -> pollers.put(name, new AccountPoller(name, settings)));
   }
 
   @Override
   public synchronized void start(EventSink sink) throws CapabilityException {
-    if (settings == null) {
+    if (pollers.isEmpty()) {
       throw new CapabilityException("maildir source is not configured", false);
     }
-    if (poller != null) {
-      throw new CapabilityException("maildir source is already started", false);
+    List<AccountPoller> started = new ArrayList<>();
+    try {
+      for (AccountPoller p : pollers.values()) {
+        p.start(sink);
+        started.add(p);
+      }
+    } catch (CapabilityException | RuntimeException e) {
+      started.forEach(AccountPoller::stop);
+      throw e;
     }
-    if (!Files.isDirectory(settings.root().resolve("new"))) {
-      throw new CapabilityException(settings.root() + " has no 'new' directory", false);
-    }
-    poller =
-        Executors.newSingleThreadScheduledExecutor(
-            r -> {
-              Thread t = new Thread(r, "maildir-poll");
-              t.setDaemon(true);
-              return t;
-            });
-    long millis = settings.pollInterval().toMillis();
-    poller.scheduleWithFixedDelay(() -> poll(sink), 0, millis, TimeUnit.MILLISECONDS);
   }
 
   @Override
   public synchronized void stop() {
-    if (poller == null) {
-      return;
-    }
-    poller.shutdownNow();
-    try {
-      poller.awaitTermination(5, TimeUnit.SECONDS);
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-    }
-    poller = null;
-  }
-
-  private void poll(EventSink sink) {
-    try {
-      Path newDir = settings.root().resolve("new");
-      List<Path> files;
-      try (Stream<Path> stream = Files.list(newDir)) {
-        files =
-            stream
-                .filter(Files::isRegularFile)
-                .filter(f -> !f.getFileName().toString().startsWith("."))
-                .sorted()
-                .toList();
-      }
-      Set<String> present = new HashSet<>();
-      for (Path file : files) {
-        String name = file.getFileName().toString();
-        present.add(name);
-        if (announced.contains(name)) {
-          continue;
-        }
-        try {
-          sink.accept(event(file));
-          announced.add(name);
-        } catch (IOException | RuntimeException e) {
-          // Tried again on the next poll; the file may still be arriving or the engine busy.
-          LOG.log(System.Logger.Level.WARNING, "cannot announce " + name + ": " + e);
-        }
-      }
-      announced.retainAll(present);
-    } catch (IOException | RuntimeException e) {
-      LOG.log(System.Logger.Level.WARNING, "cannot read " + settings.root() + ": " + e);
-    }
-  }
-
-  private static Event event(Path file) throws IOException {
-    String name = file.getFileName().toString();
-    String unique = MailMove.uniquePart(name);
-    Map<String, String> headers = Headers.read(file);
-    Map<String, Object> data = new HashMap<>();
-    data.put("message", file.toString());
-    data.put("folder", "INBOX");
-    data.put("size", Files.size(file));
-    HEADER_FIELDS.forEach((field, header) -> data.put(field, headers.getOrDefault(header, "")));
-    return new Event(
-        UUID.randomUUID().toString(),
-        "mail.received",
-        "maildir",
-        Files.getLastModifiedTime(file).toInstant(),
-        "mail:" + unique,
-        Optional.of("maildir:" + unique),
-        Optional.empty(),
-        0,
-        data);
+    pollers.values().forEach(AccountPoller::stop);
   }
 }

@@ -13,6 +13,7 @@ module it.uhde.praksis.module.imap {
   requires org.xerial.sqlitejdbc;
 
   provides it.uhde.praksis.capability.Capability with
+      it.uhde.praksis.module.imap.ImapAccounts,
       it.uhde.praksis.module.imap.ImapAppend,
       it.uhde.praksis.module.imap.ImapEdit.Delete,
       it.uhde.praksis.module.imap.ImapEdit.Mark,

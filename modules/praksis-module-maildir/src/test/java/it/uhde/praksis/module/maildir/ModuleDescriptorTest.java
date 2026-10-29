@@ -40,7 +40,8 @@ class ModuleDescriptorTest {
               "mail.mark",
               "mail.delete",
               "mail.attachment",
-              "mail.append");
+              "mail.append",
+              "mail.accounts");
       assertThat(loaded.sources()).extracting(s -> s.name()).containsExactly("maildir.inbox");
       assertThat(loaded.catalog().eventType("mail.received")).isPresent();
     }

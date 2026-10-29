@@ -305,4 +305,38 @@ class MailManageTest {
         .containsEntry("references", "<1@x> <2@x>")
         .containsEntry("message_id", "<9@x>");
   }
+
+  @Test
+  void aThreadedListKeepsConversationsTogetherAndSaysHowDeepAnAnswerIs() throws Exception {
+    Files.writeString(
+        root.resolve("cur/1.a:2,S"),
+        "From: a@x\nSubject: lunch\nMessage-ID: <a@x>\nDate: Tue, 27 Oct 2026 10:00:00 +0000\n\nb\n");
+    Files.writeString(
+        root.resolve("cur/2.a:2,S"),
+        "From: z@x\nSubject: other\nMessage-ID: <z@x>\nDate: Tue, 27 Oct 2026 11:00:00 +0000\n\nb\n");
+    Files.writeString(
+        root.resolve("cur/3.a:2,S"),
+        "From: b@x\nSubject: Re: lunch\nMessage-ID: <b@x>\nIn-Reply-To: <a@x>\nReferences: <a@x>\nDate: Tue, 27 Oct 2026 12:00:00 +0000\n\nb\n");
+    Files.writeString(
+        root.resolve("cur/4.a:2,S"),
+        "From: y@x\nSubject: late\nMessage-ID: <y@x>\nDate: Tue, 27 Oct 2026 13:00:00 +0000\n\nb\n");
+    MailList list = make(new MailList());
+
+    var plain = items(call(list, "folder", "INBOX"));
+    assertThat(plain)
+        .extracting(m -> m.get("subject"))
+        .containsExactly("late", "Re: lunch", "other", "lunch");
+    assertThat(plain.get(0).keySet()).doesNotContain("thread", "message_id");
+
+    var threaded = items(call(list, "folder", "INBOX", "threaded", true));
+    assertThat(threaded)
+        .extracting(m -> m.get("subject"))
+        .containsExactly("late", "lunch", "Re: lunch", "other");
+    assertThat(threaded.get(1))
+        .containsEntry("depth", 0L)
+        .containsEntry("thread_size", 2L)
+        .containsEntry("thread", "<a@x>");
+    assertThat(threaded.get(2)).containsEntry("depth", 1L).containsEntry("thread", "<a@x>");
+    assertThat(threaded.get(0).keySet()).doesNotContain("in_reply_to", "references");
+  }
 }

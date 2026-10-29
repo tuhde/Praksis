@@ -420,13 +420,19 @@ final class ViewResolver {
       return error(c.type(), "visible: " + e.getMessage());
     }
     ViewComponent built = build(view, c, dynamic, ruleParams);
-    Arg width = c.values().get("width");
-    return width instanceof Arg.Literal l && l.value() instanceof Number n && built.error() == null
-        ? withWidth(built, n.intValue())
-        : built;
+    if (built.error() != null) {
+      return built;
+    }
+    Integer width =
+        c.values().get("width") instanceof Arg.Literal l && l.value() instanceof Number n
+            ? n.intValue()
+            : null;
+    String key = c.values().get("key") instanceof Arg.Literal l ? String.valueOf(l.value()) : null;
+    return width == null && key == null ? built : with(built, width, key);
   }
 
-  private static ViewComponent withWidth(ViewComponent c, int width) {
+  /** The part with a width and a key; nothing else about it changes. */
+  private static ViewComponent with(ViewComponent c, Integer width, String key) {
     return new ViewComponent(
         c.type(),
         c.text(),
@@ -441,8 +447,10 @@ final class ViewResolver {
         c.form(),
         c.children(),
         c.error(),
-        width,
-        c.select());
+        width != null ? width : c.width(),
+        c.select(),
+        c.rich(),
+        key != null ? key : c.key());
   }
 
   private ViewComponent build(
@@ -569,7 +577,33 @@ final class ViewResolver {
       for (View.Action a : c.actions()) {
         actions.add(action(view, a, inRow, ruleParams, Set.of("view", "source", "item")));
       }
-      rows.add(new ViewComponent.Row(cells, select, actions, emphasis));
+      Object drag =
+          c.values().containsKey("drag")
+              ? show(
+                  evaluate(
+                      view,
+                      c.values().get("drag"),
+                      inRow,
+                      ruleParams,
+                      Set.of("view", "source", "item")))
+              : null;
+      ViewComponent.Drop drop = null;
+      if (c.values().get("drop.command") instanceof Arg.Literal command) {
+        Map<String, Object> dropArgs = new LinkedHashMap<>();
+        for (var v : c.values().entrySet()) {
+          if (v.getKey().startsWith("drop.arg.")) {
+            dropArgs.put(
+                v.getKey().substring("drop.arg.".length()),
+                show(
+                    evaluate(
+                        view, v.getValue(), inRow, ruleParams, Set.of("view", "source", "item"))));
+          }
+        }
+        drop =
+            new ViewComponent.Drop(
+                String.valueOf(command.value()), literal(c, "drop.param", ""), dropArgs);
+      }
+      rows.add(new ViewComponent.Row(cells, select, actions, emphasis, drag, drop));
     }
     return new ViewComponent(
         c.type(),

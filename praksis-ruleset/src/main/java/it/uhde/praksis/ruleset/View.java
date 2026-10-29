@@ -110,14 +110,21 @@ public record View(
    * @param args its arguments
    * @param when an expression over {@code view}; the call is made only if it is true, otherwise the
    *     result is empty (for a source that needs a selection that may not be made yet)
+   * @param requiresModules modules that must be there; if one is not, the source is left out
    */
-  public record Source(String capability, Map<String, Arg> args, Optional<Arg> when) {
+  public record Source(
+      String capability, Map<String, Arg> args, Optional<Arg> when, List<String> requiresModules) {
     public Source {
       args = Map.copyOf(args);
+      requiresModules = List.copyOf(requiresModules);
+    }
+
+    public Source(String capability, Map<String, Arg> args, Optional<Arg> when) {
+      this(capability, args, when, List.of());
     }
 
     public Source(String capability, Map<String, Arg> args) {
-      this(capability, args, Optional.empty());
+      this(capability, args, Optional.empty(), List.of());
     }
   }
 
@@ -239,11 +246,23 @@ public record View(
             description,
             schema,
             params,
-            sources,
+            availableSources(sources, modules),
             availableParts(components, modules),
             basedOn,
             raw,
             requiresModules));
+  }
+
+  private static Map<String, Source> availableSources(
+      Map<String, Source> sources, Set<String> modules) {
+    Map<String, Source> out = new LinkedHashMap<>();
+    sources.forEach(
+        (name, source) -> {
+          if (modules.containsAll(source.requiresModules())) {
+            out.put(name, source);
+          }
+        });
+    return out;
   }
 
   /** Whether a part asks only for modules that are there. */
@@ -365,7 +384,7 @@ public record View(
                 st.subTables()
                     .forEach(
                         (name, s) -> {
-                          s.onlyKeys(Set.of("capability", "args", "when"));
+                          s.onlyKeys(Set.of("capability", "args", "when", "requires_modules"));
                           if (!NAME.matcher(name).matches()) {
                             s.problem("source name '" + name + "' must match " + NAME.pattern());
                           }
@@ -373,7 +392,11 @@ public record View(
                           Map<String, Arg> args = args(s);
                           Optional<Arg> when =
                               s.raw("when").map(w -> RulesetLoader.arg(s, "when", w));
-                          capability.ifPresent(c -> sources.put(name, new Source(c, args, when)));
+                          capability.ifPresent(
+                              c ->
+                                  sources.put(
+                                      name,
+                                      new Source(c, args, when, s.strings("requires_modules"))));
                         }));
     List<Component> components = new ArrayList<>();
     int[] count = {0};
@@ -457,6 +480,8 @@ public record View(
                 "select",
                 "row_action",
                 "emphasis",
+                "drag",
+                "drop",
                 "visible",
                 "width",
                 "requires_modules"));
@@ -466,6 +491,7 @@ public record View(
         columns.addAll(entries(t, "columns", Set.of("title", "value", "format"), true));
         rowActions(t, actions);
         select = select(t, "select");
+        dragAndDrop(t, values);
       }
       case "list" -> {
         t.onlyKeys(
@@ -478,6 +504,8 @@ public record View(
                 "select",
                 "row_action",
                 "emphasis",
+                "drag",
+                "drop",
                 "visible",
                 "width",
                 "requires_modules"));
@@ -488,6 +516,7 @@ public record View(
         literal(t, "empty", null, values);
         rowActions(t, actions);
         select = select(t, "select");
+        dragAndDrop(t, values);
       }
       case "detail" -> {
         t.onlyKeys(Set.of("type", "data", "fields", "visible", "width", "requires_modules"));
@@ -506,10 +535,12 @@ public record View(
                 "sets",
                 "download",
                 "opens",
+                "key",
                 "visible",
                 "width",
                 "requires_modules"));
         literal(t, "label", null, values);
+        key(t, values);
         value(t, "enabled", false, values);
         select = select(t, "sets");
         Optional<Download> download = download(t);
@@ -564,7 +595,9 @@ public record View(
         literal(t, "images_param", null, values);
       }
       case "input" -> {
-        t.onlyKeys(Set.of("type", "param", "placeholder", "visible", "width", "requires_modules"));
+        t.onlyKeys(
+            Set.of("type", "param", "placeholder", "key", "visible", "width", "requires_modules"));
+        key(t, values);
         literal(t, "param", null, values);
         literal(t, "placeholder", null, values);
         if (!t.has("param")) {
@@ -636,6 +669,46 @@ public record View(
     }
     return Optional.of(
         new Component(type.get(), values, columns, fields, actions, select, children));
+  }
+
+  /** The key that triggers a button or focuses an input: one printable character, or a name. */
+  static final Set<String> KEY_NAMES = Set.of("Delete", "Backspace", "Enter", "Escape", "Insert");
+
+  private static void key(Table t, Map<String, Arg> out) {
+    t.string("key", false)
+        .ifPresent(
+            k -> {
+              boolean single =
+                  k.codePointCount(0, k.length()) == 1 && !Character.isWhitespace(k.codePointAt(0));
+              if (single || KEY_NAMES.contains(k)) {
+                out.put("key", new Arg.Literal(k));
+              } else {
+                t.problem(
+                    "key must be one character or one of " + new java.util.TreeSet<>(KEY_NAMES));
+              }
+            });
+  }
+
+  /**
+   * {@code drag = <expression>} makes the rows draggable, with this value (in the scope of the
+   * row); {@code drop = { command, param, args }} lets a row accept a dragged row: the command is
+   * started with the arguments (in the scope of the row that accepts) and the dragged value as
+   * {@code param}.
+   */
+  private static void dragAndDrop(Table t, Map<String, Arg> values) {
+    value(t, "drag", false, values);
+    t.table("drop", false)
+        .ifPresent(
+            d -> {
+              d.onlyKeys(Set.of("command", "param", "args"));
+              Optional<String> command = d.string("command", true);
+              Optional<String> param = d.string("param", true);
+              if (command.isPresent() && param.isPresent()) {
+                values.put("drop.command", new Arg.Literal(command.get()));
+                values.put("drop.param", new Arg.Literal(param.get()));
+                args(d).forEach((name, arg) -> values.put("drop.arg." + name, arg));
+              }
+            });
   }
 
   private static void value(Table t, String key, boolean required, Map<String, Arg> out) {

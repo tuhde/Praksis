@@ -45,17 +45,33 @@ import javax.net.ssl.X509TrustManager;
  * unless the server is on this machine; the certificate and the host name are checked.
  */
 public final class MailSend implements Capability {
-  private SmtpSettings settings;
-  private Composer composer;
+  /** One account: its settings, the way it builds mails and its record of what it sent. */
+  private static final class Account {
+    final String name;
+    final SmtpSettings settings;
+    final Composer composer;
+    Outbox outbox;
+
+    Account(String name, SmtpSettings settings) {
+      this.name = name;
+      this.settings = settings;
+      this.composer = new Composer(settings);
+    }
+  }
+
+  private final Map<String, Account> accounts = new LinkedHashMap<>();
   private Credentials credentials;
   private Path directory;
+
+  // The account of the call in progress; a call is made with the lock held.
+  private Account current;
+  private SmtpSettings settings;
+  private Composer composer;
   private Outbox outbox;
 
   @Override
   public void useUploadsDirectory(java.nio.file.Path directory) {
-    if (composer != null) {
-      composer.uploads(directory);
-    }
+    accounts.values().forEach(a -> a.composer.uploads(directory));
   }
 
   @Override
@@ -65,8 +81,9 @@ public final class MailSend implements Capability {
 
   @Override
   public void configure(Map<String, Object> config) throws CapabilityException {
-    settings = SmtpSettings.parse(config);
-    composer = new Composer(settings);
+    accounts.clear();
+    Accounts.parse(config, SmtpSettings::parse)
+        .forEach((name, s) -> accounts.put(name, new Account(name, s)));
   }
 
   @Override
@@ -81,16 +98,25 @@ public final class MailSend implements Capability {
 
   @Override
   public synchronized void close() {
-    if (outbox != null) {
-      outbox.close();
-      outbox = null;
+    for (Account a : accounts.values()) {
+      if (a.outbox != null) {
+        a.outbox.close();
+        a.outbox = null;
+      }
     }
+    outbox = null;
   }
 
   private Outbox outbox() throws CapabilityException {
     if (outbox == null) {
       try {
-        outbox = Outbox.open(directory, settings.account());
+        // two accounts may log in as the same user: the name is part of the file
+        outbox =
+            Outbox.open(
+                directory,
+                (Accounts.DEFAULT.equals(current.name) ? "" : current.name + ".")
+                    + settings.account());
+        current.outbox = outbox;
       } catch (SQLException e) {
         // sending without a record would make the limit and the repeat protection worthless
         throw new CapabilityException("cannot open the outbox: " + e.getMessage(), true, e);
@@ -102,9 +128,13 @@ public final class MailSend implements Capability {
   @Override
   public synchronized Map<String, Object> invoke(
       CapabilityContext context, Map<String, Object> args) throws CapabilityException {
-    if (settings == null) {
+    if (accounts.isEmpty()) {
       throw new CapabilityException("mail.send is not configured", false);
     }
+    current = accounts.get(Accounts.choose(accounts, args.get("account")));
+    settings = current.settings;
+    composer = current.composer;
+    outbox = current.outbox;
     Composer.Composed mail = composer.compose(args, true);
     try {
       long now = System.currentTimeMillis();

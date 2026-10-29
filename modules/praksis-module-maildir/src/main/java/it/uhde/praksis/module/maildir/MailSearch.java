@@ -23,7 +23,7 @@ public final class MailSearch implements Capability {
   private static final int DEFAULT_LIMIT = 100;
   private static final int MAX_LIMIT = 1000;
 
-  private Settings settings;
+  private final Map<String, Settings> accounts = new java.util.LinkedHashMap<>();
 
   @Override
   public String name() {
@@ -32,15 +32,17 @@ public final class MailSearch implements Capability {
 
   @Override
   public void configure(Map<String, Object> config) throws CapabilityException {
-    settings = Settings.parse(config);
+    accounts.clear();
+    accounts.putAll(Accounts.parse(config, Settings::parse));
   }
 
   @Override
   public Map<String, Object> invoke(CapabilityContext context, Map<String, Object> args)
       throws CapabilityException {
-    if (settings == null) {
+    if (accounts.isEmpty()) {
       throw new CapabilityException("mail.search is not configured", false);
     }
+    Settings settings = Accounts.settingsFor(accounts, args);
     Path folder = settings.folderDir((String) args.get("folder"));
     String query = ((String) args.get("query")).toLowerCase(Locale.ROOT);
     String in = args.get("in") instanceof String s ? s : "all";

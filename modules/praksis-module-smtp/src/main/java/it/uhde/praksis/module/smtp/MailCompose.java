@@ -13,13 +13,11 @@ import java.util.Map;
  * draft is made: the result is appended to the Drafts folder.
  */
 public final class MailCompose implements Capability {
-  private Composer composer;
+  private final Map<String, Composer> composers = new java.util.LinkedHashMap<>();
 
   @Override
   public void useUploadsDirectory(java.nio.file.Path directory) {
-    if (composer != null) {
-      composer.uploads(directory);
-    }
+    composers.values().forEach(c -> c.uploads(directory));
   }
 
   @Override
@@ -29,16 +27,19 @@ public final class MailCompose implements Capability {
 
   @Override
   public void configure(Map<String, Object> config) throws CapabilityException {
-    composer = new Composer(SmtpSettings.parse(config));
+    composers.clear();
+    Accounts.parse(config, SmtpSettings::parse)
+        .forEach((name, s) -> composers.put(name, new Composer(s)));
   }
 
   @Override
   public Map<String, Object> invoke(CapabilityContext context, Map<String, Object> args)
       throws CapabilityException {
-    if (composer == null) {
+    if (composers.isEmpty()) {
       throw new CapabilityException("mail.compose is not configured", false);
     }
-    Composer.Composed mail = composer.compose(args, false);
+    Composer.Composed mail =
+        composers.get(Accounts.choose(composers, args.get("account"))).compose(args, false);
     Map<String, Object> out = new LinkedHashMap<>();
     out.put("message_id", mail.messageId());
     out.put("raw", mail.raw());

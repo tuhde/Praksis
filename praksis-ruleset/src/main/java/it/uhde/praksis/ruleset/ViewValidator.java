@@ -95,6 +95,36 @@ final class ViewValidator {
     for (View.Component c : view.components()) {
       component(c, where, view, ruleset, screen, row, viewParams, out);
     }
+    // one key does not mean two things; but a key may be shared by parts that are shown one at a
+    // time, such as a button that turns something on and one that turns it off
+    Map<String, int[]> keys = new java.util.TreeMap<>(); // key -> {parts, parts without visible}
+    keysOf(view.components(), keys);
+    keys.forEach(
+        (key, n) -> {
+          if (n[0] > 1 && n[1] > 0) {
+            out.add(
+                new Problem(
+                    where,
+                    "the key '"
+                        + key
+                        + "' is used by "
+                        + n[0]
+                        + " parts; that is only allowed if each of them has 'visible'"));
+          }
+        });
+  }
+
+  private static void keysOf(List<View.Component> parts, Map<String, int[]> keys) {
+    for (View.Component c : parts) {
+      if (c.values().get("key") instanceof Arg.Literal l) {
+        int[] n = keys.computeIfAbsent(String.valueOf(l.value()), k -> new int[2]);
+        n[0]++;
+        if (!c.values().containsKey("visible")) {
+          n[1]++;
+        }
+      }
+      keysOf(c.children(), keys);
+    }
   }
 
   private void sourceArgs(
@@ -138,7 +168,9 @@ final class ViewValidator {
       boolean perRow =
           v.getKey().equals("title")
               || v.getKey().equals("subtitle")
-              || v.getKey().equals("emphasis");
+              || v.getKey().equals("emphasis")
+              || v.getKey().equals("drag")
+              || v.getKey().startsWith("drop.arg.");
       boolean list = v.getKey().equals("rows") || v.getKey().equals("items");
       if (v.getValue() instanceof Arg.Expr e) {
         expression(e.source(), list || !perRow ? screen : valueScope, at + " " + v.getKey(), out);
@@ -190,6 +222,9 @@ final class ViewValidator {
               s.then()
                   .ifPresent(a -> command(a.command(), a.args(), selectScope, ruleset, at, out));
             });
+    if (c.values().get("drop.command") instanceof Arg.Literal drop) {
+      dropTarget(c, String.valueOf(drop.value()), ruleset, row, at, out);
+    }
     if (c.type().equals("richtext")
         && c.values().get("images_param") instanceof Arg.Literal l
         && !viewParams.contains(String.valueOf(l.value()))) {
@@ -295,6 +330,39 @@ final class ViewValidator {
         out.add(new Problem(where, "'" + name + "' does not answer with 'items' (a list)"));
       }
     }
+  }
+
+  /**
+   * A row that accepts a dragged row starts a command with the dragged value in one parameter and
+   * the rest from the row, so the command must exist, have that parameter, and get all it needs.
+   */
+  private void dropTarget(
+      View.Component c, String id, Ruleset ruleset, Scope row, String at, List<Problem> out) {
+    String where = at + ", drop";
+    Optional<Trigger.OnCommand> command = commandOf(ruleset, id);
+    if (command.isEmpty()) {
+      out.add(new Problem(where, "there is no command '" + id + "'"));
+      return;
+    }
+    String param =
+        c.values().get("drop.param") instanceof Arg.Literal l ? String.valueOf(l.value()) : "";
+    if (command.get().params().stream().noneMatch(p -> p.name().equals(param))) {
+      out.add(new Problem(where, "command '" + id + "' has no parameter '" + param + "'"));
+    }
+    Map<String, Arg> given = new java.util.LinkedHashMap<>();
+    c.values()
+        .forEach(
+            (k, v) -> {
+              if (k.startsWith("drop.arg.")) {
+                given.put(k.substring("drop.arg.".length()), v);
+              }
+            });
+    if (given.containsKey(param)) {
+      out.add(new Problem(where, "'" + param + "' is the dragged value and cannot be given too"));
+    }
+    Map<String, Arg> withDragged = new java.util.LinkedHashMap<>(given);
+    withDragged.put(param, new Arg.Literal("dragged"));
+    command(id, withDragged, row, ruleset, where, out);
   }
 
   /** Opening a view names a view that exists and parameters that it declares. */

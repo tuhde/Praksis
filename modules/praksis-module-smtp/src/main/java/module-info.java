@@ -12,5 +12,6 @@ module it.uhde.praksis.module.smtp {
       it.uhde.praksis.module.smtp.MailCompose,
       it.uhde.praksis.module.smtp.MailForward,
       it.uhde.praksis.module.smtp.MailReply,
+      it.uhde.praksis.module.smtp.MailSenders,
       it.uhde.praksis.module.smtp.MailSend;
 }

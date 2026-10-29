@@ -26,7 +26,7 @@ public final class MailGet implements Capability {
   /** The most bytes of a mail that are read. */
   static final int MAX_BYTES = 2 * 1024 * 1024;
 
-  private Settings settings;
+  private final Map<String, Settings> accounts = new java.util.LinkedHashMap<>();
 
   @Override
   public String name() {
@@ -35,15 +35,17 @@ public final class MailGet implements Capability {
 
   @Override
   public void configure(Map<String, Object> config) throws CapabilityException {
-    settings = Settings.parse(config);
+    accounts.clear();
+    accounts.putAll(Accounts.parse(config, Settings::parse));
   }
 
   @Override
   public Map<String, Object> invoke(CapabilityContext context, Map<String, Object> args)
       throws CapabilityException {
-    if (settings == null) {
+    if (accounts.isEmpty()) {
       throw new CapabilityException("mail.get is not configured", false);
     }
+    Settings settings = Accounts.settingsFor(accounts, args);
     // the id may be from before the mail was marked, which renames the file
     Path file = MailFiles.resolve(settings, (String) args.get("message"));
     boolean images = Boolean.TRUE.equals(args.get("images"));
@@ -64,6 +66,7 @@ public final class MailGet implements Capability {
       out.put("subject", headers.getOrDefault("subject", ""));
       out.put("date", headers.getOrDefault("date", ""));
       out.put("time", time(headers.getOrDefault("date", ""), file));
+      out.put("account", Accounts.nameOf(accounts, settings));
       out.put("message_id", headers.getOrDefault("message-id", ""));
       out.put("reply_to", headers.getOrDefault("reply-to", ""));
       out.put("references", headers.getOrDefault("references", ""));

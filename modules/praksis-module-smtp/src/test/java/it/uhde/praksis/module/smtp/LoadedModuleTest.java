@@ -69,7 +69,8 @@ class LoadedModuleTest {
         LoadedModules loaded =
             ModuleLoader.load(modules, lock, Map.of("smtp", server.settings()))) {
       assertThat(loaded.capabilities())
-          .containsOnlyKeys("mail.send", "mail.compose", "mail.reply", "mail.forward");
+          .containsOnlyKeys(
+              "mail.send", "mail.compose", "mail.reply", "mail.forward", "mail.senders");
       assertThat(loaded.catalog().capability("mail.send").orElseThrow().effect())
           .isEqualTo(EffectClass.EXTERNAL);
       assertThat(loaded.capabilities().get("mail.send").getClass().getModule().getLayer())

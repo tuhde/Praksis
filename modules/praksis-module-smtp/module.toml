@@ -11,6 +11,7 @@ name = "mail.compose"
 effect = "read-only"
 dry_run = true
 params = [
+  { name = "account", type = "string", required = false, scopable = true },
   { name = "to", type = "string", required = false, scopable = false },
   { name = "cc", type = "string", required = false, scopable = false },
   { name = "bcc", type = "string", required = false, scopable = false },
@@ -33,6 +34,7 @@ name = "mail.send"
 effect = "external"
 dry_run = true
 params = [
+  { name = "account", type = "string", required = false, scopable = true },
   { name = "to", type = "string", required = true, scopable = true },
   { name = "cc", type = "string", required = false, scopable = true },
   { name = "bcc", type = "string", required = false, scopable = true },
@@ -57,6 +59,7 @@ name = "mail.reply"
 effect = "read-only"
 dry_run = true
 params = [
+  { name = "account", type = "string", required = false, scopable = true },
   { name = "from", type = "string", required = false, scopable = false },
   { name = "to", type = "string", required = false, scopable = false },
   { name = "cc", type = "string", required = false, scopable = false },
@@ -83,6 +86,7 @@ name = "mail.forward"
 effect = "read-only"
 dry_run = true
 params = [
+  { name = "account", type = "string", required = false, scopable = true },
   { name = "from", type = "string", required = false, scopable = false },
   { name = "to", type = "string", required = false, scopable = false },
   { name = "cc", type = "string", required = false, scopable = false },
@@ -100,3 +104,11 @@ results = [
   { name = "in_reply_to", type = "string", required = true },
   { name = "references", type = "string", required = true },
 ]
+
+# The accounts that can send, for a screen that shows them.
+[[capability]]
+name = "mail.senders"
+effect = "read-only"
+dry_run = true
+params = []
+results = [{ name = "items", type = "list", required = true }]

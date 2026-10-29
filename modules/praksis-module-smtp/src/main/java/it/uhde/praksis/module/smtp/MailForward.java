@@ -12,7 +12,7 @@ import java.util.Map;
  * the forward starts no thread. Only computes; nothing is read or sent.
  */
 public final class MailForward implements Capability {
-  private Replies replies;
+  private final Map<String, Replies> accounts = new java.util.LinkedHashMap<>();
 
   @Override
   public String name() {
@@ -21,15 +21,18 @@ public final class MailForward implements Capability {
 
   @Override
   public void configure(Map<String, Object> config) throws CapabilityException {
-    replies = new Replies(SmtpSettings.parse(config));
+    accounts.clear();
+    Accounts.parse(config, SmtpSettings::parse)
+        .forEach((name, s) -> accounts.put(name, new Replies(s)));
   }
 
   @Override
   public Map<String, Object> invoke(CapabilityContext context, Map<String, Object> args)
       throws CapabilityException {
-    if (replies == null) {
+    if (accounts.isEmpty()) {
       throw new CapabilityException("mail.forward is not configured", false);
     }
+    Replies replies = accounts.get(Accounts.choose(accounts, args.get("account")));
     return replies.forward(args);
   }
 }

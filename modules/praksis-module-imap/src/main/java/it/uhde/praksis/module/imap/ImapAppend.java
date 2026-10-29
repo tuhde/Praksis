@@ -45,7 +45,7 @@ public final class ImapAppend extends ImapRead {
     IMAPFolder folder = (IMAPFolder) store.getFolder((String) args.get("folder"));
     String shown = display(folder);
     if (dryRun) {
-      return Map.of("message", new MessageId(shown, 0, 0, messageId).encode());
+      return Map.of("message", new MessageId(account, shown, 0, 0, messageId).encode());
     }
     if (!folder.exists()) {
       folder.create(Folder.HOLDS_MESSAGES);
@@ -56,7 +56,8 @@ public final class ImapAppend extends ImapRead {
         if (same.length > 0) {
           return Map.of(
               "message",
-              new MessageId(shown, folder.getUIDValidity(), folder.getUID(same[0]), messageId)
+              new MessageId(
+                      account, shown, folder.getUIDValidity(), folder.getUID(same[0]), messageId)
                   .encode());
         }
       } finally {
@@ -79,6 +80,7 @@ public final class ImapAppend extends ImapRead {
     return Map.of(
         "message",
         new MessageId(
+                account,
                 shown,
                 where == null ? 0 : where.uidvalidity,
                 where == null ? 0 : where.uid,

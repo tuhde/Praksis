@@ -308,4 +308,32 @@ class ImapManageTest {
         .containsEntry("references", "<1@x> <2@x>")
         .containsEntry("message_id", "<9@x>");
   }
+
+  @Test
+  void aThreadedListKeepsConversationsTogetherAndSaysHowDeepAnAnswerIs() throws Exception {
+    server.deliverRaw(
+        true,
+        "From: a@x\nSubject: lunch\nMessage-ID: <a@x>\nDate: Tue, 27 Oct 2026 10:00:00 +0000\n\nb\n");
+    server.deliverRaw(
+        true,
+        "From: z@x\nSubject: other\nMessage-ID: <z@x>\nDate: Tue, 27 Oct 2026 11:00:00 +0000\n\nb\n");
+    server.deliverRaw(
+        true,
+        "From: b@x\nSubject: Re: lunch\nMessage-ID: <b@x>\nIn-Reply-To: <a@x>\nReferences: <a@x>\n"
+            + "Date: Tue, 27 Oct 2026 12:00:00 +0000\n\nb\n");
+    var list = make(new ImapRead.Listing());
+
+    var plain = items(list.invoke(context(false), args("folder", "INBOX")));
+    assertThat(plain)
+        .extracting(m -> m.get("subject"))
+        .containsExactly("Re: lunch", "other", "lunch");
+    assertThat(plain.get(0).keySet()).doesNotContain("thread", "message_id", "references");
+
+    var threaded = items(list.invoke(context(false), args("folder", "INBOX", "threaded", true)));
+    assertThat(threaded)
+        .extracting(m -> m.get("subject"))
+        .containsExactly("lunch", "Re: lunch", "other");
+    assertThat(threaded.get(0)).containsEntry("depth", 0L).containsEntry("thread_size", 2L);
+    assertThat(threaded.get(1)).containsEntry("depth", 1L).containsEntry("thread", "<a@x>");
+  }
 }

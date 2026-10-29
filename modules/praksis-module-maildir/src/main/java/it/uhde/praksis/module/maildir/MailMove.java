@@ -23,7 +23,7 @@ import java.util.stream.Stream;
  * folder, the call succeeds and reports where it is. That makes a repeat after a crash harmless.
  */
 public final class MailMove implements Capability {
-  private Settings settings;
+  private final Map<String, Settings> accounts = new java.util.LinkedHashMap<>();
 
   @Override
   public String name() {
@@ -32,17 +32,19 @@ public final class MailMove implements Capability {
 
   @Override
   public void configure(Map<String, Object> config) throws CapabilityException {
-    settings = Settings.parse(config);
+    accounts.clear();
+    accounts.putAll(Accounts.parse(config, Settings::parse));
   }
 
   @Override
   public Map<String, Object> invoke(CapabilityContext context, Map<String, Object> args)
       throws CapabilityException {
-    if (settings == null) {
+    if (accounts.isEmpty()) {
       throw new CapabilityException("mail.move is not configured", false);
     }
+    Settings settings = Accounts.settingsFor(accounts, args);
     Path source = Path.of((String) args.get("message")).toAbsolutePath().normalize();
-    checkInsideRoot(source);
+    checkInsideRoot(settings, source);
     Path targetFolder = settings.folderDir((String) args.get("folder"));
     String name = source.getFileName().toString();
     String unique = uniquePart(name);
@@ -71,7 +73,7 @@ public final class MailMove implements Capability {
   /**
    * The source must be a file directly in the {@code new} or {@code cur} of a folder of the root.
    */
-  private void checkInsideRoot(Path source) throws CapabilityException {
+  private static void checkInsideRoot(Settings settings, Path source) throws CapabilityException {
     Path dir = source.getParent();
     Path folder = dir == null ? null : dir.getParent();
     boolean mailDir = dir != null && Set.of("new", "cur").contains(dir.getFileName().toString());

@@ -49,8 +49,30 @@ public abstract class ImapRead implements Capability {
   /** The most characters of a text or HTML body that are returned. */
   private static final int MAX_BODY = 2_000_000;
 
+  /** One account of the module, with its connection and its cache. */
+  private static final class State {
+    final String name;
+    final ImapSettings settings;
+    final Connection connection;
+    HeaderCache cache;
+
+    State(String name, ImapSettings settings) {
+      this.name = name;
+      this.settings = settings;
+      this.connection = new Connection(settings, name);
+    }
+  }
+
+  private final Map<String, State> accounts = new java.util.LinkedHashMap<>();
+  private State current;
+
+  // The account of the call in progress. A call is made with the lock held, so these can be plain
+  // fields, which is what the readers below use.
   private ImapSettings settings;
-  private Connection connection;
+  Connection connection;
+
+  /** The name of the account of the call in progress. */
+  String account = Accounts.DEFAULT;
 
   /** Whether the call in progress is a dry run; set by {@link #invoke}, which is synchronized. */
   boolean dryRun;
@@ -60,38 +82,74 @@ public abstract class ImapRead implements Capability {
 
   @Override
   public void configure(Map<String, Object> config) throws CapabilityException {
-    settings = ImapSettings.parse(config);
-    connection = new Connection(settings);
+    accounts.clear();
+    Accounts.parse(config, ImapSettings::parse)
+        .forEach((name, s) -> accounts.put(name, new State(name, s)));
   }
 
   @Override
   public synchronized void useCredentials(Credentials credentials) {
-    if (connection != null) {
-      connection.useCredentials(credentials);
-    }
+    accounts.values().forEach(a -> a.connection.useCredentials(credentials));
   }
 
   @Override
   public synchronized void useDataDirectory(java.nio.file.Path directory) {
-    if (settings != null && settings.cache() && cache == null) {
-      try {
-        cache = HeaderCache.open(directory, settings);
-      } catch (SQLException e) {
-        // reading works without the cache, only slower
-        LOG.log(System.Logger.Level.WARNING, "imap: no header cache: " + e.getMessage());
+    for (State a : accounts.values()) {
+      if (a.settings.cache() && a.cache == null) {
+        try {
+          a.cache = HeaderCache.open(directory, a.settings, a.name);
+        } catch (SQLException e) {
+          // reading works without the cache, only slower
+          LOG.log(System.Logger.Level.WARNING, "imap: no header cache: " + e.getMessage());
+        }
       }
     }
   }
 
   @Override
   public synchronized void close() {
-    if (connection != null) {
-      connection.close();
+    for (State a : accounts.values()) {
+      a.connection.close();
+      if (a.cache != null) {
+        a.cache.release();
+        a.cache = null;
+      }
     }
-    if (cache != null) {
-      cache.release();
-      cache = null;
+    cache = null;
+  }
+
+  /**
+   * Chooses the account of a call: the one a mail id names, else the one in {@code account}, else
+   * the only one.
+   */
+  private State pick(Map<String, Object> args) throws CapabilityException {
+    if (args.get("message") instanceof String message) {
+      MessageId id =
+          MessageId.parse(message)
+              .orElseThrow(
+                  () ->
+                      new CapabilityException(
+                          "'" + message + "' is not the id of an IMAP mail", false));
+      State state = accounts.get(id.account());
+      if (state == null) {
+        throw new CapabilityException(
+            "the mail is of the account '"
+                + id.account()
+                + "', which is not set up; the accounts are "
+                + accounts.keySet(),
+            false);
+      }
+      return state;
     }
+    return accounts.get(Accounts.choose(accounts, args.get("account")));
+  }
+
+  private void select(State state) {
+    current = state;
+    settings = state.settings;
+    connection = state.connection;
+    account = state.name;
+    cache = state.cache;
   }
 
   /**
@@ -118,9 +176,10 @@ public abstract class ImapRead implements Capability {
   @Override
   public final synchronized Map<String, Object> invoke(
       CapabilityContext context, Map<String, Object> args) throws CapabilityException {
-    if (settings == null) {
+    if (accounts.isEmpty()) {
       throw new CapabilityException(name() + " is not configured", false);
     }
+    select(pick(args));
     dryRun = context.dryRun();
     try {
       if (cache != null) {
@@ -135,6 +194,7 @@ public abstract class ImapRead implements Capability {
       LOG.log(System.Logger.Level.WARNING, "imap: header cache failed: " + e.getMessage());
       cache.release();
       cache = null;
+      current.cache = null;
       return invoke(context, args);
     } catch (CapabilityException e) {
       // a connection that cannot be made is retryable; anything else is an answer to the call
@@ -267,7 +327,13 @@ public abstract class ImapRead implements Capability {
       return Map.of(
           "items",
           new ArrayList<Object>(
-              cache.list(shown, sort, Boolean.TRUE.equals(args.get("reverse")), offset, limit)),
+              cache.list(
+                  shown,
+                  sort,
+                  Boolean.TRUE.equals(args.get("reverse")),
+                  offset,
+                  limit,
+                  Boolean.TRUE.equals(args.get("threaded")))),
           "count",
           cache.total(shown));
     }
@@ -296,13 +362,21 @@ public abstract class ImapRead implements Capability {
         }
         return Map.of(
             "items",
-            new ArrayList<Object>(cache.list(shown, sort, reverse, offset, limit)),
+            new ArrayList<Object>(
+                cache.list(
+                    shown,
+                    sort,
+                    reverse,
+                    offset,
+                    limit,
+                    Boolean.TRUE.equals(args.get("threaded")))),
             "count",
             cache.total(shown));
       }
       if (!folder.exists()) {
         return Map.of("items", List.of(), "count", 0L);
       }
+      boolean threaded = Boolean.TRUE.equals(args.get("threaded"));
       folder.open(Folder.READ_ONLY);
       try {
         int total = folder.getMessageCount();
@@ -323,7 +397,11 @@ public abstract class ImapRead implements Capability {
             fetch(folder, messages);
             for (int i = 0; i < messages.length; i++) {
               items.add(
-                  item(folder, (MimeMessage) messages[reverse ? i : messages.length - 1 - i]));
+                  item(
+                      account,
+                      folder,
+                      (MimeMessage) messages[reverse ? i : messages.length - 1 - i],
+                      threaded));
             }
           }
         } else if (total > 0) {
@@ -354,8 +432,14 @@ public abstract class ImapRead implements Capability {
               });
           int from = Math.min(offset, all.size());
           for (MimeMessage m : all.subList(from, Math.min(from + limit, all.size()))) {
-            items.add(item(folder, m));
+            items.add(item(account, folder, m, threaded));
           }
+        }
+        if (threaded) {
+          // the mails of a conversation together, within the page that was asked for
+          @SuppressWarnings("unchecked")
+          List<Map<String, Object>> page = (List<Map<String, Object>>) (List<?>) items;
+          items = new ArrayList<>(it.uhde.praksis.mail.html.Threads.arrange(page));
         }
         return Map.of("items", items, "count", (long) total);
       } finally {
@@ -379,12 +463,21 @@ public abstract class ImapRead implements Capability {
       }
     }
 
-    static Map<String, Object> item(IMAPFolder folder, MimeMessage m) throws MessagingException {
+    static Map<String, Object> item(String account, IMAPFolder folder, MimeMessage m)
+        throws MessagingException {
+      return item(account, folder, m, false);
+    }
+
+    /** As above; for conversations also the headers that say which mail answers which. */
+    static Map<String, Object> item(
+        String account, IMAPFolder folder, MimeMessage m, boolean threadHeaders)
+        throws MessagingException {
       Map<String, Object> item = new LinkedHashMap<>();
       String[] ids = m.getHeader("Message-ID");
       item.put(
           "id",
           new MessageId(
+                  account,
                   display(folder),
                   folder.getUIDValidity(),
                   folder.getUID(m),
@@ -397,6 +490,11 @@ public abstract class ImapRead implements Capability {
       item.put("size", (long) Math.max(0, m.getSize()));
       item.put("unread", !m.getFlags().contains(Flags.Flag.SEEN));
       item.put("starred", m.getFlags().contains(Flags.Flag.FLAGGED));
+      if (threadHeaders) {
+        item.put("message_id", ids == null || ids.length == 0 ? "" : ids[0]);
+        item.put("in_reply_to", ImapSource.header(m, "In-Reply-To"));
+        item.put("references", ImapSource.header(m, "References"));
+      }
       return item;
     }
   }
@@ -484,7 +582,7 @@ public abstract class ImapRead implements Capability {
         fetch(folder, window);
         List<Object> items = new ArrayList<>();
         for (int i = window.length - 1; i >= 0; i--) {
-          items.add(Listing.item(folder, (MimeMessage) window[i]));
+          items.add(Listing.item(account, folder, (MimeMessage) window[i]));
         }
         return Map.of("items", items, "count", (long) hits.length);
       } finally {
@@ -618,6 +716,7 @@ public abstract class ImapRead implements Capability {
         out.put("subject", subject(m));
         out.put("date", m.getHeader("Date") == null ? "" : m.getHeader("Date")[0]);
         out.put("time", instant(m));
+        out.put("account", account);
         out.put("message_id", id.messageId());
         out.put("reply_to", ImapSource.header(m, "Reply-To"));
         out.put("references", ImapSource.header(m, "References"));

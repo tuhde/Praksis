@@ -16,7 +16,7 @@ import java.util.Map;
  * error.
  */
 public final class MailMark implements Capability {
-  private Settings settings;
+  private final Map<String, Settings> accounts = new java.util.LinkedHashMap<>();
 
   @Override
   public String name() {
@@ -25,15 +25,17 @@ public final class MailMark implements Capability {
 
   @Override
   public void configure(Map<String, Object> config) throws CapabilityException {
-    settings = Settings.parse(config);
+    accounts.clear();
+    accounts.putAll(Accounts.parse(config, Settings::parse));
   }
 
   @Override
   public Map<String, Object> invoke(CapabilityContext context, Map<String, Object> args)
       throws CapabilityException {
-    if (settings == null) {
+    if (accounts.isEmpty()) {
       throw new CapabilityException("mail.mark is not configured", false);
     }
+    Settings settings = Accounts.settingsFor(accounts, args);
     Path file = MailFiles.resolve(settings, (String) args.get("message"));
     String flags = MailFiles.flags(file.getFileName().toString());
     flags = change(flags, 'S', args.get("seen"));

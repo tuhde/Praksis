@@ -254,4 +254,39 @@ class OptionalModulesTest {
     assertThat(formWithout.values().keySet()).noneMatch(k -> k.startsWith("lookup."));
     assertThat(formWith.values()).containsKeys("lookup.capability", "lookup.arg");
   }
+
+  @Test
+  void aSourceThatAsksForAModuleThatIsNotThereIsLeftOut() throws Exception {
+    Path layer = dir.resolve("src" + System.nanoTime());
+    Files.createDirectories(layer.resolve("views"));
+    Files.writeString(layer.resolve("ruleset.toml"), "format_version = 1\nname = \"s\"\n");
+    Files.writeString(
+        layer.resolve("views/accounts.toml"),
+        """
+        title = "Accounts"
+        [source.accounts]
+        capability = "mail.accounts"
+        [source.senders]
+        capability = "mail.senders"
+        requires_modules = ["smtp"]
+
+        [[component]]
+        type = "text"
+        value = "accounts"
+        """);
+
+    View without =
+        LayerStack.resolve(List.of(new Source("s", layer)), Map.of(), Set.of("maildir"))
+            .ruleset()
+            .views()
+            .get(0);
+    View with =
+        LayerStack.resolve(List.of(new Source("s", layer)), Map.of(), Set.of("maildir", "smtp"))
+            .ruleset()
+            .views()
+            .get(0);
+
+    assertThat(without.sources().keySet()).containsExactly("accounts");
+    assertThat(with.sources().keySet()).containsExactly("accounts", "senders");
+  }
 }

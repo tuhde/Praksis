@@ -606,7 +606,31 @@ public sealed interface Response {
       String error,
       Integer width,
       Select select,
-      Rich rich) {
+      Rich rich,
+      String key) {
+    /** A part without a key. */
+    public ViewComponent(
+        String type,
+        String text,
+        String style,
+        String label,
+        Boolean enabled,
+        String empty,
+        List<Column> columns,
+        List<Row> rows,
+        List<Field> fields,
+        List<Action> actions,
+        Form form,
+        List<ViewComponent> children,
+        String error,
+        Integer width,
+        Select select,
+        Rich rich) {
+      this(
+          type, text, style, label, enabled, empty, columns, rows, fields, actions, form, children,
+          error, width, select, rich, null);
+    }
+
     /** A part that is not rich text. */
     public ViewComponent(
         String type,
@@ -626,7 +650,7 @@ public sealed interface Response {
         Select select) {
       this(
           type, text, style, label, enabled, empty, columns, rows, fields, actions, form, children,
-          error, width, select, null);
+          error, width, select, null, null);
     }
 
     /** A part without a selection of its own. */
@@ -647,7 +671,7 @@ public sealed interface Response {
         Integer width) {
       this(
           type, text, style, label, enabled, empty, columns, rows, fields, actions, form, children,
-          error, width, null, null);
+          error, width, null, null, null);
     }
 
     /** A part without a width of its own. */
@@ -678,15 +702,34 @@ public sealed interface Response {
      *
      * @param cells the values, in the order of the columns
      * @param select what a click sets: the view parameter and its value, or null
+     * @param drag the value that is dragged when the row is, or null if it cannot be
+     * @param drop what happens if a dragged row is dropped on this one, or null
      * @param actions what can be started for this row
      * @param emphasis whether the row is shown in bold (an unread mail)
      */
-    public record Row(List<Object> cells, Select select, List<Action> actions, boolean emphasis) {
+    public record Row(
+        List<Object> cells,
+        Select select,
+        List<Action> actions,
+        boolean emphasis,
+        Object drag,
+        Drop drop) {
+      /** A row that can neither be dragged nor accept a drop. */
+      public Row(List<Object> cells, Select select, List<Action> actions, boolean emphasis) {
+        this(cells, select, actions, emphasis, null, null);
+      }
+
       /** A row that is not emphasized. */
       public Row(List<Object> cells, Select select, List<Action> actions) {
-        this(cells, select, actions, false);
+        this(cells, select, actions, false, null, null);
       }
     }
+
+    /**
+     * What happens when a dragged row is dropped on a row: the command is started with {@code args}
+     * and the value that was dragged as the argument {@code param}.
+     */
+    public record Drop(String command, String param, java.util.Map<String, Object> args) {}
 
     /**
      * Clicking sets the view parameter to the value, puts the parameters in {@code clear} back to

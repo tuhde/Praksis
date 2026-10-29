@@ -885,4 +885,80 @@ class ViewResolverTest {
     assertThat(action.opens()).isEqualTo(new ViewComponent.Opens("v", Map.of("m", "m1!")));
     assertThat(action.command()).isEmpty();
   }
+
+  @Test
+  void rowsCarryWhatIsDraggedAndWhereItCanBeDroppedAndPartsCarryTheirKeys() throws Exception {
+    String view =
+        """
+        title = "Mail"
+        [param.q]
+        type = "string"
+        default = ""
+        [source.messages]
+        capability = "mail.list"
+        args = { folder = "INBOX" }
+
+        [[component]]
+        type = "table"
+        rows = { cel = "source.messages.items" }
+        columns = [ { title = "From", value = { cel = "item.from" } } ]
+        drag = { cel = "item.id" }
+
+        [[component]]
+        type = "list"
+        items = { cel = "[{'name': 'Archive'}, {'name': 'Lists'}]" }
+        title = { cel = "item.name" }
+        drop = { command = "mail.file", param = "message", args = { folder = { cel = "item.name" } } }
+
+        [[component]]
+        type = "button"
+        label = "Archive"
+        command = "mail.file"
+        args = { message = "x" }
+        key = "a"
+        width = 90
+
+        [[component]]
+        type = "input"
+        param = "q"
+        key = "/"
+        """;
+
+    Response.ResolvedView r =
+        (Response.ResolvedView) resolver(view, COMMAND).resolve("v", Map.of(), 1);
+
+    var messages = r.components().get(0);
+    assertThat(messages.rows()).extracting(x -> x.drag()).containsExactly("m1", "m2");
+    assertThat(messages.rows().get(0).drop()).isNull();
+    var folders = r.components().get(1);
+    assertThat(folders.rows()).extracting(x -> x.drag()).containsOnlyNulls();
+    assertThat(folders.rows().get(1).drop())
+        .isEqualTo(new ViewComponent.Drop("mail.file", "message", Map.of("folder", "Lists")));
+    assertThat(r.components().get(2).key()).isEqualTo("a");
+    assertThat(r.components().get(2).width()).isEqualTo(90);
+    assertThat(r.components().get(3).key()).isEqualTo("/");
+  }
+
+  @Test
+  void aRichTextWithAWidthKeepsItsText() throws Exception {
+    String view =
+        """
+        title = "Reader"
+        [param.message]
+        type = "string"
+        default = "m1"
+        [source.current]
+        capability = "mail.get"
+        args = { message = { cel = "view.message" } }
+
+        [[component]]
+        type = "richtext"
+        blocks = { cel = "source.current.blocks" }
+        width = 400
+        """;
+    Response.ResolvedView r =
+        (Response.ResolvedView) resolver(view, null).resolve("v", Map.of(), 1);
+    assertThat(r.components().get(0).width()).isEqualTo(400);
+    assertThat(r.components().get(0).rich().blocks()).isNotEmpty();
+  }
 }

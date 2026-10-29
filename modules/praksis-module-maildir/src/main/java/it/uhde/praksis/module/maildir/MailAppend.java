@@ -19,7 +19,7 @@ import java.util.UUID;
  * Unlike the IMAP module this does not look for the same mail in the folder first.
  */
 public final class MailAppend implements Capability {
-  private Settings settings;
+  private final Map<String, Settings> accounts = new java.util.LinkedHashMap<>();
 
   @Override
   public String name() {
@@ -28,15 +28,17 @@ public final class MailAppend implements Capability {
 
   @Override
   public void configure(Map<String, Object> config) throws CapabilityException {
-    settings = Settings.parse(config);
+    accounts.clear();
+    accounts.putAll(Accounts.parse(config, Settings::parse));
   }
 
   @Override
   public Map<String, Object> invoke(CapabilityContext context, Map<String, Object> args)
       throws CapabilityException {
-    if (settings == null) {
+    if (accounts.isEmpty()) {
       throw new CapabilityException("mail.append is not configured", false);
     }
+    Settings settings = Accounts.settingsFor(accounts, args);
     if (!(args.get("content") instanceof byte[] content) || content.length == 0) {
       throw new CapabilityException("mail.append needs the content of the mail", false);
     }

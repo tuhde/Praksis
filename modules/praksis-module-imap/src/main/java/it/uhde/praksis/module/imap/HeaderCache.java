@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package it.uhde.praksis.module.imap;
 
+import it.uhde.praksis.mail.html.Threads;
 import jakarta.mail.FetchProfile;
 import jakarta.mail.Flags;
 import jakarta.mail.Message;
@@ -45,7 +46,7 @@ import org.eclipse.angus.mail.imap.IMAPFolder;
  * methods are synchronized, and a sync holds the lock while it talks to the server.
  */
 final class HeaderCache {
-  private static final int SCHEMA = 1;
+  private static final int SCHEMA = 2;
   private static final int BATCH = 200;
 
   /**
@@ -76,7 +77,9 @@ final class HeaderCache {
       long time,
       long size,
       boolean seen,
-      boolean flagged) {}
+      boolean flagged,
+      String inReplyTo,
+      String references) {}
 
   private final Path file;
   private final Duration maxAge;
@@ -96,7 +99,10 @@ final class HeaderCache {
   /** The hierarchy separator of the server, to name a folder as mail ids do. */
   private char separator = '/';
 
-  private HeaderCache(Path file, Duration maxAge, Connection db) {
+  private final String account;
+
+  private HeaderCache(Path file, Duration maxAge, Connection db, String account) {
+    this.account = account;
     this.file = file;
     this.maxAge = maxAge;
     this.db = db;
@@ -107,12 +113,17 @@ final class HeaderCache {
    *
    * @throws SQLException if the file cannot be used even after it was thrown away
    */
-  static synchronized HeaderCache open(Path directory, ImapSettings settings) throws SQLException {
+  static synchronized HeaderCache open(Path directory, ImapSettings settings, String account)
+      throws SQLException {
+    // two accounts may have the same login at the same server, so the name is part of the file;
+    // the account without a name keeps the name its cache always had
+    String login = settings.account().replaceAll("[^A-Za-z0-9._@-]", "_");
     Path file =
-        directory.resolve(settings.account().replaceAll("[^A-Za-z0-9._@-]", "_") + ".cache.db");
+        directory.resolve(
+            (Accounts.DEFAULT.equals(account) ? "" : account + ".") + login + ".cache.db");
     HeaderCache cache = OPEN.get(file);
     if (cache == null) {
-      cache = new HeaderCache(file, settings.cacheMaxAge(), connect(file));
+      cache = new HeaderCache(file, settings.cacheMaxAge(), connect(file), account);
       cache.loadSeparator();
       OPEN.put(file, cache);
     }
@@ -145,7 +156,8 @@ final class HeaderCache {
                     + " message_id TEXT NOT NULL, sender TEXT NOT NULL, sender_l TEXT NOT NULL,"
                     + " subject TEXT NOT NULL, subject_l TEXT NOT NULL, date TEXT NOT NULL,"
                     + " time INTEGER NOT NULL, size INTEGER NOT NULL, seen INTEGER NOT NULL,"
-                    + " flagged INTEGER NOT NULL, PRIMARY KEY (folder, uid)) WITHOUT ROWID");
+                    + " flagged INTEGER NOT NULL, in_reply_to TEXT NOT NULL, refs TEXT NOT NULL,"
+                    + " PRIMARY KEY (folder, uid)) WITHOUT ROWID");
             s.execute("PRAGMA user_version = " + SCHEMA);
           }
         }
@@ -363,8 +375,8 @@ final class HeaderCache {
     try (PreparedStatement p =
         db.prepareStatement(
             "INSERT OR REPLACE INTO message (folder, uid, message_id, sender, sender_l, subject,"
-                + " subject_l, date, time, size, seen, flagged)"
-                + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+                + " subject_l, date, time, size, seen, flagged, in_reply_to, refs)"
+                + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
       for (Message message : batch) {
         MimeMessage m = (MimeMessage) message;
         String[] ids = m.getHeader("Message-ID");
@@ -384,6 +396,8 @@ final class HeaderCache {
         p.setLong(10, Math.max(0, m.getSize()));
         p.setInt(11, flags & 1);
         p.setInt(12, (flags >> 1) & 1);
+        p.setString(13, ImapSource.header(m, "In-Reply-To"));
+        p.setString(14, ImapSource.header(m, "References"));
         p.addBatch();
       }
       p.executeBatch();
@@ -439,7 +453,8 @@ final class HeaderCache {
 
   /** The entries of {@code mail.list} for a window of the folder. */
   synchronized List<Map<String, Object>> list(
-      String folder, String sort, boolean reverse, int offset, int limit) throws SQLException {
+      String folder, String sort, boolean reverse, int offset, int limit, boolean threaded)
+      throws SQLException {
     boolean time = sort.equals("time");
     String column =
         switch (sort) {
@@ -449,18 +464,20 @@ final class HeaderCache {
           default -> "uid";
         };
     String direction = time != reverse ? "DESC" : "ASC";
-    return query(
-        "SELECT * FROM message WHERE folder = ? ORDER BY "
-            + column
-            + " "
-            + direction
-            + ", uid "
-            + direction
-            + " LIMIT ? OFFSET ?",
-        folder,
-        folder,
-        (long) limit,
-        (long) offset);
+    return shaped(
+        query(
+            "SELECT * FROM message WHERE folder = ? ORDER BY "
+                + column
+                + " "
+                + direction
+                + ", uid "
+                + direction
+                + " LIMIT ? OFFSET ?",
+            folder,
+            folder,
+            (long) limit,
+            (long) offset),
+        threaded);
   }
 
   /** The newest mails whose sender or subject (or either, for {@code all}) contains the text. */
@@ -476,10 +493,12 @@ final class HeaderCache {
     boolean both = !in.equals("from") && !in.equals("subject");
     Object[] args =
         both ? new Object[] {folder, q, q, (long) limit} : new Object[] {folder, q, (long) limit};
-    return query(
-        "SELECT * FROM message WHERE folder = ? AND " + where + " ORDER BY uid DESC LIMIT ?",
-        folder,
-        args);
+    return shaped(
+        query(
+            "SELECT * FROM message WHERE folder = ? AND " + where + " ORDER BY uid DESC LIMIT ?",
+            folder,
+            args),
+        false);
   }
 
   /** How many mails of the folder the search matches, however many are returned. */
@@ -524,17 +543,34 @@ final class HeaderCache {
                   r.getLong("time"),
                   r.getLong("size"),
                   r.getInt("seen") == 1,
-                  r.getInt("flagged") == 1);
-          out.add(item(folder, validity == null ? 0 : validity, row));
+                  r.getInt("flagged") == 1,
+                  r.getString("in_reply_to"),
+                  r.getString("refs"));
+          out.add(item(account, folder, validity == null ? 0 : validity, row));
         }
       }
     }
     return out;
   }
 
-  private static Map<String, Object> item(String folder, long validity, Row row) {
+  /** The page as a plain list, or put into conversations (within the page). */
+  private static List<Map<String, Object>> shaped(
+      List<Map<String, Object>> page, boolean threaded) {
+    if (threaded) {
+      return Threads.arrange(page);
+    }
+    page.forEach(
+        m -> {
+          m.remove("message_id");
+          m.remove("in_reply_to");
+          m.remove("references");
+        });
+    return page;
+  }
+
+  private static Map<String, Object> item(String account, String folder, long validity, Row row) {
     Map<String, Object> item = new LinkedHashMap<>();
-    item.put("id", new MessageId(folder, validity, row.uid(), row.messageId()).encode());
+    item.put("id", new MessageId(account, folder, validity, row.uid(), row.messageId()).encode());
     item.put("from", row.from());
     item.put("subject", row.subject());
     item.put("date", row.date());
@@ -542,6 +578,10 @@ final class HeaderCache {
     item.put("size", row.size());
     item.put("unread", !row.seen());
     item.put("starred", row.flagged());
+    // only for conversations; list() takes them out again if they are not asked for
+    item.put("message_id", row.messageId());
+    item.put("in_reply_to", row.inReplyTo());
+    item.put("references", row.references());
     return item;
   }
 

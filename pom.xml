@@ -45,6 +45,7 @@
     <module>modules/praksis-module-imap</module>
     <module>modules/praksis-module-smtp</module>
     <module>modules/praksis-module-contacts</module>
+    <module>modules/praksis-module-notify</module>
   </modules>
 
   <properties>
