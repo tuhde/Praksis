@@ -112,6 +112,18 @@ public final class Permissions {
         }
       }
     }
+    // the sources of a view read with the grants of the layer that owns the view
+    Map<String, String> viewOwners = new HashMap<>();
+    effective.viewOrigins().forEach(o -> viewOwners.put(o.viewId(), o.owner()));
+    for (View view : effective.ruleset().views()) {
+      String owner = viewOwners.getOrDefault(view.id(), "?");
+      for (View.Source source : view.sources().values()) {
+        Action.Call call = new Action.Call("source", source.capability(), source.args());
+        found
+            .computeIfAbsent(requirement(owner, call, params, catalog), k -> new TreeSet<>())
+            .add("view:" + view.id());
+      }
+    }
     return new Needs(found);
   }
 

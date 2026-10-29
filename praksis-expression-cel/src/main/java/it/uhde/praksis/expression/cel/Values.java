@@ -117,6 +117,7 @@ final class Values {
       case Boolean b -> b;
       case Instant i -> i;
       case ByteString b -> b.toByteArray();
+      case dev.cel.common.values.CelByteString b -> b.toByteArray();
       case NullValue n -> null;
       case Timestamp t -> Instant.ofEpochSecond(t.getSeconds(), t.getNanos());
       case Value v -> fromValue(v);

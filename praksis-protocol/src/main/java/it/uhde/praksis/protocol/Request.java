@@ -33,6 +33,8 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.Commands.class, name = "commands"),
   @JsonSubTypes.Type(value = Request.RunCommand.class, name = "run-command"),
   @JsonSubTypes.Type(value = Request.Outcome.class, name = "outcome"),
+  @JsonSubTypes.Type(value = Request.Views.class, name = "views"),
+  @JsonSubTypes.Type(value = Request.ViewResolve.class, name = "view"),
   @JsonSubTypes.Type(value = Request.Stop.class, name = "stop")
 })
 public sealed interface Request {
@@ -236,6 +238,26 @@ public sealed interface Request {
    * @param event the event id
    */
   record Outcome(String event) implements Request {}
+
+  /** Asks for the views of the ruleset in use. Answered with {@link Response.ViewList}. */
+  record Views() implements Request {}
+
+  /**
+   * Asks for a view with its data. The daemon runs the sources of the view under the grants of the
+   * layer that owns it, evaluates the expressions and answers with a description that contains only
+   * values. Answered with {@link Response.ResolvedView}, or with an error, e.g. if the view needs a
+   * newer UI schema than the client understands.
+   *
+   * @param view the view id
+   * @param params the state of the view, by parameter name; missing ones have their default
+   * @param maxSchema the newest UI schema that the client understands; 0 means any
+   */
+  record ViewResolve(String view, java.util.Map<String, Object> params, int maxSchema)
+      implements Request {
+    public ViewResolve {
+      params = params == null ? java.util.Map.of() : params;
+    }
+  }
 
   /**
    * Asks the daemon to finish what it is doing and exit. Answered with {@link Response.Stopped}.

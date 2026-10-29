@@ -15,6 +15,19 @@ params = [
 ]
 results = [{ name = "message", type = "string", required = true }]
 
+[[capability]]
+name = "mail.list"
+effect = "read-only"
+dry_run = true
+params = [
+  { name = "folder", type = "string", required = true, scopable = true },
+  { name = "limit", type = "int", required = false, scopable = false },
+]
+results = [
+  { name = "items", type = "list", required = true },
+  { name = "count", type = "int", required = true },
+]
+
 [[event]]
 type = "mail.received"
 fields = [

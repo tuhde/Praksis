@@ -43,7 +43,9 @@ import picocli.CommandLine.Spec;
       Praksis.ShadowCommand.class,
       Praksis.Proposals.class,
       Praksis.CommandsCommand.class,
-      Praksis.RunCommand.class
+      Praksis.RunCommand.class,
+      Praksis.ViewsCommand.class,
+      Praksis.ViewCommand.class
     })
 public final class Praksis {
   static final int EXIT_FAILED = 1;
@@ -565,6 +567,152 @@ public final class Praksis {
         };
       } catch (NumberFormatException e) {
         throw new IllegalArgumentException("must be a " + type);
+      }
+    }
+  }
+
+  @Command(
+      name = "views",
+      description = "Lists the views of the ruleset in use: screens made of data and components.")
+  static final class ViewsCommand extends Base {
+    @Override
+    public Integer call() {
+      Response response = send(new Request.Views());
+      if (!(response instanceof Response.ViewList l)) {
+        return exitCodeFor(response);
+      }
+      if (l.views().isEmpty()) {
+        out().println("No views. A layer adds one as views/<id>.toml.");
+      }
+      for (Response.ViewList.ViewInfo v : l.views()) {
+        out().printf("%s  %s  [schema %d, layer %s]%n", v.id(), v.title(), v.schema(), v.owner());
+        if (v.description() != null) {
+          out().printf("    %s%n", v.description());
+        }
+        for (Response.ViewList.Param p : v.params()) {
+          out().printf("    %s (%s), default %s%n", p.name(), p.type(), p.value());
+        }
+      }
+      return 0;
+    }
+  }
+
+  @Command(
+      name = "view",
+      description =
+          "Shows a view as text, with its data: the daemon runs its sources and evaluates it."
+              + " The state of the view is set with name=value.")
+  static final class ViewCommand extends Base {
+    @CommandLine.Parameters(index = "0", paramLabel = "<view>", description = "The view id.")
+    String view;
+
+    @CommandLine.Parameters(index = "1..*", paramLabel = "<name=value>", description = "State.")
+    java.util.List<String> state = new java.util.ArrayList<>();
+
+    @Override
+    public Integer call() {
+      Response listed = send(new Request.Views());
+      if (!(listed instanceof Response.ViewList l)) {
+        return exitCodeFor(listed);
+      }
+      Response.ViewList.ViewInfo info =
+          l.views().stream().filter(v -> v.id().equals(view)).findFirst().orElse(null);
+      java.util.Map<String, Object> given = new java.util.LinkedHashMap<>();
+      for (String a : state) {
+        int eq = a.indexOf('=');
+        if (eq < 1) {
+          err().println("State is written name=value: " + a);
+          return 2;
+        }
+        String name = a.substring(0, eq);
+        String value = a.substring(eq + 1);
+        String type =
+            info == null
+                ? "string"
+                : info.params().stream()
+                    .filter(p -> p.name().equals(name))
+                    .map(Response.ViewList.Param::type)
+                    .findFirst()
+                    .orElse("string");
+        try {
+          given.put(
+              name,
+              switch (type) {
+                case "int" -> Long.parseLong(value);
+                case "double" -> Double.parseDouble(value);
+                case "bool" -> Boolean.parseBoolean(value);
+                default -> value;
+              });
+        } catch (NumberFormatException e) {
+          err().println("State '" + name + "' must be a " + type + ": " + value);
+          return 2;
+        }
+      }
+      Response response = send(new Request.ViewResolve(view, given, 1));
+      if (!(response instanceof Response.ResolvedView r)) {
+        return exitCodeFor(response);
+      }
+      out().printf("== %s ==%n", r.title());
+      r.params().forEach(p -> out().printf("   %s = %s%n", p.name(), p.value()));
+      r.warnings().forEach(w -> out().printf("   ! %s%n", w));
+      r.components().forEach(c -> show(c, 0));
+      return 0;
+    }
+
+    private void show(Response.ViewComponent c, int depth) {
+      String pad = "  ".repeat(depth + 1);
+      if (c.error() != null) {
+        out().printf("%s[%s: %s]%n", pad, c.type(), c.error());
+        return;
+      }
+      switch (c.type()) {
+        case "text" -> out().printf("%s%s%n", pad, c.text());
+        case "table", "list" -> {
+          if (c.type().equals("table")) {
+            out()
+                .printf(
+                    "%s| %s%n",
+                    pad,
+                    String.join(
+                        " | ",
+                        c.columns().stream().map(Response.ViewComponent.Column::title).toList()));
+          }
+          for (Response.ViewComponent.Row row : c.rows()) {
+            out()
+                .printf(
+                    "%s| %s%s%n",
+                    pad,
+                    String.join(" | ", row.cells().stream().map(String::valueOf).toList()),
+                    row.select() == null
+                        ? ""
+                        : "   [select " + row.select().param() + "=" + row.select().value() + "]");
+            row.actions()
+                .forEach(a -> out().printf("%s    -> %s (%s)%n", pad, a.label(), a.command()));
+          }
+          if (c.rows().isEmpty() && c.empty() != null) {
+            out().printf("%s%s%n", pad, c.empty());
+          }
+        }
+        case "detail" ->
+            c.fields().forEach(f -> out().printf("%s%s: %s%n", pad, f.label(), f.value()));
+        case "button" ->
+            out()
+                .printf(
+                    "%s[%s]%s%n",
+                    pad, c.label(), Boolean.FALSE.equals(c.enabled()) ? " (disabled)" : "");
+        case "form" ->
+            out()
+                .printf(
+                    "%sform for %s: %s%n",
+                    pad,
+                    c.form().command(),
+                    String.join(
+                        ", ",
+                        c.form().fields().stream().map(f -> f.name() + "=" + f.value()).toList()));
+        default -> {
+          out().printf("%s%s:%n", pad, c.type());
+          c.children().forEach(child -> show(child, depth + 1));
+        }
       }
     }
   }

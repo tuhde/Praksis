@@ -186,4 +186,54 @@ class CelExpressionCompilerTest {
     Scope bad = new Scope(Optional.empty(), List.of(), Map.of("my-action", List.of()));
     assertThatThrownBy(() -> compiler.compile("true", bad)).isInstanceOf(ExpressionException.class);
   }
+
+  @Test
+  void dynamicVariablesHoldPlainValuesOfNoDeclaredType() throws Exception {
+    Scope scope =
+        new Scope(
+            Optional.empty(), List.of(), Map.of(), java.util.Set.of("view", "source", "item"));
+    Map<String, Object> dynamic =
+        Map.of(
+            "view", Map.of("folder", "Inbox", "limit", 5L),
+            "source",
+                Map.of(
+                    "messages",
+                    Map.of(
+                        "items",
+                        List.of(
+                            Map.of("id", "m1", "when", NOW, "size", 10L),
+                            Map.of("id", "m2", "when", NOW, "size", 20L)))),
+            "item", Map.of("subject", "Hello", "tags", List.of("a", "b")));
+    Bindings bindings = new Bindings(Optional.empty(), Map.of(), Map.of(), NOW, dynamic);
+
+    assertThat(compiler.compile("view.folder + '/' + item.subject", scope).evaluate(bindings))
+        .isEqualTo("Inbox/Hello");
+    assertThat(
+            compiler
+                .compile("source.messages.items.map(m, m.size).filter(n, n > view.limit)", scope)
+                .evaluate(bindings))
+        .isEqualTo(List.of(10L, 20L));
+    assertThat(
+            compiler
+                .compile("size(source.messages.items)", scope, ValueType.INT)
+                .evaluate(bindings))
+        .isEqualTo(2L);
+    assertThat(compiler.compile("source.messages.items[0].when", scope).evaluate(bindings))
+        .isEqualTo(NOW);
+    assertThat(
+            compiler
+                .compile("item.tags.exists(t, t == 'b')", scope, ValueType.BOOL)
+                .evaluate(bindings))
+        .isEqualTo(true);
+
+    // a variable that the scope does not name does not exist, and one that is not bound is an error
+    assertThatThrownBy(() -> compiler.compile("other.x", scope))
+        .isInstanceOf(ExpressionException.class);
+    assertThatThrownBy(
+            () ->
+                compiler
+                    .compile("view.folder", scope)
+                    .evaluate(new Bindings(Optional.empty(), Map.of(), Map.of(), NOW)))
+        .isInstanceOf(ExpressionException.class);
+  }
 }

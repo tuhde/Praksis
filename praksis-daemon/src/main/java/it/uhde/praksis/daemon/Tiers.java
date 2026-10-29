@@ -132,6 +132,34 @@ final class Tiers {
       overall = max(overall, tier);
     }
 
+    // a view only reads and shows; it needs approval only if it reads what no grant covers
+    Map<String, String> viewBefore = new HashMap<>();
+    current.viewOrigins().forEach(v -> viewBefore.put(v.viewId(), v.hash()));
+    for (LayerStack.ViewOrigin v : candidate.viewOrigins()) {
+      String was = viewBefore.get(v.viewId());
+      if (v.hash().equals(was)) {
+        continue;
+      }
+      List<String> reasons = new ArrayList<>();
+      if (rules.widening()) {
+        for (Permissions.Requirement r : uncovered) {
+          if (needs
+              .rules()
+              .getOrDefault(r, new java.util.TreeSet<>())
+              .contains("view:" + v.viewId())) {
+            reasons.add("reads what no grant covers: " + r.describe());
+          }
+        }
+      }
+      Tier tier = reasons.isEmpty() ? Tier.AUTOMATIC : Tier.APPROVAL;
+      if (reasons.isEmpty()) {
+        reasons.add("a view only reads and shows what the grants allow");
+      }
+      decisions.add(
+          new Decision("view:" + v.viewId(), was == null ? "new" : "changed", tier, reasons));
+      overall = max(overall, tier);
+    }
+
     for (LayerStack.Origin was : current.origins()) {
       if (afterRules.containsKey(was.ruleId())) {
         continue;

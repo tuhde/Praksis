@@ -67,6 +67,7 @@ public final class Daemon implements AutoCloseable {
   private Approvals approvals;
   private Shadows shadows;
   private Screens screens;
+  private ViewResolver views;
   private final Topics topics = new Topics();
   private ApiServer api;
 
@@ -137,6 +138,18 @@ public final class Daemon implements AutoCloseable {
                   access, new StoreAuditLog(store), clock, config.dryRun(), approvals));
       approvals.bind(engine);
       shadows.bind(engine);
+      Map<String, String> viewOwners = new java.util.HashMap<>();
+      effective.viewOrigins().forEach(v -> viewOwners.put(v.viewId(), v.owner()));
+      views =
+          new ViewResolver(
+              effective.ruleset(),
+              viewOwners,
+              modules.catalog(),
+              compiler,
+              capabilities,
+              access,
+              new StoreAuditLog(store),
+              clock);
       screens =
           new Screens(
               config,
@@ -228,6 +241,7 @@ public final class Daemon implements AutoCloseable {
       }
       Map<String, String> layers = new java.util.HashMap<>();
       effective.origins().forEach(o -> layers.put(o.ruleId(), o.owner()));
+      effective.viewOrigins().forEach(v -> layers.put("view:" + v.viewId(), v.owner()));
       return new GrantPolicy(policy, layers);
     } catch (RulesetException e) {
       throw new DaemonException(
@@ -327,6 +341,8 @@ public final class Daemon implements AutoCloseable {
         case Request.Commands c -> screens.commands();
         case Request.RunCommand r -> screens.run(r, clock);
         case Request.Outcome o -> screens.outcome(o.event());
+        case Request.Views v -> views.list();
+        case Request.ViewResolve v -> views.resolve(v.view(), v.params(), v.maxSchema());
         case Request.Stop s -> new Response.Stopped();
       };
     } catch (Injection.Invalid | Approvals.Failure | Shadows.Failure | DaemonException e) {

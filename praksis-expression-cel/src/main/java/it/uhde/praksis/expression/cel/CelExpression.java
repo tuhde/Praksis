@@ -40,6 +40,12 @@ final class CelExpression implements Expression {
               .orElseThrow(() -> new ExpressionException("the expression needs an event"));
       input.put("event", event(scope.event().get(), event));
     }
+    for (String name : scope.dynamic()) {
+      if (!bindings.dynamic().containsKey(name)) {
+        throw new ExpressionException("the expression needs the variable '" + name + "'");
+      }
+      input.put(name, bindings.dynamic().get(name));
+    }
     try {
       return Values.fromCel(program.eval(input));
     } catch (CelEvaluationException e) {

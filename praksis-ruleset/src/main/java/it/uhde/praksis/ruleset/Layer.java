@@ -37,6 +37,7 @@ import java.util.stream.Stream;
  * @param replaces the rules this layer replaces
  * @param patches the rules this layer changes
  * @param disables the rules this layer turns off
+ * @param views the views this layer adds, or replaces by naming the hash of the view below
  */
 public record Layer(
     String name,
@@ -44,16 +45,18 @@ public record Layer(
     List<Rule> adds,
     List<Replace> replaces,
     List<Patch> patches,
-    List<Disable> disables) {
+    List<Disable> disables,
+    List<View> views) {
   private static final Pattern HASH = Pattern.compile("sha256:[0-9a-f]{64}");
   private static final Set<String> DIRECTORIES =
-      Set.of("rules", "replace", "patch", "disable", "tests", "docs");
+      Set.of("rules", "replace", "patch", "disable", "views", "tests", "docs");
 
   public Layer {
     adds = List.copyOf(adds);
     replaces = List.copyOf(replaces);
     patches = List.copyOf(patches);
     disables = List.copyOf(disables);
+    views = List.copyOf(views);
   }
 
   /** Reads the layer in the directory, or throws with every structural problem found. */
@@ -78,6 +81,10 @@ public record Layer(
     for (Path file : files(directory.resolve("disable"), problems)) {
       disable(file, problems).ifPresent(disables::add);
     }
+    List<View> views = new ArrayList<>();
+    for (Path file : files(directory.resolve("views"), problems)) {
+      view(file, problems).ifPresent(views::add);
+    }
     try (Stream<Path> entries = Files.list(directory)) {
       for (Path entry : entries.sorted().toList()) {
         String entryName = entry.getFileName().toString();
@@ -87,7 +94,7 @@ public record Layer(
           problems.add(
               new Problem(
                   entryName + "/",
-                  "unknown directory; a layer has rules, replace, patch and disable"));
+                  "unknown directory; a layer has rules, replace, patch, disable and views"));
         }
       }
     } catch (IOException e) {
@@ -100,7 +107,7 @@ public record Layer(
               .map(p -> new Problem("layer '" + name + "': " + p.location(), p.message()))
               .toList());
     }
-    return new Layer(name, header, header.rules(), replaces, patches, disables);
+    return new Layer(name, header, header.rules(), replaces, patches, disables, views);
   }
 
   private static List<Path> files(Path dir, List<Problem> problems) {
@@ -130,6 +137,14 @@ public record Layer(
       return Optional.empty();
     }
     return hash;
+  }
+
+  private static Optional<View> view(Path file, List<Problem> problems) {
+    Table t = RulesetLoader.read(file, where(file), problems);
+    if (t == null) {
+      return Optional.empty();
+    }
+    return View.parse(t, id(file), t.rawEntries());
   }
 
   private static Optional<Replace> replace(Path file, List<Problem> problems) {

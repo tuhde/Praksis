@@ -29,7 +29,7 @@ class ModuleDescriptorTest {
     Path root = Files.createDirectories(dir.resolve("mail"));
     try (LoadedModules loaded =
         ModuleLoader.load(modules, lock, Map.of("maildir", Map.of("root", root.toString())))) {
-      assertThat(loaded.capabilities()).containsOnlyKeys("mail.move");
+      assertThat(loaded.capabilities()).containsOnlyKeys("mail.move", "mail.list");
       assertThat(loaded.sources()).extracting(s -> s.name()).containsExactly("maildir.inbox");
       assertThat(loaded.catalog().eventType("mail.received")).isPresent();
     }

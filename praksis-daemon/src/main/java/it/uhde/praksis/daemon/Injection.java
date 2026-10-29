@@ -116,7 +116,7 @@ final class Injection {
   }
 
   @SuppressWarnings("unchecked")
-  private static Object coerce(FieldDescriptor field, Object v) {
+  static Object coerce(FieldDescriptor field, Object v) {
     switch (field.type()) {
       case STRING:
         if (v instanceof String) {

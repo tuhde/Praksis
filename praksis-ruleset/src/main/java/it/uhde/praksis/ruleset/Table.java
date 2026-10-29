@@ -19,6 +19,11 @@ public final class Table {
     this.problems = problems;
   }
 
+  /** The list that problems are recorded in, for code that reads nested tables. */
+  List<Problem> problems() {
+    return problems;
+  }
+
   public String location() {
     return location;
   }

@@ -59,8 +59,32 @@ public final class LayerStack {
    * @param ruleset the ruleset to run
    * @param origins where each of its rules comes from, in firing order
    * @param disabled the rules that are turned off
+   * @param viewOrigins where each view of the ruleset comes from
    */
-  public record Effective(Ruleset ruleset, List<Origin> origins, List<Disabled> disabled) {}
+  public record Effective(
+      Ruleset ruleset,
+      List<Origin> origins,
+      List<Disabled> disabled,
+      List<ViewOrigin> viewOrigins) {
+    public Effective {
+      viewOrigins = List.copyOf(viewOrigins);
+    }
+
+    /** An effective ruleset without views. */
+    public Effective(Ruleset ruleset, List<Origin> origins, List<Disabled> disabled) {
+      this(ruleset, origins, disabled, List.of());
+    }
+  }
+
+  /**
+   * Where a view comes from.
+   *
+   * @param viewId the view
+   * @param layer the layer that added it
+   * @param owner the layer that defined it last; its grants decide what the view's sources may read
+   * @param hash the hash of the effective view, which a replacement names in {@code based_on}
+   */
+  public record ViewOrigin(String viewId, String layer, String owner, String hash) {}
 
   private record Entry(Rule rule, String layer, String owner, List<String> history) {}
 
@@ -85,11 +109,13 @@ public final class LayerStack {
     }
 
     Map<String, Entry> rules = new LinkedHashMap<>();
+    Map<String, ViewEntry> views = new LinkedHashMap<>();
     Map<String, Disabled> disabled = new LinkedHashMap<>();
     Map<String, ParamDecl> declared = new LinkedHashMap<>();
     for (Layer layer : loaded) {
       mergeParams(layer, declared, problems);
       apply(layer, rules, disabled, problems);
+      applyViews(layer, views, problems);
     }
     applyParamValues(params, declared, problems);
     if (!problems.isEmpty()) {
@@ -104,7 +130,11 @@ public final class LayerStack {
             Ruleset.SUPPORTED_FORMAT_VERSION,
             name,
             List.copyOf(declared.values()),
-            ordered.stream().map(Entry::rule).toList());
+            ordered.stream().map(Entry::rule).toList(),
+            views.values().stream()
+                .sorted(Comparator.comparing(v -> v.view().id()))
+                .map(ViewEntry::view)
+                .toList());
     List<Origin> origins =
         ordered.stream()
             .map(
@@ -112,7 +142,60 @@ public final class LayerStack {
                     new Origin(
                         e.rule().id(), e.layer(), e.owner(), RuleView.hash(e.rule()), e.history()))
             .toList();
-    return new Effective(ruleset, origins, List.copyOf(disabled.values()));
+    List<ViewOrigin> viewOrigins =
+        ruleset.views().stream()
+            .map(
+                v -> {
+                  ViewEntry e = views.get(v.id());
+                  return new ViewOrigin(v.id(), e.layer(), e.owner(), v.hash());
+                })
+            .toList();
+    return new Effective(ruleset, origins, List.copyOf(disabled.values()), viewOrigins);
+  }
+
+  private record ViewEntry(View view, String layer, String owner) {}
+
+  /** A view is added; with {@code based_on} it replaces the view below, if that is unchanged. */
+  private static void applyViews(
+      Layer layer, Map<String, ViewEntry> views, List<Problem> problems) {
+    Map<String, ViewEntry> below = new LinkedHashMap<>(views);
+    Set<String> touched = new HashSet<>();
+    for (View view : layer.views()) {
+      String where = "layer '" + layer.name() + "': views/" + view.id() + ".toml";
+      ViewEntry existing = below.get(view.id());
+      if (!touched.add(view.id())) {
+        problems.add(new Problem(where, "more than one operation on view '" + view.id() + "'"));
+      } else if (view.basedOn().isEmpty() && existing != null) {
+        problems.add(
+            new Problem(
+                where,
+                "view '"
+                    + view.id()
+                    + "' already exists (added by '"
+                    + existing.layer()
+                    + "'); to replace it name its hash in 'based_on': "
+                    + existing.view().hash()));
+      } else if (view.basedOn().isPresent() && existing == null) {
+        problems.add(
+            new Problem(
+                where, "'based_on' names a view, but there is no view '" + view.id() + "' below"));
+      } else if (view.basedOn().isPresent()
+          && !view.basedOn().get().equals(existing.view().hash())) {
+        problems.add(
+            new Problem(
+                where,
+                "the view '"
+                    + view.id()
+                    + "' has changed since this replacement was written: it is now "
+                    + existing.view().hash()
+                    + ", not "
+                    + view.basedOn().get()));
+      } else {
+        views.put(
+            view.id(),
+            new ViewEntry(view, existing == null ? layer.name() : existing.layer(), layer.name()));
+      }
+    }
   }
 
   private static void apply(

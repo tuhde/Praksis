@@ -26,6 +26,8 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Response.CommandList.class, name = "commands"),
   @JsonSubTypes.Type(value = Response.CommandStarted.class, name = "command-started"),
   @JsonSubTypes.Type(value = Response.Outcome.class, name = "outcome"),
+  @JsonSubTypes.Type(value = Response.ViewList.class, name = "views"),
+  @JsonSubTypes.Type(value = Response.ResolvedView.class, name = "view"),
   @JsonSubTypes.Type(value = Response.Done.class, name = "done"),
   @JsonSubTypes.Type(value = Response.Stopped.class, name = "stopped"),
   @JsonSubTypes.Type(value = Response.Error.class, name = "error")
@@ -458,6 +460,134 @@ public sealed interface Response {
    * @param lines the run log of the event, oldest first
    */
   record Outcome(boolean done, List<LogLines.Line> lines) implements Response {}
+
+  /**
+   * The views of the ruleset in use.
+   *
+   * @param views the views, by id
+   */
+  record ViewList(List<ViewInfo> views) implements Response {
+    /**
+     * A view.
+     *
+     * @param id the id
+     * @param title what a person sees
+     * @param description what it is for, or null
+     * @param schema the UI schema it is written in
+     * @param owner the layer whose grants decide what its sources may read
+     * @param params its state, with defaults
+     */
+    public record ViewInfo(
+        String id,
+        String title,
+        String description,
+        int schema,
+        String owner,
+        List<Param> params) {}
+
+    /** A parameter of a view. */
+    public record Param(String name, String type, Object value) {}
+  }
+
+  /**
+   * A view with its data.
+   *
+   * @param id the view id
+   * @param title what a person sees
+   * @param schema the UI schema of the description
+   * @param params the state of the view as used
+   * @param components what to show, top to bottom
+   * @param warnings what went wrong in the sources (a source that could not be read, a call that no
+   *     grant covers); the components that need them say so themselves
+   */
+  record ResolvedView(
+      String id,
+      String title,
+      int schema,
+      List<ViewList.Param> params,
+      List<ViewComponent> components,
+      List<String> warnings)
+      implements Response {}
+
+  /**
+   * One part of a resolved view. Which fields are set depends on {@code type}: {@code text} ({@code
+   * text}, {@code style}), {@code table} ({@code columns}, {@code rows}, {@code empty}), {@code
+   * list} (rows of two cells: title and subtitle), {@code detail} ({@code fields}), {@code button}
+   * ({@code label}, {@code enabled}, {@code actions}), {@code form} ({@code form}), {@code row} and
+   * {@code column} ({@code children}). A part that could not be worked out has {@code error}
+   * instead.
+   *
+   * @param type the component type
+   * @param text the text of a text
+   * @param style {@code normal}, {@code title}, {@code muted} or {@code code}
+   * @param label the label of a button
+   * @param enabled whether a button can be used
+   * @param empty what to show when there are no rows
+   * @param columns the columns of a table
+   * @param rows the rows of a table or list
+   * @param fields the fields of a detail
+   * @param actions what can be started
+   * @param form the form of a command
+   * @param children the parts of a container
+   * @param error why this part is not shown, or null
+   */
+  record ViewComponent(
+      String type,
+      String text,
+      String style,
+      String label,
+      Boolean enabled,
+      String empty,
+      List<Column> columns,
+      List<Row> rows,
+      List<Field> fields,
+      List<Action> actions,
+      Form form,
+      List<ViewComponent> children,
+      String error) {
+    /** A column of a table. {@code format}: text, datetime, date, number or bytes. */
+    public record Column(String title, String format) {}
+
+    /**
+     * A row.
+     *
+     * @param cells the values, in the order of the columns
+     * @param select what a click sets: the view parameter and its value, or null
+     * @param actions what can be started for this row
+     */
+    public record Row(List<Object> cells, Select select, List<Action> actions) {}
+
+    /** Clicking sets the view parameter to the value and asks for the view again. */
+    public record Select(String param, Object value) {}
+
+    /** A labelled value of a detail. */
+    public record Field(String label, String format, Object value) {}
+
+    /**
+     * A command that a person can start.
+     *
+     * @param label what the button says
+     * @param command the command id
+     * @param args the arguments, with values
+     * @param confirm a question to ask first, or null
+     */
+    public record Action(
+        String label, String command, java.util.Map<String, Object> args, String confirm) {}
+
+    /**
+     * A form for a command.
+     *
+     * @param command the command id
+     * @param title the title of the command
+     * @param submit what the button says
+     * @param fields the arguments with the given defaults
+     */
+    public record Form(String command, String title, String submit, List<FormField> fields) {}
+
+    /** An argument of a form. */
+    public record FormField(
+        String name, String type, boolean required, String label, Object value) {}
+  }
 
   /** The daemon is shutting down. */
   record Stopped() implements Response {}

@@ -113,7 +113,8 @@ final class Shadows {
         store.endShadow(old.ruleId(), old.hash()); // changed again, or gone
       }
     }
-    return new Plan(new Ruleset(all.formatVersion(), all.name(), all.params(), live), trial);
+    return new Plan(
+        new Ruleset(all.formatVersion(), all.name(), all.params(), live, all.views()), trial);
   }
 
   /** The rules on trial, with what they were seen to do. */

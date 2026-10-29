@@ -40,6 +40,9 @@ public final class CelExpressionCompiler implements ExpressionCompiler {
     if (scope.event().isPresent()) {
       builder.addVar("event", struct(schema.event));
     }
+    for (String name : scope.dynamic()) {
+      builder.addVar(name, SimpleType.DYN);
+    }
     if (expected != null) {
       builder.setResultType(celType(expected));
     }

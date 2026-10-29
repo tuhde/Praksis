@@ -78,6 +78,7 @@ public final class RulesetValidator {
       }
       compiled.add(rule(rule, where, params, problems));
     }
+    problems.addAll(new ViewValidator(compiler, catalog).validate(ruleset));
     return new Result(problems, problems.isEmpty() ? compiled : List.of());
   }
 
