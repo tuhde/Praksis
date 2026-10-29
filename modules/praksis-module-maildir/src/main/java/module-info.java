@@ -8,6 +8,7 @@ module it.uhde.praksis.module.maildir {
   requires it.uhde.praksis.capability;
 
   provides it.uhde.praksis.capability.Capability with
+      it.uhde.praksis.module.maildir.MailAppend,
       it.uhde.praksis.module.maildir.MailAttachment,
       it.uhde.praksis.module.maildir.MailDelete,
       it.uhde.praksis.module.maildir.MailFolders,

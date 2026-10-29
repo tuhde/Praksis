@@ -215,4 +215,35 @@ class MailManageTest {
     assertThatThrownBy(() -> call(attachment, "message", file.toString(), "name", "nope"))
         .hasMessageContaining("no attachment named 'nope'");
   }
+
+  @Test
+  void appendWritesTheMailIntoANewFolderWithItsFlagsAndNothingIsLeftInTmp() throws Exception {
+    MailAppend append = make(new MailAppend());
+    byte[] mail = "From: a@x\nSubject: sent one\nMessage-ID: <1@x>\n\nbody\n".getBytes();
+
+    String sent = (String) call(append, "folder", "Sent", "content", mail).get("message");
+    String draft =
+        (String)
+            call(append, "folder", "Drafts", "content", mail, "draft", true, "seen", false)
+                .get("message");
+
+    assertThat(Path.of(sent).getParent()).isEqualTo(root.resolve(".Sent/cur"));
+    assertThat(Path.of(sent).getFileName().toString()).endsWith(":2,S");
+    assertThat(Path.of(draft).getFileName().toString()).endsWith(":2,D");
+    assertThat(Files.readAllBytes(Path.of(sent))).isEqualTo(mail);
+    try (var tmp = Files.list(root.resolve(".Sent/tmp"))) {
+      assertThat(tmp).isEmpty();
+    }
+    // the mail can be read back with the other capabilities, and the draft is unread
+    assertThat(items(call(make(new MailList()), "folder", "Drafts")).get(0))
+        .containsEntry("subject", "sent one")
+        .containsEntry("unread", true);
+    // a dry run writes nothing
+    make(new MailAppend()).invoke(context(true), Map.of("folder", "Other", "content", mail));
+    assertThat(root.resolve(".Other")).doesNotExist();
+    assertThatThrownBy(() -> call(append, "folder", "Sent"))
+        .hasMessageContaining("needs the content");
+    assertThatThrownBy(() -> call(append, "folder", "../x", "content", mail))
+        .isInstanceOf(CapabilityException.class);
+  }
 }

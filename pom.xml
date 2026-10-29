@@ -42,6 +42,7 @@
     <module>praksis-integration</module>
     <module>modules/praksis-module-maildir</module>
     <module>modules/praksis-module-imap</module>
+    <module>modules/praksis-module-smtp</module>
   </modules>
 
   <properties>

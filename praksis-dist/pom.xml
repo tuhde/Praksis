@@ -65,6 +65,13 @@
       <version>${project.version}</version>
       <scope>runtime</scope>
     </dependency>
+    <!-- Like the IMAP module: its Angus Mail jars go to its own directory. -->
+    <dependency>
+      <groupId>it.uhde</groupId>
+      <artifactId>praksis-module-smtp</artifactId>
+      <version>${project.version}</version>
+      <scope>runtime</scope>
+    </dependency>
   </dependencies>
 
   <build>
@@ -82,7 +89,7 @@
             <configuration>
               <outputDirectory>${project.build.directory}/mp</outputDirectory>
               <includeScope>runtime</includeScope>
-              <excludeArtifactIds>praksis-expression-cel,praksis-module-maildir,praksis-module-imap,angus-mail,jakarta.mail-api,jakarta.activation-api,angus-activation</excludeArtifactIds>
+              <excludeArtifactIds>praksis-expression-cel,praksis-module-maildir,praksis-module-imap,praksis-module-smtp,angus-mail,jakarta.mail-api,jakarta.activation-api,angus-activation</excludeArtifactIds>
             </configuration>
           </execution>
           <execution>
@@ -95,6 +102,18 @@
               <outputDirectory>${project.build.directory}/imap</outputDirectory>
               <includeScope>runtime</includeScope>
               <includeArtifactIds>praksis-module-imap,angus-mail,jakarta.mail-api,jakarta.activation-api,angus-activation</includeArtifactIds>
+            </configuration>
+          </execution>
+          <execution>
+            <id>smtp-module</id>
+            <phase>package</phase>
+            <goals>
+              <goal>copy-dependencies</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/smtp</outputDirectory>
+              <includeScope>runtime</includeScope>
+              <includeArtifactIds>praksis-module-smtp,angus-mail,jakarta.mail-api,jakarta.activation-api,angus-activation</includeArtifactIds>
             </configuration>
           </execution>
           <execution>
@@ -157,6 +176,11 @@
                 <copy todir="${image.dir}/lib/praksis/modules/imap">
                   <fileset dir="${project.build.directory}/imap" includes="*.jar"/>
                   <fileset dir="${project.basedir}/../modules/praksis-module-imap" includes="module.toml"/>
+                </copy>
+                <mkdir dir="${image.dir}/lib/praksis/modules/smtp"/>
+                <copy todir="${image.dir}/lib/praksis/modules/smtp">
+                  <fileset dir="${project.build.directory}/smtp" includes="*.jar"/>
+                  <fileset dir="${project.basedir}/../modules/praksis-module-smtp" includes="module.toml"/>
                 </copy>
                 <copy file="${project.basedir}/../LICENSE" todir="${image.dir}"/>
                 <copy file="${project.basedir}/../NOTICE" todir="${image.dir}"/>

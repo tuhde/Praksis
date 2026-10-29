@@ -87,7 +87,8 @@ class LoadedModuleTest {
               "mail.search",
               "mail.mark",
               "mail.delete",
-              "mail.attachment");
+              "mail.attachment",
+              "mail.append");
       assertThat(loaded.sources()).extracting(s -> s.name()).containsExactly("imap.inbox");
       assertThat(loaded.catalog().eventType("mail.received")).isPresent();
       assertThat(loaded.capabilities().get("mail.move").getClass().getModule().getLayer())

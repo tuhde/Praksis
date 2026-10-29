@@ -213,4 +213,49 @@ class ImapManageTest {
     assertThatThrownBy(() -> attachment.invoke(context(false), args("message", id, "name", "nope")))
         .hasMessageContaining("no attachment named 'nope'");
   }
+
+  @Test
+  void appendPutsTheMailIntoAFolderThatIsMadeAndNotTwice() throws Exception {
+    var append = make(new ImapAppend());
+    var list = make(new ImapRead.Listing());
+    byte[] mail =
+        "From: a@x\r\nSubject: sent one\r\nMessage-ID: <sent1@x>\r\n\r\nbody\r\n".getBytes();
+
+    String first =
+        (String)
+            append.invoke(context(false), args("folder", "Sent", "content", mail)).get("message");
+    String again =
+        (String)
+            append.invoke(context(false), args("folder", "Sent", "content", mail)).get("message");
+
+    assertThat(again).isEqualTo(first);
+    var inSent = items(list.invoke(context(false), args("folder", "Sent")));
+    assertThat(inSent).hasSize(1);
+    assertThat(inSent.get(0)).containsEntry("subject", "sent one").containsEntry("unread", false);
+    assertThat(inSent.get(0).get("id")).isEqualTo(first);
+
+    String draft =
+        (String)
+            append
+                .invoke(
+                    context(false),
+                    args(
+                        "folder",
+                        "Drafts",
+                        "content",
+                        "Subject: d\r\nMessage-ID: <d@x>\r\n\r\nx\r\n".getBytes(),
+                        "draft",
+                        true,
+                        "seen",
+                        false))
+                .get("message");
+    assertThat(items(list.invoke(context(false), args("folder", "Drafts"))).get(0))
+        .containsEntry("unread", true);
+    assertThat(draft).isNotEmpty();
+    // a dry run changes nothing
+    append.invoke(context(true), args("folder", "Never", "content", mail));
+    assertThat(items(list.invoke(context(false), args("folder", "Never")))).isEmpty();
+    assertThatThrownBy(() -> append.invoke(context(false), args("folder", "Sent")))
+        .hasMessageContaining("needs the content");
+  }
 }

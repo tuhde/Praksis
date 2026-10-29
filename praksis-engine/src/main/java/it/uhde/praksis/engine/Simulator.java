@@ -36,8 +36,43 @@ final class Simulator implements AutoCloseable {
   /** A call that a rule made. */
   record Call(String rule, String capability, Map<String, Object> args) {
     String describe() {
-      return capability + " " + args;
+      return capability + " " + shown(args);
     }
+  }
+
+  /**
+   * Bytes have no TOML form: a test writes them as Base64 text, which is also how they are shown.
+   */
+  static Object shown(Object value) {
+    if (value instanceof byte[] bytes) {
+      return java.util.Base64.getEncoder().encodeToString(bytes);
+    }
+    if (value instanceof Map<?, ?> map) {
+      Map<Object, Object> out = new java.util.LinkedHashMap<>();
+      map.forEach((k, v) -> out.put(k, shown(v)));
+      return out;
+    }
+    if (value instanceof List<?> list) {
+      return list.stream().map(Simulator::shown).toList();
+    }
+    return value;
+  }
+
+  /** A mocked result of a bytes field is written as Base64 text; the capability returns bytes. */
+  private static Map<String, Object> withBytes(CapabilityDescriptor c, Map<String, Object> mock) {
+    Map<String, Object> out = new java.util.LinkedHashMap<>(mock);
+    for (var field : c.results()) {
+      if (field.type() == it.uhde.praksis.capability.ValueType.BYTES
+          && out.get(field.name()) instanceof String text) {
+        try {
+          out.put(field.name(), java.util.Base64.getDecoder().decode(text));
+        } catch (IllegalArgumentException e) {
+          throw new IllegalArgumentException(
+              "the mocked result '" + field.name() + "' of " + c.name() + " is not Base64", e);
+        }
+      }
+    }
+    return out;
   }
 
   /**
@@ -66,7 +101,9 @@ final class Simulator implements AutoCloseable {
       Map<String, Capability> recorders = new HashMap<>();
       for (CapabilityDescriptor c : catalog.capabilities()) {
         recorders.put(
-            c.name(), new Recorder(c.name(), mocks.getOrDefault(c.name(), Defaults.results(c))));
+            c.name(),
+            new Recorder(
+                c.name(), withBytes(c, mocks.getOrDefault(c.name(), Defaults.results(c)))));
       }
       opened = Store.open(temp.resolve("sim.db"));
       engine =

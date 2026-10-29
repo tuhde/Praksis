@@ -107,6 +107,18 @@ results = [
   { name = "size", type = "int", required = true },
 ]
 
+[[capability]]
+name = "mail.append"
+effect = "local-write"
+dry_run = true
+params = [
+  { name = "folder", type = "string", required = true, scopable = true },
+  { name = "content", type = "bytes", required = true, scopable = false },
+  { name = "seen", type = "bool", required = false, scopable = false },
+  { name = "draft", type = "bool", required = false, scopable = false },
+]
+results = [{ name = "message", type = "string", required = true }]
+
 [[event]]
 type = "mail.received"
 fields = [

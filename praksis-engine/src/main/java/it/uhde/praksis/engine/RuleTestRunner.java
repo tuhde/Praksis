@@ -175,6 +175,16 @@ public final class RuleTestRunner {
     return data;
   }
 
+  /** The argument that was given is the one that was expected; bytes are expected as Base64. */
+  private static boolean matches(Object expected, Object actual) {
+    if (actual instanceof byte[] bytes) {
+      return expected instanceof String text
+          ? java.util.Base64.getEncoder().encodeToString(bytes).equals(text)
+          : expected instanceof byte[] other && java.util.Arrays.equals(bytes, other);
+    }
+    return new ArgMatcher.Equals(expected).matches(actual);
+  }
+
   private Result execute(String layer, LayerStack.Effective effective, RuleTest test)
       throws Exception {
     Event event =
@@ -223,7 +233,7 @@ public final class RuleTestRunner {
       for (var arg : want.args().entrySet()) {
         same &=
             got.args().containsKey(arg.getKey())
-                && new ArgMatcher.Equals(arg.getValue()).matches(got.args().get(arg.getKey()));
+                && matches(arg.getValue(), got.args().get(arg.getKey()));
       }
       if (!same) {
         return "call " + (i + 1) + " should be " + describe(want) + ", but is " + got.describe();

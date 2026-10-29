@@ -38,6 +38,20 @@ class RuleTestRunnerTest {
                           List.of(
                               new FieldDescriptor("message", ValueType.STRING, true, false),
                               new FieldDescriptor("folder", ValueType.STRING, true, true)),
+                          List.of()),
+                      new CapabilityDescriptor(
+                          "mail.compose",
+                          EffectClass.READ_ONLY,
+                          true,
+                          List.of(new FieldDescriptor("subject", ValueType.STRING, true, false)),
+                          List.of(new FieldDescriptor("raw", ValueType.BYTES, true, false))),
+                      new CapabilityDescriptor(
+                          "mail.append",
+                          EffectClass.LOCAL_WRITE,
+                          true,
+                          List.of(
+                              new FieldDescriptor("folder", ValueType.STRING, true, true),
+                              new FieldDescriptor("content", ValueType.BYTES, true, false)),
                           List.of())),
                   List.of(
                       new EventTypeDescriptor(
@@ -328,5 +342,74 @@ class RuleTestRunnerTest {
     RuleTestRunner.Report report = run("base");
 
     assertThat(report.ok()).as(report.toString()).isTrue();
+  }
+
+  @Test
+  void bytesAreMockedAndExpectedAsBase64() throws Exception {
+    write("base/ruleset.toml", "format_version = 1\nname = \"base\"\n");
+    write(
+        "base/rules/mail.draft.toml",
+        """
+        id = "mail.draft"
+        effect = "local-write"
+        needs = ["mail.compose", "mail.append"]
+
+        [trigger]
+        kind = "command"
+        title = "Draft"
+        [[trigger.param]]
+        name = "subject"
+        type = "string"
+
+        [[action]]
+        id = "compose"
+        capability = "mail.compose"
+        args = { subject = { cel = "event.data.subject" } }
+        [[action]]
+        id = "save"
+        capability = "mail.append"
+        args = { folder = "Drafts", content = { cel = "results.compose.raw" } }
+        """);
+    write(
+        "base/tests/mail.draft.toml",
+        """
+        format_version = 1
+        [[test]]
+        name = "the composed bytes are saved"
+        [test.mock."mail.compose"]
+        raw = "ZHJhZnQ="
+        [test.event]
+        type = "command.mail.draft"
+        data = { subject = "s" }
+        [[test.call]]
+        capability = "mail.compose"
+        args = { subject = "s" }
+        [[test.call]]
+        capability = "mail.append"
+        args = { folder = "Drafts", content = "ZHJhZnQ=" }
+
+        [[test]]
+        name = "other bytes are a failure, and it says what they were"
+        [test.mock."mail.compose"]
+        raw = "ZHJhZnQ="
+        [test.event]
+        type = "command.mail.draft"
+        data = { subject = "s" }
+        [[test.call]]
+        capability = "mail.compose"
+        args = { subject = "s" }
+        [[test.call]]
+        capability = "mail.append"
+        args = { folder = "Drafts", content = "b3RoZXI=" }
+        """);
+
+    RuleTestRunner.Report report = run("base");
+
+    assertThat(report.results()).hasSize(2);
+    assertThat(report.results().get(0).passed()).as(report.toString()).isTrue();
+    assertThat(report.results().get(1).passed()).isFalse();
+    assertThat(report.results().get(1).message())
+        .contains("content=ZHJhZnQ=")
+        .doesNotContain("[B@");
   }
 }
