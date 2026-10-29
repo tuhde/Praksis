@@ -78,9 +78,9 @@ class MailListTest {
     assertThat(inbox).extracting(i -> i.get("subject")).containsExactly("newest", "newer", "old");
     assertThat(inbox.get(0))
         .containsEntry("from", "a@example.org")
-        .containsEntry("new", true)
+        .containsEntry("unread", true)
         .containsEntry("id", root.resolve("new/3.c").toString());
-    assertThat(inbox.get(1)).containsEntry("new", false);
+    assertThat(inbox.get(1)).containsEntry("unread", false);
     assertThat((Long) inbox.get(0).get("size")).isPositive();
     assertThat(items("Archive", null))
         .extracting(i -> i.get("subject"))

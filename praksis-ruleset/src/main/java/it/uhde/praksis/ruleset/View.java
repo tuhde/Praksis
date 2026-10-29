@@ -92,10 +92,21 @@ public record View(
           .enable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
           .build();
 
-  /** A read-only capability call whose result is available as {@code source.<name>}. */
-  public record Source(String capability, Map<String, Arg> args) {
+  /**
+   * A read-only capability call whose result is available as {@code source.<name>}.
+   *
+   * @param capability the capability
+   * @param args its arguments
+   * @param when an expression over {@code view}; the call is made only if it is true, otherwise the
+   *     result is empty (for a source that needs a selection that may not be made yet)
+   */
+  public record Source(String capability, Map<String, Arg> args, Optional<Arg> when) {
     public Source {
       args = Map.copyOf(args);
+    }
+
+    public Source(String capability, Map<String, Arg> args) {
+      this(capability, args, Optional.empty());
     }
   }
 
@@ -138,8 +149,19 @@ public record View(
     }
   }
 
-  /** Clicking a row sets the view parameter {@code param} to {@code value}. */
-  public record Select(String param, Arg value) {}
+  /**
+   * Clicking a row sets the view parameter {@code param} to {@code value} and puts the parameters
+   * in {@code clear} back to their defaults (choosing another folder forgets the selected mail).
+   */
+  public record Select(String param, Arg value, List<String> clear) {
+    public Select {
+      clear = List.copyOf(clear);
+    }
+
+    public Select(String param, Arg value) {
+      this(param, value, List.of());
+    }
+  }
 
   /** {@code sha256:<hex>} of the view\'s content, without {@code based_on}. */
   public String hash() {
@@ -226,13 +248,15 @@ public record View(
                 st.subTables()
                     .forEach(
                         (name, s) -> {
-                          s.onlyKeys(Set.of("capability", "args"));
+                          s.onlyKeys(Set.of("capability", "args", "when"));
                           if (!NAME.matcher(name).matches()) {
                             s.problem("source name '" + name + "' must match " + NAME.pattern());
                           }
                           Optional<String> capability = s.string("capability", true);
                           Map<String, Arg> args = args(s);
-                          capability.ifPresent(c -> sources.put(name, new Source(c, args)));
+                          Optional<Arg> when =
+                              s.raw("when").map(w -> RulesetLoader.arg(s, "when", w));
+                          capability.ifPresent(c -> sources.put(name, new Source(c, args, when)));
                         }));
     List<Component> components = new ArrayList<>();
     int[] count = {0};
@@ -279,6 +303,8 @@ public record View(
       return Optional.empty();
     }
     Map<String, Arg> values = new LinkedHashMap<>();
+    value(t, "visible", false, values);
+    width(t, values);
     List<Map<String, Arg>> columns = new ArrayList<>();
     List<Map<String, Arg>> fields = new ArrayList<>();
     List<Action> actions = new ArrayList<>();
@@ -286,12 +312,23 @@ public record View(
     List<Component> children = new ArrayList<>();
     switch (type.get()) {
       case "text" -> {
-        t.onlyKeys(Set.of("type", "value", "style"));
+        t.onlyKeys(Set.of("type", "value", "style", "visible", "width"));
         value(t, "value", true, values);
         literal(t, "style", STYLES, values);
       }
       case "table" -> {
-        t.onlyKeys(Set.of("type", "rows", "empty", "columns", "select", "row_action"));
+        t.onlyKeys(
+            Set.of(
+                "type",
+                "rows",
+                "empty",
+                "columns",
+                "select",
+                "row_action",
+                "emphasis",
+                "visible",
+                "width"));
+        value(t, "emphasis", false, values);
         value(t, "rows", true, values);
         literal(t, "empty", null, values);
         columns.addAll(entries(t, "columns", Set.of("title", "value", "format"), true));
@@ -299,7 +336,19 @@ public record View(
         select = select(t);
       }
       case "list" -> {
-        t.onlyKeys(Set.of("type", "items", "title", "subtitle", "empty", "select", "row_action"));
+        t.onlyKeys(
+            Set.of(
+                "type",
+                "items",
+                "title",
+                "subtitle",
+                "empty",
+                "select",
+                "row_action",
+                "emphasis",
+                "visible",
+                "width"));
+        value(t, "emphasis", false, values);
         value(t, "items", true, values);
         value(t, "title", true, values);
         value(t, "subtitle", false, values);
@@ -308,12 +357,13 @@ public record View(
         select = select(t);
       }
       case "detail" -> {
-        t.onlyKeys(Set.of("type", "data", "fields"));
+        t.onlyKeys(Set.of("type", "data", "fields", "visible", "width"));
         value(t, "data", false, values);
         fields.addAll(entries(t, "fields", Set.of("label", "value", "format"), true));
       }
       case "button" -> {
-        t.onlyKeys(Set.of("type", "label", "enabled", "command", "args", "confirm"));
+        t.onlyKeys(
+            Set.of("type", "label", "enabled", "command", "args", "confirm", "visible", "width"));
         literal(t, "label", null, values);
         value(t, "enabled", false, values);
         Optional<String> command = t.string("command", true);
@@ -327,7 +377,7 @@ public record View(
                         t.string("confirm", false))));
       }
       case "form" -> {
-        t.onlyKeys(Set.of("type", "command", "defaults", "submit_label"));
+        t.onlyKeys(Set.of("type", "command", "defaults", "submit_label", "visible", "width"));
         literal(t, "command", null, values);
         literal(t, "submit_label", null, values);
         t.table("defaults", false)
@@ -342,7 +392,7 @@ public record View(
         }
       }
       default -> {
-        t.onlyKeys(Set.of("type", "children"));
+        t.onlyKeys(Set.of("type", "children", "visible", "width"));
         if (depth >= MAX_DEPTH) {
           t.problem("containers are nested at most " + MAX_DEPTH + " deep");
         } else {
@@ -368,6 +418,19 @@ public record View(
       return;
     }
     out.put(key, RulesetLoader.arg(t, key, raw.get()));
+  }
+
+  /** {@code width}: the preferred width in pixels, a whole number from 40 to 4000. */
+  private static void width(Table t, Map<String, Arg> out) {
+    Optional<Object> raw = t.raw("width");
+    if (raw.isEmpty()) {
+      return;
+    }
+    if (raw.get() instanceof Number n && n.longValue() >= 40 && n.longValue() <= 4000) {
+      out.put("width", new Arg.Literal(n.longValue()));
+    } else {
+      t.problem("'width' must be a whole number of pixels from 40 to 4000");
+    }
   }
 
   /** An attribute that must be a plain string, optionally one of a fixed set. */
@@ -452,7 +515,7 @@ public record View(
     if (s.isEmpty()) {
       return Optional.empty();
     }
-    s.get().onlyKeys(Set.of("param", "value"));
+    s.get().onlyKeys(Set.of("param", "value", "clear"));
     Optional<String> param = s.get().string("param", true);
     Optional<Object> value = s.get().raw("value");
     if (value.isEmpty()) {
@@ -461,6 +524,10 @@ public record View(
     if (param.isEmpty() || value.isEmpty()) {
       return Optional.empty();
     }
-    return Optional.of(new Select(param.get(), RulesetLoader.arg(s.get(), "value", value.get())));
+    return Optional.of(
+        new Select(
+            param.get(),
+            RulesetLoader.arg(s.get(), "value", value.get()),
+            s.get().strings("clear")));
   }
 }

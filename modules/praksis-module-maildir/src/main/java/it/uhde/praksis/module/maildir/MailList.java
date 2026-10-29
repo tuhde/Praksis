@@ -17,8 +17,8 @@ import java.util.stream.Stream;
 
 /**
  * Lists the mails of a folder of the Maildir, newest first: id (the path, which {@code mail.move}
- * takes), sender, subject, date, size and whether the mail is new. Only reads; a folder that does
- * not exist is empty.
+ * takes), sender, subject, date (as written and as a time), size and whether the mail is unread.
+ * Only reads; a folder that does not exist is empty.
  */
 public final class MailList implements Capability {
   private static final int DEFAULT_LIMIT = 100;
@@ -64,8 +64,12 @@ public final class MailList implements Capability {
         item.put("from", headers.getOrDefault("from", ""));
         item.put("subject", headers.getOrDefault("subject", ""));
         item.put("date", headers.getOrDefault("date", ""));
+        item.put("time", MailGet.time(headers.getOrDefault("date", ""), file));
         item.put("size", Files.size(file));
-        item.put("new", file.getParent().getFileName().toString().equals("new"));
+        item.put(
+            "unread",
+            MailFolders.isUnread(
+                file.getParent().getFileName().toString(), file.getFileName().toString()));
         items.add(item);
       }
       return Map.of("items", items, "count", (long) files.size());

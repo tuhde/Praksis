@@ -136,13 +136,18 @@ final class ViewResolver {
     for (var source : view.sources().entrySet()) {
       sources.put(
           source.getKey(),
-          read(view, source.getKey(), source.getValue(), dynamic, ruleParams, problems));
+          wanted(view, source.getValue(), dynamic, ruleParams, problems, source.getKey())
+              ? read(view, source.getKey(), source.getValue(), dynamic, ruleParams, problems)
+              : Map.of());
     }
     dynamic.put("source", sources);
 
     List<ViewComponent> components = new ArrayList<>();
     for (View.Component c : view.components()) {
-      components.add(component(view, c, dynamic, ruleParams));
+      ViewComponent built = component(view, c, dynamic, ruleParams);
+      if (built != null) {
+        components.add(built);
+      }
     }
     List<Response.ViewList.Param> shown = new ArrayList<>();
     for (ParamDecl p : view.params()) {
@@ -150,6 +155,26 @@ final class ViewResolver {
     }
     return new Response.ResolvedView(
         view.id(), view.title(), view.schema(), shown, components, problems);
+  }
+
+  /** Whether the source is to be read at all: its {@code when} is true, or it has none. */
+  private boolean wanted(
+      View view,
+      View.Source source,
+      Map<String, Object> dynamic,
+      Map<String, Object> ruleParams,
+      List<String> problems,
+      String name) {
+    if (source.when().isEmpty()) {
+      return true;
+    }
+    try {
+      return Boolean.TRUE.equals(
+          evaluate(view, source.when().get(), dynamic, ruleParams, Set.of("view")));
+    } catch (ExpressionException e) {
+      problems.add("source '" + name + "': when: " + e.getMessage());
+      return false;
+    }
   }
 
   /** One source: its call, if the grants of the owner layer allow it. */
@@ -208,7 +233,49 @@ final class ViewResolver {
     }
   }
 
+  /** The part, or null if its {@code visible} is false. */
   private ViewComponent component(
+      View view, View.Component c, Map<String, Object> dynamic, Map<String, Object> ruleParams) {
+    try {
+      if (c.values().containsKey("visible")
+          && !Boolean.TRUE.equals(
+              evaluate(
+                  view,
+                  c.values().get("visible"),
+                  dynamic,
+                  ruleParams,
+                  Set.of("view", "source")))) {
+        return null;
+      }
+    } catch (ExpressionException | RuntimeException e) {
+      return error(c.type(), "visible: " + e.getMessage());
+    }
+    ViewComponent built = build(view, c, dynamic, ruleParams);
+    Arg width = c.values().get("width");
+    return width instanceof Arg.Literal l && l.value() instanceof Number n && built.error() == null
+        ? withWidth(built, n.intValue())
+        : built;
+  }
+
+  private static ViewComponent withWidth(ViewComponent c, int width) {
+    return new ViewComponent(
+        c.type(),
+        c.text(),
+        c.style(),
+        c.label(),
+        c.enabled(),
+        c.empty(),
+        c.columns(),
+        c.rows(),
+        c.fields(),
+        c.actions(),
+        c.form(),
+        c.children(),
+        c.error(),
+        width);
+  }
+
+  private ViewComponent build(
       View view, View.Component c, Map<String, Object> dynamic, Map<String, Object> ruleParams) {
     try {
       return switch (c.type()) {
@@ -233,7 +300,14 @@ final class ViewResolver {
         case "form" -> form(view, c, dynamic, ruleParams);
         default -> {
           List<ViewComponent> children = new ArrayList<>();
-          c.children().forEach(child -> children.add(component(view, child, dynamic, ruleParams)));
+          c.children()
+              .forEach(
+                  child -> {
+                    ViewComponent built = component(view, child, dynamic, ruleParams);
+                    if (built != null) {
+                      children.add(built);
+                    }
+                  });
           yield new ViewComponent(
               c.type(), null, null, null, null, null, null, null, null, null, null, children, null);
         }
@@ -316,13 +390,23 @@ final class ViewResolver {
                         c.select().get().value(),
                         inRow,
                         ruleParams,
-                        Set.of("view", "source", "item"))));
+                        Set.of("view", "source", "item"))),
+                c.select().get().clear());
       }
+      boolean emphasis =
+          c.values().containsKey("emphasis")
+              && Boolean.TRUE.equals(
+                  evaluate(
+                      view,
+                      c.values().get("emphasis"),
+                      inRow,
+                      ruleParams,
+                      Set.of("view", "source", "item")));
       List<ViewComponent.Action> actions = new ArrayList<>();
       for (View.Action a : c.actions()) {
         actions.add(action(view, a, inRow, ruleParams, Set.of("view", "source", "item")));
       }
-      rows.add(new ViewComponent.Row(cells, select, actions));
+      rows.add(new ViewComponent.Row(cells, select, actions, emphasis));
     }
     return new ViewComponent(
         c.type(),

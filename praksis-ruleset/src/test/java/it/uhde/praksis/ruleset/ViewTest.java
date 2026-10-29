@@ -259,4 +259,58 @@ class ViewTest {
     assertThatThrownBy(() -> LayerStack.resolve(List.of(new Source("nothing", nothing)), Map.of()))
         .hasMessageContaining("there is no view");
   }
+
+  @Test
+  void sourcesPartsAndRowsCanBeConditionalSizedAndEmphasized() throws Exception {
+    String view =
+        """
+        title = "Reader"
+        [param.folder]
+        type = "string"
+        default = "INBOX"
+        [param.message]
+        type = "string"
+        default = ""
+        [source.current]
+        capability = "mail.list"
+        args = { folder = { cel = "view.folder" } }
+        when = { cel = "view.message != ''" }
+
+        [[component]]
+        type = "list"
+        width = 200
+        items = { cel = "source.current.items" }
+        title = { cel = "item.subject" }
+        emphasis = { cel = "item.unread" }
+        select = { param = "message", value = { cel = "item.id" }, clear = ["folder"] }
+
+        [[component]]
+        type = "text"
+        visible = { cel = "view.message != ''" }
+        value = "x"
+        """;
+    assertThat(problems(view)).isEmpty();
+    Path l = layer("c" + System.nanoTime(), Map.of("mail.inbox", view), COMMAND);
+    View v = LayerStack.resolve(List.of(new Source("c", l)), Map.of()).ruleset().views().get(0);
+    assertThat(v.sources().get("current").when()).isPresent();
+    assertThat(v.components().get(0).values()).containsKeys("width", "emphasis");
+    assertThat(v.components().get(0).select().get().clear()).containsExactly("folder");
+    assertThat(v.components().get(1).values()).containsKey("visible");
+
+    assertThat(
+            problems(
+                view.replace(
+                    "visible = { cel = \"view.message != ''\" }",
+                    "visible = { cel = \"other.x\" }")))
+        .anyMatch(p -> p.message().contains("other"));
+    assertThat(
+            problems(
+                view.replace(
+                    "when = { cel = \"view.message != ''\" }", "when = { cel = \"nope.x\" }")))
+        .anyMatch(p -> p.location().contains("when"));
+    String broken = view.replace("width = 200", "width = 5");
+    Path bad = layer("w" + System.nanoTime(), Map.of("mail.inbox", broken), COMMAND);
+    assertThatThrownBy(() -> LayerStack.resolve(List.of(new Source("w", bad)), Map.of()))
+        .hasMessageContaining("'width' must be a whole number of pixels");
+  }
 }

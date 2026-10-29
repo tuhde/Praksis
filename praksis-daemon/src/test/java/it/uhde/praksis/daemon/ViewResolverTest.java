@@ -80,8 +80,28 @@ class ViewResolverTest {
           return Map.of(
               "items",
               List.of(
-                  Map.of("id", "m1", "from", "a@x", "when", NOW, "raw", new byte[] {1, 2}),
-                  Map.of("id", "m2", "from", "b@x", "when", NOW, "raw", new byte[] {3})));
+                  Map.of(
+                      "id",
+                      "m1",
+                      "from",
+                      "a@x",
+                      "when",
+                      NOW,
+                      "raw",
+                      new byte[] {1, 2},
+                      "unread",
+                      true),
+                  Map.of(
+                      "id",
+                      "m2",
+                      "from",
+                      "b@x",
+                      "when",
+                      NOW,
+                      "raw",
+                      new byte[] {3},
+                      "unread",
+                      false)));
         }
       };
 
@@ -310,5 +330,59 @@ class ViewResolverTest {
         .extracting(ViewComponent.Field::value)
         .containsExactly("a@x", 2L);
     assertThat(r.components().get(1).fields().get(1).format()).isEqualTo("number");
+  }
+
+  @Test
+  void aSourceThatIsNotWantedIsNotReadAndAPartThatIsNotVisibleIsLeftOut() throws Exception {
+    String view =
+        """
+        title = "Reader"
+        [param.message]
+        type = "string"
+        default = ""
+        [source.messages]
+        capability = "mail.list"
+        args = { folder = "INBOX" }
+        [source.current]
+        capability = "mail.list"
+        args = { folder = "Selected" }
+        when = { cel = "view.message != ''" }
+
+        [[component]]
+        type = "table"
+        width = 320
+        rows = { cel = "source.messages.items" }
+        columns = [ { title = "From", value = { cel = "item.from" } } ]
+        emphasis = { cel = "item.unread" }
+        select = { param = "message", value = { cel = "item.id" }, clear = ["other"] }
+
+        [[component]]
+        type = "text"
+        visible = { cel = "view.message != ''" }
+        value = { cel = "'Open: ' + view.message + ' (' + string(size(source.current.items)) + ')'" }
+        """;
+    ViewResolver resolver = resolver(view, null);
+
+    // nothing selected: the second source is not read, and the text is left out
+    Response.ResolvedView none = (Response.ResolvedView) resolver.resolve("v", Map.of(), 1);
+    assertThat(reads).containsExactly("INBOX");
+    assertThat(none.warnings()).isEmpty();
+    assertThat(none.components())
+        .singleElement()
+        .satisfies(
+            table -> {
+              assertThat(table.type()).isEqualTo("table");
+              assertThat(table.width()).isEqualTo(320);
+              assertThat(table.rows()).extracting(r -> r.emphasis()).containsExactly(true, false);
+              assertThat(table.rows().get(0).select().clear()).containsExactly("other");
+            });
+
+    // something selected: both are read and the text shows
+    Response.ResolvedView some =
+        (Response.ResolvedView) resolver.resolve("v", Map.of("message", "m1"), 1);
+    assertThat(reads).containsExactly("INBOX", "INBOX", "Selected");
+    assertThat(some.components()).hasSize(2);
+    assertThat(some.components().get(1).text()).isEqualTo("Open: m1 (2)");
+    assertThat(some.components().get(1).width()).isNull();
   }
 }

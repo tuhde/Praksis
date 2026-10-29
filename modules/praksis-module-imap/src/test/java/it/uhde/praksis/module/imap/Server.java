@@ -48,6 +48,22 @@ final class Server implements AutoCloseable {
     user.deliver(message);
   }
 
+  /** Delivers a mail as written (CRLF line ends are made from LF). */
+  void deliverRaw(boolean seen, String raw) throws Exception {
+    MimeMessage message =
+        new MimeMessage(
+            com.icegreen.greenmail.util.GreenMailUtil.getSession(
+                greenMail.getImap().getServerSetup()),
+            new ByteArrayInputStream(raw.replace("\n", "\r\n").getBytes(StandardCharsets.UTF_8)));
+    message.setFlag(Flags.Flag.SEEN, seen);
+    user.deliver(message);
+  }
+
+  /** Makes an empty folder. */
+  void createFolder(String name) throws Exception {
+    greenMail.getManagers().getImapHostManager().createMailbox(user, name);
+  }
+
   @Override
   public void close() {
     greenMail.stop();

@@ -87,6 +87,9 @@ final class ViewValidator {
                     + "'; a view may only read"));
       }
       sourceArgs(source.getValue(), capability.get(), sourceScope, at, out);
+      if (source.getValue().when().orElse(null) instanceof Arg.Expr e) {
+        expression(e.source(), sourceScope, at + " when", out);
+      }
     }
     for (View.Component c : view.components()) {
       component(c, where, view, ruleset, screen, row, viewParams, out);
@@ -131,7 +134,10 @@ final class ViewValidator {
       if (v.getKey().startsWith("default.")) {
         continue; // checked with the command of the form
       }
-      boolean perRow = v.getKey().equals("title") || v.getKey().equals("subtitle");
+      boolean perRow =
+          v.getKey().equals("title")
+              || v.getKey().equals("subtitle")
+              || v.getKey().equals("emphasis");
       boolean list = v.getKey().equals("rows") || v.getKey().equals("items");
       if (v.getValue() instanceof Arg.Expr e) {
         expression(e.source(), list || !perRow ? screen : valueScope, at + " " + v.getKey(), out);

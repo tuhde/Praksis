@@ -78,7 +78,8 @@ class LoadedModuleTest {
     try (Server server = new Server();
         LoadedModules loaded =
             ModuleLoader.load(modules, lock, Map.of("imap", server.settings()))) {
-      assertThat(loaded.capabilities()).containsOnlyKeys("mail.move");
+      assertThat(loaded.capabilities())
+          .containsOnlyKeys("mail.move", "mail.folders", "mail.list", "mail.get");
       assertThat(loaded.sources()).extracting(s -> s.name()).containsExactly("imap.inbox");
       assertThat(loaded.catalog().eventType("mail.received")).isPresent();
       assertThat(loaded.capabilities().get("mail.move").getClass().getModule().getLayer())

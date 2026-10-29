@@ -544,6 +544,7 @@ public sealed interface Response {
    * @param form the form of a command
    * @param children the parts of a container
    * @param error why this part is not shown, or null
+   * @param width the preferred width in pixels, or null to share what is left
    */
   record ViewComponent(
       String type,
@@ -558,7 +559,28 @@ public sealed interface Response {
       List<Action> actions,
       Form form,
       List<ViewComponent> children,
-      String error) {
+      String error,
+      Integer width) {
+    /** A part without a width of its own. */
+    public ViewComponent(
+        String type,
+        String text,
+        String style,
+        String label,
+        Boolean enabled,
+        String empty,
+        List<Column> columns,
+        List<Row> rows,
+        List<Field> fields,
+        List<Action> actions,
+        Form form,
+        List<ViewComponent> children,
+        String error) {
+      this(
+          type, text, style, label, enabled, empty, columns, rows, fields, actions, form, children,
+          error, null);
+    }
+
     /** A column of a table. {@code format}: text, datetime, date, number or bytes. */
     public record Column(String title, String format) {}
 
@@ -568,11 +590,25 @@ public sealed interface Response {
      * @param cells the values, in the order of the columns
      * @param select what a click sets: the view parameter and its value, or null
      * @param actions what can be started for this row
+     * @param emphasis whether the row is shown in bold (an unread mail)
      */
-    public record Row(List<Object> cells, Select select, List<Action> actions) {}
+    public record Row(List<Object> cells, Select select, List<Action> actions, boolean emphasis) {
+      /** A row that is not emphasized. */
+      public Row(List<Object> cells, Select select, List<Action> actions) {
+        this(cells, select, actions, false);
+      }
+    }
 
-    /** Clicking sets the view parameter to the value and asks for the view again. */
-    public record Select(String param, Object value) {}
+    /**
+     * Clicking sets the view parameter to the value, puts the parameters in {@code clear} back to
+     * their defaults, and asks for the view again.
+     */
+    public record Select(String param, Object value, List<String> clear) {
+      /** A selection that clears nothing. */
+      public Select(String param, Object value) {
+        this(param, value, List.of());
+      }
+    }
 
     /** A labelled value of a detail. */
     public record Field(String label, String format, Object value) {}

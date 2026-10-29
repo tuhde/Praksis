@@ -15,6 +15,45 @@ params = [
 ]
 results = [{ name = "message", type = "string", required = true }]
 
+[[capability]]
+name = "mail.folders"
+effect = "read-only"
+dry_run = true
+params = []
+results = [{ name = "folders", type = "list", required = true }]
+
+[[capability]]
+name = "mail.list"
+effect = "read-only"
+dry_run = true
+params = [
+  { name = "folder", type = "string", required = true, scopable = true },
+  { name = "limit", type = "int", required = false, scopable = false },
+]
+results = [
+  { name = "items", type = "list", required = true },
+  { name = "count", type = "int", required = true },
+]
+
+[[capability]]
+name = "mail.get"
+effect = "read-only"
+dry_run = true
+params = [{ name = "message", type = "string", required = true, scopable = false }]
+results = [
+  { name = "from", type = "string", required = true },
+  { name = "to", type = "string", required = true },
+  { name = "cc", type = "string", required = true },
+  { name = "subject", type = "string", required = true },
+  { name = "date", type = "string", required = true },
+  { name = "time", type = "timestamp", required = true },
+  { name = "message_id", type = "string", required = true },
+  { name = "text", type = "string", required = true },
+  { name = "html", type = "string", required = true },
+  { name = "attachments", type = "list", required = true },
+  { name = "size", type = "int", required = true },
+]
+
 [[event]]
 type = "mail.received"
 fields = [
