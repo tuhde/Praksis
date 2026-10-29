@@ -527,9 +527,10 @@ public sealed interface Response {
    * One part of a resolved view. Which fields are set depends on {@code type}: {@code text} ({@code
    * text}, {@code style}), {@code table} ({@code columns}, {@code rows}, {@code empty}), {@code
    * list} (rows of two cells: title and subtitle), {@code detail} ({@code fields}), {@code button}
-   * ({@code label}, {@code enabled}, {@code actions}), {@code form} ({@code form}), {@code row} and
-   * {@code column} ({@code children}). A part that could not be worked out has {@code error}
-   * instead.
+   * ({@code label}, {@code enabled}, {@code actions} and/or {@code select}), {@code form} ({@code
+   * form}), {@code input} ({@code text}: what it holds, {@code label}: the hint, {@code select}:
+   * the parameter it sets), {@code row} and {@code column} ({@code children}). A part that could
+   * not be worked out has {@code error} instead.
    *
    * @param type the component type
    * @param text the text of a text
@@ -560,7 +561,29 @@ public sealed interface Response {
       Form form,
       List<ViewComponent> children,
       String error,
-      Integer width) {
+      Integer width,
+      Select select) {
+    /** A part without a selection of its own. */
+    public ViewComponent(
+        String type,
+        String text,
+        String style,
+        String label,
+        Boolean enabled,
+        String empty,
+        List<Column> columns,
+        List<Row> rows,
+        List<Field> fields,
+        List<Action> actions,
+        Form form,
+        List<ViewComponent> children,
+        String error,
+        Integer width) {
+      this(
+          type, text, style, label, enabled, empty, columns, rows, fields, actions, form, children,
+          error, width, null);
+    }
+
     /** A part without a width of its own. */
     public ViewComponent(
         String type,
@@ -601,12 +624,18 @@ public sealed interface Response {
 
     /**
      * Clicking sets the view parameter to the value, puts the parameters in {@code clear} back to
-     * their defaults, and asks for the view again.
+     * their defaults, starts the command {@code then} if there is one, and asks for the view again.
+     * For an {@code input} the value is null: the client puts the text that was typed there.
      */
-    public record Select(String param, Object value, List<String> clear) {
-      /** A selection that clears nothing. */
+    public record Select(String param, Object value, List<String> clear, Action then) {
+      /** A selection that clears nothing and starts nothing. */
       public Select(String param, Object value) {
-        this(param, value, List.of());
+        this(param, value, List.of(), null);
+      }
+
+      /** A selection that starts nothing. */
+      public Select(String param, Object value, List<String> clear) {
+        this(param, value, clear, null);
       }
     }
 

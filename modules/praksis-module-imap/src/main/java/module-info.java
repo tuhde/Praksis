@@ -10,10 +10,14 @@ module it.uhde.praksis.module.imap {
   requires java.logging;
 
   provides it.uhde.praksis.capability.Capability with
+      it.uhde.praksis.module.imap.ImapEdit.Delete,
+      it.uhde.praksis.module.imap.ImapEdit.Mark,
       it.uhde.praksis.module.imap.ImapMove,
+      it.uhde.praksis.module.imap.ImapRead.Attachment,
       it.uhde.praksis.module.imap.ImapRead.Folders,
       it.uhde.praksis.module.imap.ImapRead.Get,
-      it.uhde.praksis.module.imap.ImapRead.Listing;
+      it.uhde.praksis.module.imap.ImapRead.Listing,
+      it.uhde.praksis.module.imap.ImapRead.Search;
   provides it.uhde.praksis.capability.EventSource with
       it.uhde.praksis.module.imap.ImapSource;
 }

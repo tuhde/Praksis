@@ -18,7 +18,11 @@ import java.util.Map;
  */
 final class MailBody {
   /** An attachment: what a list shows, not its content. */
-  record Attachment(String name, String type, long size) {}
+  record Attachment(String name, String type, long size, byte[] content) {
+    Attachment(String name, String type, long size) {
+      this(name, type, size, null);
+    }
+  }
 
   /** The parts of a mail that a reader shows. */
   record Parsed(String text, String html, List<Attachment> attachments) {}
@@ -29,8 +33,14 @@ final class MailBody {
 
   /** Parses a whole mail as it is in the file. */
   static Parsed parse(byte[] mail) {
+    return parse(mail, false);
+  }
+
+  /** As {@link #parse(byte[])}; with {@code keepContent} the attachments carry their bytes. */
+  static Parsed parse(byte[] mail, boolean keepContent) {
     String raw = new String(mail, StandardCharsets.ISO_8859_1);
     Collector out = new Collector();
+    out.keep = keepContent;
     part(raw, 0, out);
     return new Parsed(out.text, out.html, out.attachments);
   }
@@ -38,6 +48,7 @@ final class MailBody {
   private static final class Collector {
     String text = "";
     String html = "";
+    boolean keep;
     final List<Attachment> attachments = new ArrayList<>();
   }
 
@@ -67,7 +78,11 @@ final class MailBody {
     if (attached || (!type.equals("text/plain") && !type.equals("text/html"))) {
       if (!type.startsWith("multipart/")) {
         out.attachments.add(
-            new Attachment(name.isEmpty() ? "(no name)" : name, type, content.length));
+            new Attachment(
+                name.isEmpty() ? "(no name)" : name,
+                type,
+                content.length,
+                out.keep ? content : null));
       }
       return;
     }

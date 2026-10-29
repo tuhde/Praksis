@@ -16,9 +16,10 @@ import java.util.Map;
 import java.util.stream.Stream;
 
 /**
- * Lists the mails of a folder of the Maildir, newest first: id (the path, which {@code mail.move}
- * takes), sender, subject, date (as written and as a time), size and whether the mail is unread.
- * Only reads; a folder that does not exist is empty.
+ * Lists the mails of a folder of the Maildir, newest first unless {@code sort} (time, from,
+ * subject, size), {@code reverse} and {@code offset} say otherwise: id (the path, which {@code
+ * mail.move} takes), sender, subject, date (as written and as a time), size and whether the mail is
+ * unread. Only reads; a folder that does not exist is empty.
  */
 public final class MailList implements Capability {
   private static final int DEFAULT_LIMIT = 100;
@@ -45,6 +46,12 @@ public final class MailList implements Capability {
     Path folder = settings.folderDir((String) args.get("folder"));
     long asked = args.get("limit") instanceof Number n ? n.longValue() : DEFAULT_LIMIT;
     int limit = (int) Math.max(1, Math.min(asked, MAX_LIMIT));
+    int offset = args.get("offset") instanceof Number n ? (int) Math.max(0, n.longValue()) : 0;
+    String sort = args.get("sort") instanceof String t ? t : "time";
+    boolean reverse = Boolean.TRUE.equals(args.get("reverse"));
+    if (!List.of("time", "from", "subject", "size").contains(sort)) {
+      throw new CapabilityException("sort must be time, from, subject or size", false);
+    }
     try {
       List<Path> files = new ArrayList<>();
       for (String dir : new String[] {"new", "cur"}) {
@@ -55,22 +62,28 @@ public final class MailList implements Capability {
           }
         }
       }
-      files.sort(Comparator.comparing(MailList::modified).reversed());
       List<Object> items = new ArrayList<>();
-      for (Path file : files.subList(0, Math.min(limit, files.size()))) {
-        Map<String, String> headers = Headers.read(file);
-        Map<String, Object> item = new LinkedHashMap<>();
-        item.put("id", file.toString());
-        item.put("from", headers.getOrDefault("from", ""));
-        item.put("subject", headers.getOrDefault("subject", ""));
-        item.put("date", headers.getOrDefault("date", ""));
-        item.put("time", MailGet.time(headers.getOrDefault("date", ""), file));
-        item.put("size", Files.size(file));
-        item.put(
-            "unread",
-            MailFolders.isUnread(
-                file.getParent().getFileName().toString(), file.getFileName().toString()));
-        items.add(item);
+      if (sort.equals("time")) {
+        files.sort(Comparator.comparing(MailList::modified).reversed());
+        if (reverse) {
+          java.util.Collections.reverse(files);
+        }
+        for (Path file : window(files, offset, limit)) {
+          items.add(item(file));
+        }
+      } else {
+        // sorting by a header needs every header, so only the window is built as a full item
+        List<Map<String, Object>> all = new ArrayList<>();
+        for (Path file : files) {
+          all.add(item(file));
+        }
+        Comparator<Map<String, Object>> order =
+            sort.equals("size")
+                ? Comparator.comparingLong(m -> (Long) m.get("size"))
+                : Comparator.comparing(
+                    m -> ((String) m.get(sort)).toLowerCase(java.util.Locale.ROOT));
+        all.sort(reverse ? order.reversed() : order);
+        items.addAll(window(all, offset, limit));
       }
       return Map.of("items", items, "count", (long) files.size());
     } catch (IOException e) {
@@ -78,7 +91,30 @@ public final class MailList implements Capability {
     }
   }
 
-  private static Instant modified(Path file) {
+  private static <T> List<T> window(List<T> all, int offset, int limit) {
+    int from = Math.min(offset, all.size());
+    return all.subList(from, Math.min(from + limit, all.size()));
+  }
+
+  /** The list entry of one mail. */
+  static Map<String, Object> item(Path file) throws IOException {
+    Map<String, String> headers = Headers.read(file);
+    Map<String, Object> item = new LinkedHashMap<>();
+    item.put("id", file.toString());
+    item.put("from", headers.getOrDefault("from", ""));
+    item.put("subject", headers.getOrDefault("subject", ""));
+    item.put("date", headers.getOrDefault("date", ""));
+    item.put("time", MailGet.time(headers.getOrDefault("date", ""), file));
+    item.put("size", Files.size(file));
+    item.put(
+        "unread",
+        MailFolders.isUnread(
+            file.getParent().getFileName().toString(), file.getFileName().toString()));
+    item.put("starred", MailFiles.flags(file.getFileName().toString()).indexOf('F') >= 0);
+    return item;
+  }
+
+  static Instant modified(Path file) {
     try {
       return Files.getLastModifiedTime(file).toInstant();
     } catch (IOException e) {

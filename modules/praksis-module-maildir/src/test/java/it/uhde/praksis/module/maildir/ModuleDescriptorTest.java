@@ -30,7 +30,15 @@ class ModuleDescriptorTest {
     try (LoadedModules loaded =
         ModuleLoader.load(modules, lock, Map.of("maildir", Map.of("root", root.toString())))) {
       assertThat(loaded.capabilities())
-          .containsOnlyKeys("mail.move", "mail.list", "mail.folders", "mail.get");
+          .containsOnlyKeys(
+              "mail.move",
+              "mail.list",
+              "mail.folders",
+              "mail.get",
+              "mail.search",
+              "mail.mark",
+              "mail.delete",
+              "mail.attachment");
       assertThat(loaded.sources()).extracting(s -> s.name()).containsExactly("maildir.inbox");
       assertThat(loaded.catalog().eventType("mail.received")).isPresent();
     }

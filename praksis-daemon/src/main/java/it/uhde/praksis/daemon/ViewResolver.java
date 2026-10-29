@@ -272,7 +272,8 @@ final class ViewResolver {
         c.form(),
         c.children(),
         c.error(),
-        width);
+        width,
+        c.select());
   }
 
   private ViewComponent build(
@@ -298,6 +299,7 @@ final class ViewResolver {
         case "detail" -> detail(view, c, dynamic, ruleParams);
         case "button" -> button(view, c, dynamic, ruleParams);
         case "form" -> form(view, c, dynamic, ruleParams);
+        case "input" -> input(c, dynamic);
         default -> {
           List<ViewComponent> children = new ArrayList<>();
           c.children()
@@ -382,16 +384,7 @@ final class ViewResolver {
       ViewComponent.Select select = null;
       if (c.select().isPresent()) {
         select =
-            new ViewComponent.Select(
-                c.select().get().param(),
-                show(
-                    evaluate(
-                        view,
-                        c.select().get().value(),
-                        inRow,
-                        ruleParams,
-                        Set.of("view", "source", "item"))),
-                c.select().get().clear());
+            select(view, c.select().get(), inRow, ruleParams, Set.of("view", "source", "item"));
       }
       boolean emphasis =
           c.values().containsKey("emphasis")
@@ -453,6 +446,8 @@ final class ViewResolver {
     for (View.Action a : c.actions()) {
       actions.add(action(view, a, dynamic, ruleParams, names));
     }
+    ViewComponent.Select sets =
+        c.select().isPresent() ? select(view, c.select().get(), dynamic, ruleParams, names) : null;
     return new ViewComponent(
         "button",
         null,
@@ -466,7 +461,44 @@ final class ViewResolver {
         actions,
         null,
         null,
-        null);
+        null,
+        null,
+        sets);
+  }
+
+  private ViewComponent input(View.Component c, Map<String, Object> dynamic) {
+    String param = literal(c, "param", "");
+    Object current = dynamic.get("view") instanceof Map<?, ?> m ? m.get(param) : null;
+    return new ViewComponent(
+        "input",
+        current == null ? "" : String.valueOf(current),
+        null,
+        literal(c, "placeholder", null),
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        new ViewComponent.Select(param, null));
+  }
+
+  private ViewComponent.Select select(
+      View view,
+      View.Select s,
+      Map<String, Object> dynamic,
+      Map<String, Object> ruleParams,
+      Set<String> names)
+      throws ExpressionException {
+    return new ViewComponent.Select(
+        s.param(),
+        show(evaluate(view, s.value(), dynamic, ruleParams, names)),
+        s.clear(),
+        s.then().isPresent() ? action(view, s.then().get(), dynamic, ruleParams, names) : null);
   }
 
   private ViewComponent form(

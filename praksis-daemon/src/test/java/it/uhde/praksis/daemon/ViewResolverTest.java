@@ -385,4 +385,60 @@ class ViewResolverTest {
     assertThat(some.components().get(1).text()).isEqualTo("Open: m1 (2)");
     assertThat(some.components().get(1).width()).isNull();
   }
+
+  @Test
+  void aClickCanStartACommandAButtonCanSetStateAndAnInputShowsItsParameter() throws Exception {
+    String view =
+        """
+        title = "Reader"
+        [param.message]
+        type = "string"
+        default = ""
+        [param.limit]
+        type = "int"
+        default = 100
+        [param.query]
+        type = "string"
+        default = ""
+        [source.messages]
+        capability = "mail.list"
+        args = { folder = "INBOX" }
+
+        [[component]]
+        type = "list"
+        items = { cel = "source.messages.items" }
+        title = { cel = "item.from" }
+        select = { param = "message", value = { cel = "item.id" }, then = { command = "mail.file", args = { message = { cel = "item.id" } } } }
+
+        [[component]]
+        type = "button"
+        label = "More"
+        sets = { param = "limit", value = { cel = "view.limit + 100" }, clear = ["message"] }
+
+        [[component]]
+        type = "input"
+        param = "query"
+        placeholder = "Search"
+        """;
+    Response.ResolvedView r =
+        (Response.ResolvedView)
+            resolver(view, COMMAND).resolve("v", Map.of("limit", 200L, "query", "inv"), 1);
+
+    assertThat(r.components().get(0).rows().get(0).select().then())
+        .satisfies(
+            a -> {
+              assertThat(a.command()).isEqualTo("mail.file");
+              assertThat(a.args()).containsEntry("message", "m1");
+            });
+    ViewComponent more = r.components().get(1);
+    assertThat(more.actions()).isEmpty();
+    assertThat(more.select().param()).isEqualTo("limit");
+    assertThat(more.select().value()).isEqualTo(300L);
+    assertThat(more.select().clear()).containsExactly("message");
+    ViewComponent input = r.components().get(2);
+    assertThat(input.type()).isEqualTo("input");
+    assertThat(input.text()).isEqualTo("inv");
+    assertThat(input.label()).isEqualTo("Search");
+    assertThat(input.select().param()).isEqualTo("query");
+  }
 }

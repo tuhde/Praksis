@@ -18,8 +18,10 @@ import jakarta.mail.internet.MimeUtility;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import org.eclipse.angus.mail.imap.IMAPFolder;
 import org.eclipse.angus.mail.imap.IMAPStore;
@@ -35,11 +37,20 @@ public abstract class ImapRead implements Capability {
   private static final int DEFAULT_LIMIT = 100;
   private static final int MAX_LIMIT = 1000;
 
+  /** Sorting by a header needs every envelope, so it is only done up to this many mails. */
+  static final int MAX_SORTED = 5000;
+
+  /** The attachment size that is returned unless the call asks for more. */
+  static final long DEFAULT_ATTACHMENT = 5L * 1024 * 1024;
+
   /** The most characters of a text or HTML body that are returned. */
   private static final int MAX_BODY = 2_000_000;
 
   private ImapSettings settings;
   private Connection connection;
+
+  /** Whether the call in progress is a dry run; set by {@link #invoke}, which is synchronized. */
+  boolean dryRun;
 
   @Override
   public void configure(Map<String, Object> config) throws CapabilityException {
@@ -67,6 +78,7 @@ public abstract class ImapRead implements Capability {
     if (settings == null) {
       throw new CapabilityException(name() + " is not configured", false);
     }
+    dryRun = context.dryRun();
     try {
       return read(connection.store(), args);
     } catch (MessagingException | IOException e) {
@@ -135,29 +147,72 @@ public abstract class ImapRead implements Capability {
     }
 
     @Override
-    Map<String, Object> read(IMAPStore store, Map<String, Object> args) throws MessagingException {
+    Map<String, Object> read(IMAPStore store, Map<String, Object> args)
+        throws MessagingException, CapabilityException {
       IMAPFolder folder = (IMAPFolder) store.getFolder((String) args.get("folder"));
       if (!folder.exists()) {
         return Map.of("items", List.of(), "count", 0L);
       }
       long asked = args.get("limit") instanceof Number n ? n.longValue() : DEFAULT_LIMIT;
       int limit = (int) Math.max(1, Math.min(asked, MAX_LIMIT));
+      int offset = args.get("offset") instanceof Number n ? (int) Math.max(0, n.longValue()) : 0;
+      String sort = args.get("sort") instanceof String t ? t : "time";
+      boolean reverse = Boolean.TRUE.equals(args.get("reverse"));
+      if (!List.of("time", "from", "subject", "size").contains(sort)) {
+        throw new CapabilityException("sort must be time, from, subject or size", false);
+      }
       folder.open(Folder.READ_ONLY);
       try {
         int total = folder.getMessageCount();
-        int first = Math.max(1, total - limit + 1);
         List<Object> items = new ArrayList<>();
-        if (total > 0) {
-          Message[] messages = folder.getMessages(first, total);
-          FetchProfile profile = new FetchProfile();
-          profile.add(FetchProfile.Item.ENVELOPE);
-          profile.add(FetchProfile.Item.FLAGS);
-          profile.add(FetchProfile.Item.SIZE);
-          profile.add(org.eclipse.angus.mail.imap.IMAPFolder.FetchProfileItem.HEADERS);
-          profile.add(jakarta.mail.UIDFolder.FetchProfileItem.UID);
-          folder.fetch(messages, profile);
-          for (int i = messages.length - 1; i >= 0; i--) {
-            items.add(item(folder, (MimeMessage) messages[i]));
+        if (total > 0 && sort.equals("time")) {
+          // the sequence number grows with the arrival, so the window is a range of numbers
+          int first;
+          int last;
+          if (reverse) {
+            first = 1 + offset;
+            last = Math.min(total, first + limit - 1);
+          } else {
+            last = total - offset;
+            first = Math.max(1, last - limit + 1);
+          }
+          if (first <= last) {
+            Message[] messages = folder.getMessages(first, last);
+            fetch(folder, messages);
+            for (int i = 0; i < messages.length; i++) {
+              items.add(
+                  item(folder, (MimeMessage) messages[reverse ? i : messages.length - 1 - i]));
+            }
+          }
+        } else if (total > 0) {
+          if (total > MAX_SORTED) {
+            throw new CapabilityException(
+                "sorting by "
+                    + sort
+                    + " works up to "
+                    + MAX_SORTED
+                    + " mails, the folder has "
+                    + total,
+                false);
+          }
+          Message[] messages = folder.getMessages();
+          fetch(folder, messages);
+          List<MimeMessage> all = new ArrayList<>();
+          for (Message m : messages) {
+            all.add((MimeMessage) m);
+          }
+          Comparator<MimeMessage> order =
+              sort.equals("size")
+                  ? Comparator.comparingInt(Listing::size)
+                  : Comparator.comparing(m -> text(m, sort));
+          all.sort(
+              (x, y) -> {
+                int c = order.compare(x, y);
+                return reverse ? -c : c;
+              });
+          int from = Math.min(offset, all.size());
+          for (MimeMessage m : all.subList(from, Math.min(from + limit, all.size()))) {
+            items.add(item(folder, m));
           }
         }
         return Map.of("items", items, "count", (long) total);
@@ -166,7 +221,23 @@ public abstract class ImapRead implements Capability {
       }
     }
 
-    private Map<String, Object> item(IMAPFolder folder, MimeMessage m) throws MessagingException {
+    private static int size(MimeMessage m) {
+      try {
+        return m.getSize();
+      } catch (MessagingException e) {
+        return 0;
+      }
+    }
+
+    private static String text(MimeMessage m, String sort) {
+      try {
+        return (sort.equals("from") ? address(m.getFrom()) : subject(m)).toLowerCase(Locale.ROOT);
+      } catch (MessagingException e) {
+        return "";
+      }
+    }
+
+    static Map<String, Object> item(IMAPFolder folder, MimeMessage m) throws MessagingException {
       Map<String, Object> item = new LinkedHashMap<>();
       String[] ids = m.getHeader("Message-ID");
       item.put(
@@ -183,8 +254,158 @@ public abstract class ImapRead implements Capability {
       item.put("time", instant(m));
       item.put("size", (long) Math.max(0, m.getSize()));
       item.put("unread", !m.getFlags().contains(Flags.Flag.SEEN));
+      item.put("starred", m.getFlags().contains(Flags.Flag.FLAGGED));
       return item;
     }
+  }
+
+  /** The mail an argument names. */
+  static MessageId id(Map<String, Object> args) throws CapabilityException {
+    return MessageId.parse((String) args.get("message"))
+        .orElseThrow(
+            () ->
+                new CapabilityException(
+                    "'" + args.get("message") + "' is not the id of an IMAP mail", false));
+  }
+
+  /** {@code mail.search}: the mails of a folder with a text in the sender, subject or body. */
+  public static final class Search extends ImapRead {
+    @Override
+    public String name() {
+      return "mail.search";
+    }
+
+    @Override
+    Map<String, Object> read(IMAPStore store, Map<String, Object> args)
+        throws MessagingException, CapabilityException {
+      IMAPFolder folder = (IMAPFolder) store.getFolder((String) args.get("folder"));
+      if (!folder.exists()) {
+        return Map.of("items", List.of(), "count", 0L);
+      }
+      String query = (String) args.get("query");
+      String in = args.get("in") instanceof String t ? t : "all";
+      jakarta.mail.search.SearchTerm term =
+          switch (in) {
+            case "from" -> new jakarta.mail.search.FromStringTerm(query);
+            case "subject" -> new jakarta.mail.search.SubjectTerm(query);
+            case "body" -> new jakarta.mail.search.BodyTerm(query);
+            case "all" ->
+                new jakarta.mail.search.OrTerm(
+                    new jakarta.mail.search.SearchTerm[] {
+                      new jakarta.mail.search.FromStringTerm(query),
+                      new jakarta.mail.search.SubjectTerm(query),
+                      new jakarta.mail.search.BodyTerm(query)
+                    });
+            default ->
+                throw new CapabilityException("in must be all, from, subject or body", false);
+          };
+      long asked = args.get("limit") instanceof Number n ? n.longValue() : DEFAULT_LIMIT;
+      int limit = (int) Math.max(1, Math.min(asked, MAX_LIMIT));
+      folder.open(Folder.READ_ONLY);
+      try {
+        Message[] hits = query.isEmpty() ? folder.getMessages() : folder.search(term);
+        int from = Math.max(0, hits.length - limit);
+        Message[] window = java.util.Arrays.copyOfRange(hits, from, hits.length);
+        fetch(folder, window);
+        List<Object> items = new ArrayList<>();
+        for (int i = window.length - 1; i >= 0; i--) {
+          items.add(Listing.item(folder, (MimeMessage) window[i]));
+        }
+        return Map.of("items", items, "count", (long) hits.length);
+      } finally {
+        folder.close(false);
+      }
+    }
+  }
+
+  /** {@code mail.attachment}: the content of one attachment, unless it is too big. */
+  public static final class Attachment extends ImapRead {
+    @Override
+    public String name() {
+      return "mail.attachment";
+    }
+
+    @Override
+    Map<String, Object> read(IMAPStore store, Map<String, Object> args)
+        throws MessagingException, IOException, CapabilityException {
+      MessageId id = id(args);
+      String wanted = (String) args.get("name");
+      long max =
+          args.get("max_bytes") instanceof Number n
+              ? Math.max(1, Math.min(n.longValue(), 25L * 1024 * 1024))
+              : DEFAULT_ATTACHMENT;
+      IMAPFolder folder = (IMAPFolder) store.getFolder(id.folder());
+      folder.open(Folder.READ_ONLY);
+      try {
+        MimeMessage m =
+            folder.getUIDValidity() == id.validity()
+                ? (MimeMessage) folder.getMessageByUID(id.uid())
+                : null;
+        if (m == null) {
+          throw new CapabilityException("mail not found: it is not in " + id.folder(), false);
+        }
+        Part part = find(m, wanted, 0);
+        if (part == null) {
+          throw new CapabilityException("the mail has no attachment named '" + wanted + "'", false);
+        }
+        if (part.getSize() > max) {
+          throw new CapabilityException(
+              "the attachment '"
+                  + wanted
+                  + "' is "
+                  + part.getSize()
+                  + " bytes, more than the limit of "
+                  + max,
+              false);
+        }
+        byte[] bytes;
+        try (java.io.InputStream in = part.getInputStream()) {
+          bytes = in.readNBytes((int) max + 1);
+        }
+        if (bytes.length > max) {
+          throw new CapabilityException(
+              "the attachment '" + wanted + "' is more than the limit of " + max + " bytes", false);
+        }
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("name", wanted);
+        out.put("type", part.getContentType().split(";", 2)[0].strip().toLowerCase(Locale.ROOT));
+        out.put("size", (long) bytes.length);
+        out.put("content", bytes);
+        return out;
+      } finally {
+        folder.close(false);
+      }
+    }
+
+    private static Part find(Part part, String name, int depth)
+        throws MessagingException, IOException {
+      if (depth > 8) {
+        return null;
+      }
+      if (part.isMimeType("multipart/*")) {
+        Multipart multipart = (Multipart) part.getContent();
+        for (int i = 0; i < multipart.getCount(); i++) {
+          Part hit = find(multipart.getBodyPart(i), name, depth + 1);
+          if (hit != null) {
+            return hit;
+          }
+        }
+        return null;
+      }
+      String file = part.getFileName();
+      return file != null && MimeUtility.decodeText(file).equals(name) ? part : null;
+    }
+  }
+
+  /** What a list needs of each mail, in one round trip. */
+  static void fetch(IMAPFolder folder, Message[] messages) throws MessagingException {
+    FetchProfile profile = new FetchProfile();
+    profile.add(FetchProfile.Item.ENVELOPE);
+    profile.add(FetchProfile.Item.FLAGS);
+    profile.add(FetchProfile.Item.SIZE);
+    profile.add(IMAPFolder.FetchProfileItem.HEADERS);
+    profile.add(jakarta.mail.UIDFolder.FetchProfileItem.UID);
+    folder.fetch(messages, profile);
   }
 
   /** {@code mail.get}. */

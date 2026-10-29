@@ -155,6 +155,26 @@ public final class RuleTestRunner {
     }
   }
 
+  /**
+   * The data of the test's event. A command is started with the defaults of its parameters for what
+   * is not given, so a test of a command gets them too.
+   */
+  private static Map<String, Object> withDefaults(
+      it.uhde.praksis.ruleset.Ruleset ruleset, RuleTest test) {
+    Map<String, Object> data = new java.util.HashMap<>(test.eventData());
+    for (var rule : ruleset.rules()) {
+      if (rule.eventType().equals(test.eventType())
+          && rule.trigger() instanceof it.uhde.praksis.ruleset.Trigger.OnCommand command) {
+        for (var p : command.params()) {
+          if (!data.containsKey(p.name()) && p.defaultValue().isPresent()) {
+            data.put(p.name(), p.defaultValue().get());
+          }
+        }
+      }
+    }
+    return data;
+  }
+
   private Result execute(String layer, LayerStack.Effective effective, RuleTest test)
       throws Exception {
     Event event =
@@ -167,7 +187,7 @@ public final class RuleTestRunner {
             Optional.empty(),
             Optional.empty(),
             0,
-            test.eventData());
+            withDefaults(effective.ruleset(), test));
     Simulator.Run run;
     try (Simulator simulator =
         new Simulator(effective.ruleset(), catalog, compiler, test.mocks())) {

@@ -275,4 +275,58 @@ class RuleTestRunnerTest {
     assertThat(report.ok()).as(report.toString()).isTrue();
     assertThat(report.covered(Map.of("mail.file", "base"))).containsExactly("mail.file");
   }
+
+  @Test
+  void aCommandTestGetsTheDefaultsOfTheParametersItDoesNotGive() throws Exception {
+    write("base/ruleset.toml", "format_version = 1\nname = \"base\"\n");
+    write(
+        "base/rules/mail.star.toml",
+        """
+        id = "mail.star"
+        effect = "local-write"
+        needs = ["mail.move"]
+
+        [trigger]
+        kind = "command"
+        title = "Star"
+        [[trigger.param]]
+        name = "message"
+        type = "string"
+        [[trigger.param]]
+        name = "folder"
+        type = "string"
+        default = "Starred"
+
+        [[action]]
+        id = "move"
+        capability = "mail.move"
+        args = { message = { cel = "event.data.message" }, folder = { cel = "event.data.folder" } }
+        """);
+    write(
+        "base/tests/mail.star.toml",
+        """
+        format_version = 1
+        [[test]]
+        name = "uses the default"
+        [test.event]
+        type = "command.mail.star"
+        data = { message = "m1" }
+        [[test.call]]
+        capability = "mail.move"
+        args = { message = "m1", folder = "Starred" }
+
+        [[test]]
+        name = "a given value wins"
+        [test.event]
+        type = "command.mail.star"
+        data = { message = "m1", folder = "Other" }
+        [[test.call]]
+        capability = "mail.move"
+        args = { message = "m1", folder = "Other" }
+        """);
+
+    RuleTestRunner.Report report = run("base");
+
+    assertThat(report.ok()).as(report.toString()).isTrue();
+  }
 }

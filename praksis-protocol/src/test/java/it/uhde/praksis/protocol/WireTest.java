@@ -148,6 +148,34 @@ class WireTest {
                     0)),
             new Response.Verification(false, "t", 0, 0, 0, List.of(), null, null, null),
             new Response.ProposalList(List.of(proposal), null),
+            new Response.ResolvedView(
+                "id",
+                "t",
+                1,
+                List.of(),
+                List.of(
+                    new Response.ViewComponent(
+                        "button",
+                        null,
+                        null,
+                        "More",
+                        true,
+                        null,
+                        null,
+                        null,
+                        null,
+                        List.of(),
+                        null,
+                        null,
+                        null,
+                        null,
+                        new Response.ViewComponent.Select(
+                            "limit",
+                            200,
+                            List.of("message"),
+                            new Response.ViewComponent.Action(
+                                "mail.read", "mail.read", Map.of("message", "m"), null)))),
+                List.of()),
             new Response.ProposalDetail(
                 proposal,
                 new Response.Verification(

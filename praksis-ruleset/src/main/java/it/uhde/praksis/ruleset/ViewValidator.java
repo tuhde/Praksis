@@ -160,15 +160,33 @@ final class ViewValidator {
     c.select()
         .ifPresent(
             s -> {
+              String verb = c.type().equals("button") ? "sets" : "select sets";
               if (!viewParams.contains(s.param())) {
                 out.add(
                     new Problem(
-                        at, "select sets '" + s.param() + "', which the view does not declare"));
+                        at, verb + " '" + s.param() + "', which the view does not declare"));
               }
+              for (String name : s.clear()) {
+                if (!viewParams.contains(name)) {
+                  out.add(
+                      new Problem(
+                          at, "clear names '" + name + "', which the view does not declare"));
+                }
+              }
+              Scope selectScope = perRow ? row : screen;
               if (s.value() instanceof Arg.Expr e) {
-                expression(e.source(), row, at + " select", out);
+                expression(e.source(), selectScope, at + " " + verb, out);
               }
+              s.then()
+                  .ifPresent(a -> command(a.command(), a.args(), selectScope, ruleset, at, out));
             });
+    if (c.type().equals("input")
+        && c.values().get("param") instanceof Arg.Literal l
+        && !viewParams.contains(String.valueOf(l.value()))) {
+      out.add(
+          new Problem(
+              at, "input is bound to '" + l.value() + "', which the view does not declare"));
+    }
     if (c.type().equals("form")) {
       Arg command = c.values().get("command");
       String id = command instanceof Arg.Literal l ? String.valueOf(l.value()) : "";

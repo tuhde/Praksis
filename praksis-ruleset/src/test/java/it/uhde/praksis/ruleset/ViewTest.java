@@ -313,4 +313,83 @@ class ViewTest {
     assertThatThrownBy(() -> LayerStack.resolve(List.of(new Source("w", bad)), Map.of()))
         .hasMessageContaining("'width' must be a whole number of pixels");
   }
+
+  @Test
+  void aClickCanStartACommandAButtonCanOnlySetStateAndAnInputIsBoundToAParameter()
+      throws Exception {
+    String view =
+        """
+        title = "Reader"
+        [param.folder]
+        type = "string"
+        default = "INBOX"
+        [param.message]
+        type = "string"
+        default = ""
+        [param.limit]
+        type = "int"
+        default = 100
+        [param.query]
+        type = "string"
+        default = ""
+        [source.messages]
+        capability = "mail.list"
+        args = { folder = { cel = "view.folder" } }
+
+        [[component]]
+        type = "list"
+        items = { cel = "source.messages.items" }
+        title = { cel = "item.subject" }
+        select = { param = "message", value = { cel = "item.id" }, then = { command = "mail.file", args = { message = { cel = "item.id" } } } }
+
+        [[component]]
+        type = "button"
+        label = "More"
+        sets = { param = "limit", value = { cel = "view.limit + 100" } }
+
+        [[component]]
+        type = "input"
+        param = "query"
+        placeholder = "Search"
+        """;
+    assertThat(problems(view)).isEmpty();
+    Path l = layer("t" + System.nanoTime(), Map.of("mail.inbox", view), COMMAND);
+    View v = LayerStack.resolve(List.of(new Source("t", l)), Map.of()).ruleset().views().get(0);
+    View.Select select = v.components().get(0).select().get();
+    assertThat(select.then().get().command()).isEqualTo("mail.file");
+    assertThat(select.then().get().args()).containsKey("message");
+    View.Component more = v.components().get(1);
+    assertThat(more.select().get().param()).isEqualTo("limit");
+    assertThat(more.actions()).isEmpty();
+    assertThat(v.components().get(2).values()).containsKeys("param", "placeholder");
+
+    assertThat(
+            problems(
+                view.replace("then = { command = \"mail.file\"", "then = { command = \"nope\"")))
+        .anyMatch(p -> p.message().contains("there is no command 'nope'"));
+    assertThat(problems(view.replace("param = \"limit\"", "param = \"other\"")))
+        .anyMatch(p -> p.message().contains("sets 'other'"));
+    assertThat(problems(view.replace("param = \"query\"", "param = \"other\"")))
+        .anyMatch(p -> p.message().contains("input is bound to 'other'"));
+    assertThat(
+            problems(view.replace("clear", "clear").replace("then =", "clear = [\"zzz\"], then =")))
+        .anyMatch(p -> p.message().contains("clear names 'zzz'"));
+    Path neither =
+        layer(
+            "n" + System.nanoTime(),
+            Map.of(
+                "mail.inbox",
+                view.replace(
+                    "sets = { param = \"limit\", value = { cel = \"view.limit + 100\" } }", "")),
+            COMMAND);
+    assertThatThrownBy(() -> LayerStack.resolve(List.of(new Source("n", neither)), Map.of()))
+        .hasMessageContaining("missing 'command'");
+    Path bad =
+        layer(
+            "u" + System.nanoTime(),
+            Map.of("mail.inbox", view.replace("param = \"query\"\n", "")),
+            COMMAND);
+    assertThatThrownBy(() -> LayerStack.resolve(List.of(new Source("u", bad)), Map.of()))
+        .hasMessageContaining("missing 'param'");
+  }
 }

@@ -83,7 +83,7 @@ public record View(
   private static final Pattern NAME = Pattern.compile("[a-z][a-z0-9_]*");
   private static final Pattern HASH = Pattern.compile("sha256:[0-9a-f]{64}");
   private static final Set<String> TYPES =
-      Set.of("text", "table", "list", "detail", "button", "form", "row", "column");
+      Set.of("text", "table", "list", "detail", "button", "form", "input", "row", "column");
   private static final Set<String> FORMATS = Set.of("text", "datetime", "date", "number", "bytes");
   private static final Set<String> STYLES = Set.of("normal", "title", "muted", "code");
   private static final JsonMapper CANONICAL =
@@ -150,16 +150,22 @@ public record View(
   }
 
   /**
-   * Clicking a row sets the view parameter {@code param} to {@code value} and puts the parameters
-   * in {@code clear} back to their defaults (choosing another folder forgets the selected mail).
+   * Clicking a row, or pressing a button that has {@code sets}, sets the view parameter {@code
+   * param} to {@code value} and puts the parameters in {@code clear} back to their defaults
+   * (choosing another folder forgets the selected mail). If there is a {@code then}, that command
+   * is started as well (opening a mail marks it read).
    */
-  public record Select(String param, Arg value, List<String> clear) {
+  public record Select(String param, Arg value, List<String> clear, Optional<Action> then) {
     public Select {
       clear = List.copyOf(clear);
     }
 
+    public Select(String param, Arg value, List<String> clear) {
+      this(param, value, clear, Optional.empty());
+    }
+
     public Select(String param, Arg value) {
-      this(param, value, List.of());
+      this(param, value, List.of(), Optional.empty());
     }
   }
 
@@ -333,7 +339,7 @@ public record View(
         literal(t, "empty", null, values);
         columns.addAll(entries(t, "columns", Set.of("title", "value", "format"), true));
         rowActions(t, actions);
-        select = select(t);
+        select = select(t, "select");
       }
       case "list" -> {
         t.onlyKeys(
@@ -354,7 +360,7 @@ public record View(
         value(t, "subtitle", false, values);
         literal(t, "empty", null, values);
         rowActions(t, actions);
-        select = select(t);
+        select = select(t, "select");
       }
       case "detail" -> {
         t.onlyKeys(Set.of("type", "data", "fields", "visible", "width"));
@@ -363,10 +369,13 @@ public record View(
       }
       case "button" -> {
         t.onlyKeys(
-            Set.of("type", "label", "enabled", "command", "args", "confirm", "visible", "width"));
+            Set.of(
+                "type", "label", "enabled", "command", "args", "confirm", "sets", "visible",
+                "width"));
         literal(t, "label", null, values);
         value(t, "enabled", false, values);
-        Optional<String> command = t.string("command", true);
+        select = select(t, "sets");
+        Optional<String> command = t.string("command", select.isEmpty());
         command.ifPresent(
             c ->
                 actions.add(
@@ -375,6 +384,14 @@ public record View(
                         c,
                         args(t),
                         t.string("confirm", false))));
+      }
+      case "input" -> {
+        t.onlyKeys(Set.of("type", "param", "placeholder", "visible", "width"));
+        literal(t, "param", null, values);
+        literal(t, "placeholder", null, values);
+        if (!t.has("param")) {
+          t.problem("missing 'param'");
+        }
       }
       case "form" -> {
         t.onlyKeys(Set.of("type", "command", "defaults", "submit_label", "visible", "width"));
@@ -510,16 +527,26 @@ public record View(
     }
   }
 
-  private static Optional<Select> select(Table t) {
-    Optional<Table> s = t.table("select", false);
+  private static Optional<Select> select(Table t, String key) {
+    Optional<Table> s = t.table(key, false);
     if (s.isEmpty()) {
       return Optional.empty();
     }
-    s.get().onlyKeys(Set.of("param", "value", "clear"));
+    s.get().onlyKeys(Set.of("param", "value", "clear", "then"));
     Optional<String> param = s.get().string("param", true);
     Optional<Object> value = s.get().raw("value");
     if (value.isEmpty()) {
       s.get().problem("missing 'value'");
+    }
+    Optional<Action> then = Optional.empty();
+    Optional<Table> thenTable = s.get().table("then", false);
+    if (thenTable.isPresent()) {
+      Table th = thenTable.get();
+      th.onlyKeys(Set.of("command", "args"));
+      Optional<String> command = th.string("command", true);
+      if (command.isPresent()) {
+        then = Optional.of(new Action(command.get(), command.get(), args(th), Optional.empty()));
+      }
     }
     if (param.isEmpty() || value.isEmpty()) {
       return Optional.empty();
@@ -528,6 +555,7 @@ public record View(
         new Select(
             param.get(),
             RulesetLoader.arg(s.get(), "value", value.get()),
-            s.get().strings("clear")));
+            s.get().strings("clear"),
+            then));
   }
 }
