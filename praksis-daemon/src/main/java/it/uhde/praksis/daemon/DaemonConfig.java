@@ -43,6 +43,7 @@ import java.util.Set;
  * [[layer]]
  * name = "local"
  * path = "my-rules"            # a directory, read as it is and not pinned
+ * ai_maintained = true         # may an AI propose changes? true for a directory, false for git
  *
  * [shadow]                     # new and changed rules are observed before they run
  * enabled    = false           # off unless set
@@ -99,6 +100,11 @@ public record DaemonConfig(
           "param",
           "enabled_modules",
           "shadow");
+
+  /** The layers that an AI may propose changes to. */
+  public List<LayerConfig> aiMaintainedLayers() {
+    return layers.stream().filter(LayerConfig::aiMaintained).toList();
+  }
 
   /** The file that pins the commit of every git layer. */
   public Path rulesetLock() {

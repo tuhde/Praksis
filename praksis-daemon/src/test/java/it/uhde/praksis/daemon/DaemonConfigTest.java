@@ -117,6 +117,47 @@ class DaemonConfigTest {
   }
 
   @Test
+  void aLayerIsMaintainedByAnAiOnlyIfItIsADirectoryOrSaysSo() throws Exception {
+    Files.writeString(
+        home.resolve("praksis.toml"),
+        """
+        format_version = 1
+
+        [[layer]]
+        name = "mail"
+        git = "https://example.org/Praksis-Mail"
+        ref = "main"
+
+        [[layer]]
+        name = "mine"
+        git = "git@example.org:me/myPraksis.git"
+        ref = "main"
+        ai_maintained = true
+
+        [[layer]]
+        name = "local"
+        path = "my-rules"
+
+        [[layer]]
+        name = "frozen"
+        path = "frozen-rules"
+        ai_maintained = false
+        """);
+    DaemonConfig c = DaemonConfig.load(home);
+    assertThat(c.layers())
+        .extracting(LayerConfig::aiMaintained)
+        .containsExactly(false, true, true, false);
+    assertThat(c.aiMaintainedLayers())
+        .extracting(LayerConfig::name)
+        .containsExactly("mine", "local");
+
+    Files.writeString(
+        home.resolve("praksis.toml"),
+        "format_version = 1\n[[layer]]\nname = \"a\"\npath = \"p\"\nai_maintained = \"yes\"\n");
+    assertThatThrownBy(() -> DaemonConfig.load(home)).hasMessageContaining("ai_maintained");
+  }
+
+  @Test
   void reportsMistakesInLayers() throws Exception {
     Files.writeString(
         home.resolve("praksis.toml"),

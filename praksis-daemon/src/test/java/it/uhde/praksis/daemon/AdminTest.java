@@ -298,6 +298,37 @@ class AdminTest {
   }
 
   @Test
+  void theStatusSaysWhichLayersAnAiMayProposeChangesTo() throws Exception {
+    configure(
+        """
+        format_version = 1
+
+        [[layer]]
+        name = "mail"
+        git = "%s"
+        ref = "main"
+
+        [[layer]]
+        name = "mine"
+        git = "%s"
+        ref = "main"
+        ai_maintained = true
+        """
+            .formatted(MAIL_URL, MINE_URL));
+    String status = admin("layers", "status").out();
+    assertThat(status)
+        .contains("mail: " + MAIL_URL + " @ main - not pinned yet, run: praksis layers update\n")
+        .contains(
+            "mine: "
+                + MINE_URL
+                + " @ main - not pinned yet, run: praksis layers update [AI-maintained]");
+    assertThat(admin("layers", "update").exit()).isZero();
+    assertThat(admin("layers", "status").out().lines())
+        .anyMatch(l -> l.startsWith("mine:") && l.endsWith("[AI-maintained]"))
+        .noneMatch(l -> l.startsWith("mail:") && l.contains("AI-maintained"));
+  }
+
+  @Test
   void theFirstUpdatePinsEveryLayerAndTheDaemonThenNeedsNoNetwork() throws Exception {
     Result r = admin("layers", "update");
     assertThat(r.exit()).as(r.err()).isZero();

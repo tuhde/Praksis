@@ -113,13 +113,23 @@ final class Admin {
     }
     for (LayerConfig layer : config.layers()) {
       if (!layer.isGit()) {
-        out.println(layer.name() + ": directory " + layer.path().get() + " (not pinned)");
+        out.println(
+            layer.name()
+                + ": directory "
+                + layer.path().get()
+                + " (not pinned)"
+                + (layer.aiMaintained() ? " [AI-maintained]" : ""));
         continue;
       }
       var pin = pins.get(layer.name());
       String where = layer.git().get() + " @ " + layer.ref().get();
       if (pin == null) {
-        out.println(layer.name() + ": " + where + " - not pinned yet, run: praksis layers update");
+        out.println(
+            layer.name()
+                + ": "
+                + where
+                + " - not pinned yet, run: praksis layers update"
+                + (layer.aiMaintained() ? " [AI-maintained]" : ""));
       } else {
         boolean stale =
             !pin.git().equals(layer.git().get()) || !pin.ref().equals(layer.ref().get());
@@ -133,7 +143,8 @@ final class Admin {
                 + " - pinned to "
                 + Layers.abbreviate(pin.commit())
                 + (stale ? " (the configuration changed since, run: praksis layers update)" : "")
-                + (present ? "" : " (files not on disk, fetched when needed)"));
+                + (present ? "" : " (files not on disk, fetched when needed)")
+                + (layer.aiMaintained() ? " [AI-maintained]" : ""));
       }
     }
     return 0;

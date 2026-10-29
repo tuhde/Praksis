@@ -15,9 +15,17 @@ import java.util.regex.Pattern;
  * @param git the address of the repository, or empty
  * @param ref the branch or tag that {@code praksis layers update} follows, for a git layer
  * @param path the directory, for a path layer
+ * @param aiMaintained whether an AI may propose changes to this layer (as branches that the user
+ *     approves); {@code ai_maintained} in the file, by default true for a directory and false for a
+ *     git layer, which usually is somebody else's. For a layer that is not AI-maintained a change
+ *     can still be checked, but Praksis does not take proposals for it.
  */
 public record LayerConfig(
-    String name, Optional<String> git, Optional<String> ref, Optional<Path> path) {
+    String name,
+    Optional<String> git,
+    Optional<String> ref,
+    Optional<Path> path,
+    boolean aiMaintained) {
   private static final Pattern NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]*");
 
   /** True if the layer is pinned to a commit of a git repository. */
@@ -26,7 +34,7 @@ public record LayerConfig(
   }
 
   static Optional<LayerConfig> parse(Table t, Path home) {
-    t.onlyKeys(Set.of("name", "git", "ref", "path"));
+    t.onlyKeys(Set.of("name", "git", "ref", "path", "ai_maintained"));
     Optional<String> name = t.string("name", true);
     Optional<String> git = t.string("git", false);
     Optional<String> ref = t.string("ref", false);
@@ -47,6 +55,11 @@ public record LayerConfig(
       return Optional.empty();
     }
     return Optional.of(
-        new LayerConfig(name.get(), git, ref, path.map(p -> home.resolve(p).normalize())));
+        new LayerConfig(
+            name.get(),
+            git,
+            ref,
+            path.map(p -> home.resolve(p).normalize()),
+            t.bool("ai_maintained", path.isPresent())));
   }
 }
