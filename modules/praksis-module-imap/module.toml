@@ -2,7 +2,7 @@ format_version = 1
 name = "imap"
 version = "0.1.0"
 module = "it.uhde.praksis.module.imap"
-jdk_modules = ["java.desktop", "java.logging", "java.xml"]
+jdk_modules = ["java.desktop", "java.logging", "java.sql", "java.xml", "org.xerial.sqlitejdbc"]
 sources = ["imap.inbox"]
 
 [[capability]]
@@ -122,4 +122,13 @@ fields = [
   { name = "list_id", type = "string" },
   { name = "precedence", type = "string" },
   { name = "x_spam_flag", type = "string" },
+]
+
+[[event]]
+type = "mail.changed"
+fields = [
+  { name = "folder", type = "string", required = true },
+  { name = "added", type = "int", required = true },
+  { name = "removed", type = "int", required = true },
+  { name = "changed", type = "int", required = true },
 ]

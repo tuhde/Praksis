@@ -36,6 +36,7 @@ public final class ImapMove implements Capability {
 
   private ImapSettings settings;
   private Connection connection;
+  private HeaderCache cache;
 
   @Override
   public String name() {
@@ -56,9 +57,24 @@ public final class ImapMove implements Capability {
   }
 
   @Override
+  public synchronized void useDataDirectory(java.nio.file.Path directory) {
+    if (settings != null && settings.cache() && cache == null) {
+      try {
+        cache = HeaderCache.open(directory, settings);
+      } catch (java.sql.SQLException e) {
+        // moving works without the cache
+      }
+    }
+  }
+
+  @Override
   public synchronized void close() {
     if (connection != null) {
       connection.close();
+    }
+    if (cache != null) {
+      cache.release();
+      cache = null;
     }
   }
 
@@ -119,6 +135,10 @@ public final class ImapMove implements Capability {
         throw new CapabilityException(
             "the server supports neither MOVE nor UIDPLUS, so a mail cannot be moved safely",
             false);
+      }
+      if (cache != null) {
+        cache.remove(id.folder(), id.uid());
+        cache.stale(targetName);
       }
       // The server names the new place of the mail in its answer. Searching the folder for it
       // would read every mail of a folder that grows with each move.

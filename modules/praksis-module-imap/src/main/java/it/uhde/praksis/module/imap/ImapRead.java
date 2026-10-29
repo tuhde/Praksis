@@ -16,6 +16,7 @@ import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
 import jakarta.mail.internet.MimeUtility;
 import java.io.IOException;
+import java.sql.SQLException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -34,6 +35,7 @@ import org.eclipse.angus.mail.imap.IMAPStore;
  * stay unread, and content that could do something is never executed here.
  */
 public abstract class ImapRead implements Capability {
+  private static final System.Logger LOG = System.getLogger(ImapRead.class.getName());
   private static final int DEFAULT_LIMIT = 100;
   private static final int MAX_LIMIT = 1000;
 
@@ -52,6 +54,9 @@ public abstract class ImapRead implements Capability {
   /** Whether the call in progress is a dry run; set by {@link #invoke}, which is synchronized. */
   boolean dryRun;
 
+  /** The headers of the account, or null if there is no data directory or the cache is off. */
+  HeaderCache cache;
+
   @Override
   public void configure(Map<String, Object> config) throws CapabilityException {
     settings = ImapSettings.parse(config);
@@ -66,10 +71,47 @@ public abstract class ImapRead implements Capability {
   }
 
   @Override
+  public synchronized void useDataDirectory(java.nio.file.Path directory) {
+    if (settings != null && settings.cache() && cache == null) {
+      try {
+        cache = HeaderCache.open(directory, settings);
+      } catch (SQLException e) {
+        // reading works without the cache, only slower
+        LOG.log(System.Logger.Level.WARNING, "imap: no header cache: " + e.getMessage());
+      }
+    }
+  }
+
+  @Override
   public synchronized void close() {
     if (connection != null) {
       connection.close();
     }
+    if (cache != null) {
+      cache.release();
+      cache = null;
+    }
+  }
+
+  /**
+   * Brings a folder of the cache up to date unless it is trusted already.
+   *
+   * @return false if the folder does not exist
+   */
+  boolean refresh(IMAPFolder folder, String shown) throws MessagingException, SQLException {
+    if (cache.fresh(shown)) {
+      return true;
+    }
+    if (!folder.exists()) {
+      return false;
+    }
+    folder.open(Folder.READ_ONLY);
+    try {
+      cache.sync(folder, shown);
+    } finally {
+      folder.close(false);
+    }
+    return true;
   }
 
   @Override
@@ -80,15 +122,58 @@ public abstract class ImapRead implements Capability {
     }
     dryRun = context.dryRun();
     try {
+      if (cache != null) {
+        Map<String, Object> cached = fromCache(args, false);
+        if (cached != null) {
+          return cached;
+        }
+      }
       return read(connection.store(), args);
+    } catch (SQLException e) {
+      // a cache that fails is switched off; the call is answered by the server instead
+      LOG.log(System.Logger.Level.WARNING, "imap: header cache failed: " + e.getMessage());
+      cache.release();
+      cache = null;
+      return invoke(context, args);
+    } catch (CapabilityException e) {
+      // a connection that cannot be made is retryable; anything else is an answer to the call
+      Map<String, Object> offline = e.retryable() ? staleFromCache(args) : null;
+      if (offline != null) {
+        return offline;
+      }
+      throw e;
     } catch (MessagingException | IOException e) {
       connection.close(); // the next call opens a new connection
+      Map<String, Object> offline = staleFromCache(args);
+      if (offline != null) {
+        return offline;
+      }
       throw new CapabilityException("imap " + settings.account() + ": " + e.getMessage(), true, e);
     }
   }
 
+  /** What the cache says when the server cannot be asked, or null if it knows nothing. */
+  private Map<String, Object> staleFromCache(Map<String, Object> args) {
+    try {
+      return cache == null ? null : fromCache(args, true);
+    } catch (SQLException | CapabilityException e) {
+      return null;
+    }
+  }
+
+  /**
+   * The answer from the cache alone, without a connection, or null if the cache cannot give it.
+   *
+   * @param stale whether a folder that is not known to be up to date may be answered from, which is
+   *     what is done when the server cannot be reached
+   */
+  Map<String, Object> fromCache(Map<String, Object> args, boolean stale)
+      throws SQLException, CapabilityException {
+    return null;
+  }
+
   abstract Map<String, Object> read(IMAPStore store, Map<String, Object> args)
-      throws MessagingException, IOException, CapabilityException;
+      throws MessagingException, IOException, CapabilityException, SQLException;
 
   /** The folder name as a rule writes it: levels separated by {@code /}. */
   static String display(IMAPFolder folder) throws MessagingException {
@@ -111,6 +196,23 @@ public abstract class ImapRead implements Capability {
       return "mail.folders";
     }
 
+    /** The cached numbers, or the server's (one STATUS), which are then kept for a while. */
+    private HeaderCache.Counts counts(IMAPFolder folder, String shown) throws MessagingException {
+      try {
+        var known = cache.counts(shown);
+        if (known.isPresent()) {
+          return known.get();
+        }
+      } catch (SQLException e) {
+        return null;
+      }
+      var fetched =
+          new HeaderCache.Counts(
+              Math.max(0, folder.getMessageCount()), Math.max(0, folder.getUnreadMessageCount()));
+      cache.remember(shown, fetched);
+      return fetched;
+    }
+
     @Override
     Map<String, Object> read(IMAPStore store, Map<String, Object> args) throws MessagingException {
       List<Object> folders = new ArrayList<>();
@@ -121,9 +223,15 @@ public abstract class ImapRead implements Capability {
           continue;
         }
         Map<String, Object> entry = new LinkedHashMap<>();
-        entry.put("name", display(folder));
-        entry.put("unread", (long) Math.max(0, folder.getUnreadMessageCount()));
-        entry.put("total", (long) Math.max(0, folder.getMessageCount()));
+        String shown = display(folder);
+        HeaderCache.Counts counts = cache == null ? null : counts(folder, shown);
+        entry.put("name", shown);
+        entry.put(
+            "unread",
+            counts != null ? counts.unread() : (long) Math.max(0, folder.getUnreadMessageCount()));
+        entry.put(
+            "total",
+            counts != null ? counts.total() : (long) Math.max(0, folder.getMessageCount()));
         folders.add(entry);
       }
       folders.sort(
@@ -142,17 +250,36 @@ public abstract class ImapRead implements Capability {
   /** {@code mail.list}. */
   public static final class Listing extends ImapRead {
     @Override
+    Map<String, Object> fromCache(Map<String, Object> args, boolean stale)
+        throws SQLException, CapabilityException {
+      String shown = cache.shown((String) args.get("folder"));
+      if (stale ? cache.validity(shown) == null : !cache.fresh(shown)) {
+        return null;
+      }
+      long asked = args.get("limit") instanceof Number n ? n.longValue() : DEFAULT_LIMIT;
+      int limit = (int) Math.max(1, Math.min(asked, MAX_LIMIT));
+      int offset = args.get("offset") instanceof Number n ? (int) Math.max(0, n.longValue()) : 0;
+      String sort = args.get("sort") instanceof String t ? t : "time";
+      if (!List.of("time", "from", "subject", "size").contains(sort)) {
+        throw new CapabilityException("sort must be time, from, subject or size", false);
+      }
+      return Map.of(
+          "items",
+          new ArrayList<Object>(
+              cache.list(shown, sort, Boolean.TRUE.equals(args.get("reverse")), offset, limit)),
+          "count",
+          cache.total(shown));
+    }
+
+    @Override
     public String name() {
       return "mail.list";
     }
 
     @Override
     Map<String, Object> read(IMAPStore store, Map<String, Object> args)
-        throws MessagingException, CapabilityException {
+        throws MessagingException, CapabilityException, SQLException {
       IMAPFolder folder = (IMAPFolder) store.getFolder((String) args.get("folder"));
-      if (!folder.exists()) {
-        return Map.of("items", List.of(), "count", 0L);
-      }
       long asked = args.get("limit") instanceof Number n ? n.longValue() : DEFAULT_LIMIT;
       int limit = (int) Math.max(1, Math.min(asked, MAX_LIMIT));
       int offset = args.get("offset") instanceof Number n ? (int) Math.max(0, n.longValue()) : 0;
@@ -160,6 +287,20 @@ public abstract class ImapRead implements Capability {
       boolean reverse = Boolean.TRUE.equals(args.get("reverse"));
       if (!List.of("time", "from", "subject", "size").contains(sort)) {
         throw new CapabilityException("sort must be time, from, subject or size", false);
+      }
+      if (cache != null) {
+        String shown = display(folder);
+        if (!refresh(folder, shown)) {
+          return Map.of("items", List.of(), "count", 0L);
+        }
+        return Map.of(
+            "items",
+            new ArrayList<Object>(cache.list(shown, sort, reverse, offset, limit)),
+            "count",
+            cache.total(shown));
+      }
+      if (!folder.exists()) {
+        return Map.of("items", List.of(), "count", 0L);
       }
       folder.open(Folder.READ_ONLY);
       try {
@@ -276,12 +417,30 @@ public abstract class ImapRead implements Capability {
     }
 
     @Override
-    Map<String, Object> read(IMAPStore store, Map<String, Object> args)
-        throws MessagingException, CapabilityException {
-      IMAPFolder folder = (IMAPFolder) store.getFolder((String) args.get("folder"));
-      if (!folder.exists()) {
-        return Map.of("items", List.of(), "count", 0L);
+    Map<String, Object> fromCache(Map<String, Object> args, boolean stale)
+        throws SQLException, CapabilityException {
+      String query = (String) args.get("query");
+      String in = args.get("in") instanceof String t ? t : "all";
+      String shown = cache.shown((String) args.get("folder"));
+      // the sender and the subject are in the cache; the text of the mails is not
+      if (query.isEmpty()
+          || !(in.equals("from") || in.equals("subject"))
+          || (stale ? cache.validity(shown) == null : !cache.fresh(shown))) {
+        return null;
       }
+      long asked = args.get("limit") instanceof Number n ? n.longValue() : DEFAULT_LIMIT;
+      int limit = (int) Math.max(1, Math.min(asked, MAX_LIMIT));
+      return Map.of(
+          "items",
+          new ArrayList<Object>(cache.search(shown, query, in, limit)),
+          "count",
+          cache.searchCount(shown, query, in));
+    }
+
+    @Override
+    Map<String, Object> read(IMAPStore store, Map<String, Object> args)
+        throws MessagingException, CapabilityException, SQLException {
+      IMAPFolder folder = (IMAPFolder) store.getFolder((String) args.get("folder"));
       String query = (String) args.get("query");
       String in = args.get("in") instanceof String t ? t : "all";
       jakarta.mail.search.SearchTerm term =
@@ -301,6 +460,21 @@ public abstract class ImapRead implements Capability {
           };
       long asked = args.get("limit") instanceof Number n ? n.longValue() : DEFAULT_LIMIT;
       int limit = (int) Math.max(1, Math.min(asked, MAX_LIMIT));
+      if (cache != null && !query.isEmpty() && (in.equals("from") || in.equals("subject"))) {
+        // the sender and the subject are in the cache; the text of the mails is not
+        String shown = display(folder);
+        if (!refresh(folder, shown)) {
+          return Map.of("items", List.of(), "count", 0L);
+        }
+        return Map.of(
+            "items",
+            new ArrayList<Object>(cache.search(shown, query, in, limit)),
+            "count",
+            cache.searchCount(shown, query, in));
+      }
+      if (!folder.exists()) {
+        return Map.of("items", List.of(), "count", 0L);
+      }
       folder.open(Folder.READ_ONLY);
       try {
         Message[] hits = query.isEmpty() ? folder.getMessages() : folder.search(term);

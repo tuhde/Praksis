@@ -55,6 +55,34 @@ public final class LoadedModules implements AutoCloseable {
     sources.forEach(source -> source.useCredentials(perComponent.apply(source.name())));
   }
 
+  /**
+   * Gives every capability and event source the directory of its module below {@code root} ({@code
+   * root/<module name>}), which is made if it is missing. A module that cannot be given a directory
+   * is left without one and told nothing: it has to work without, which is the default.
+   */
+  public void useDataDirectory(java.nio.file.Path root) {
+    for (ModuleDescriptor module : descriptors) {
+      java.nio.file.Path directory = root.resolve(module.name());
+      try {
+        java.nio.file.Files.createDirectories(directory);
+      } catch (java.io.IOException e) {
+        System.err.println("praksis: no data directory for module " + module.name() + ": " + e);
+        continue;
+      }
+      for (var capability : module.capabilities()) {
+        Capability part = capabilities.get(capability.name());
+        if (part != null) {
+          part.useDataDirectory(directory);
+        }
+      }
+      for (String name : module.sources()) {
+        sources.stream()
+            .filter(source -> source.name().equals(name))
+            .forEach(source -> source.useDataDirectory(directory));
+      }
+    }
+  }
+
   /** Starts all event sources. If one fails, the ones already started are stopped again. */
   public synchronized void startSources(EventSink sink) throws CapabilityException {
     try {

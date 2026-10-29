@@ -53,11 +53,16 @@ public abstract class ImapEdit extends ImapRead {
         throw new CapabilityException("mail not found: it is not in " + id.folder(), false);
       }
       if (!dryRun) {
-        if (args.get("seen") instanceof Boolean on) {
-          message.setFlag(Flags.Flag.SEEN, on);
+        Boolean seen = args.get("seen") instanceof Boolean on ? on : null;
+        Boolean flagged = args.get("flagged") instanceof Boolean on ? on : null;
+        if (seen != null) {
+          message.setFlag(Flags.Flag.SEEN, seen);
         }
-        if (args.get("flagged") instanceof Boolean on) {
-          message.setFlag(Flags.Flag.FLAGGED, on);
+        if (flagged != null) {
+          message.setFlag(Flags.Flag.FLAGGED, flagged);
+        }
+        if (cache != null) {
+          cache.flags(id.folder(), id.uid(), seen, flagged);
         }
       }
       return Map.of("message", id.encode());
@@ -89,6 +94,9 @@ public abstract class ImapEdit extends ImapRead {
       if (!dryRun) {
         message.setFlag(Flags.Flag.DELETED, true);
         folder.expunge(new Message[] {message});
+        if (cache != null) {
+          cache.remove(id.folder(), id.uid());
+        }
       }
       return Map.of("deleted", true);
     }

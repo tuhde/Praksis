@@ -23,6 +23,14 @@ public interface EventSource {
    */
   default void useCredentials(Credentials credentials) {}
 
+  /**
+   * Hands over the directory this module may keep its own files in, such as a cache, once, before
+   * any other method but {@link #configure}. It is private to the module (every module of the
+   * daemon has its own), it exists, and it is not backed up or synced by Praksis: whatever is kept
+   * there must be possible to rebuild. The default does nothing.
+   */
+  default void useDataDirectory(java.nio.file.Path directory) {}
+
   /** The name of this source, unique across modules. Matches an entry in the module descriptor. */
   String name();
 

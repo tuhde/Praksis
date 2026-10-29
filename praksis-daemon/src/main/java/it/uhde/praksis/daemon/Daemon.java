@@ -122,6 +122,7 @@ public final class Daemon implements AutoCloseable {
       auditPolicy(config, store);
       auditRules(effective, layers, compiler, modules.catalog(), store, Admin.trust(config));
       modules.useCredentials(new CredentialResolver(access::policy, store, clock)::forComponent);
+      modules.useDataDirectory(config.dataDirectory());
       approvals = new Approvals(config, store, access, modules.catalog(), clock);
       Map<String, Capability> capabilities = modules.capabilities();
       shadows = new Shadows(config, store, clock, effective);

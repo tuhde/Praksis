@@ -26,6 +26,14 @@ public interface Capability {
   default void useCredentials(Credentials credentials) {}
 
   /**
+   * Hands over the directory this module may keep its own files in, such as a cache, once, before
+   * any other method but {@link #configure}. It is private to the module (every module of the
+   * daemon has its own), it exists, and it is not backed up or synced by Praksis: whatever is kept
+   * there must be possible to rebuild. The default does nothing.
+   */
+  default void useDataDirectory(java.nio.file.Path directory) {}
+
+  /**
    * Releases what the implementation holds, e.g. connections and their threads. Called once when
    * the daemon shuts down, after the last call.
    */

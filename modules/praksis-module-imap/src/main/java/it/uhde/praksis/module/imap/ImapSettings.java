@@ -27,6 +27,8 @@ import java.util.Set;
  * poll_interval_ms = 30000
  * timeout_ms       = 60000
  * ca_file          = "/path/ca.pem"   # an extra certificate authority to trust
+ * cache            = true       # keep the headers of the folders in a local database (default)
+ * cache_max_age_ms = 60000      # how old a folder in the cache may be before a read asks the server
  * </pre>
  *
  * @param host the server
@@ -40,6 +42,9 @@ import java.util.Set;
  * @param pollInterval how often the source looks for new mail
  * @param timeout the longest the server may stay silent
  * @param caFile a PEM file with certificates to trust in addition to the system's
+ * @param cache whether the headers are kept in a local database; it is used only if the daemon
+ *     gives the module a directory
+ * @param cacheMaxAge how old the cached state of a folder that no connection watches may be
  */
 record ImapSettings(
     String host,
@@ -52,7 +57,9 @@ record ImapSettings(
     Initial initial,
     Duration pollInterval,
     Duration timeout,
-    Optional<Path> caFile) {
+    Optional<Path> caFile,
+    boolean cache,
+    Duration cacheMaxAge) {
   enum Security {
     SSL,
     STARTTLS,
@@ -80,7 +87,9 @@ record ImapSettings(
           "initial",
           "poll_interval_ms",
           "timeout_ms",
-          "ca_file");
+          "ca_file",
+          "cache",
+          "cache_max_age_ms");
 
   static ImapSettings parse(Map<String, Object> settings) throws CapabilityException {
     for (String key : settings.keySet()) {
@@ -138,7 +147,21 @@ record ImapSettings(
         Initial.valueOf(choice(settings, "initial", "unseen", Initial.values())),
         Duration.ofMillis(number(settings, "poll_interval_ms", 30_000, 1, Long.MAX_VALUE)),
         Duration.ofMillis(number(settings, "timeout_ms", 60_000, 1, Long.MAX_VALUE)),
-        ca);
+        ca,
+        flag(settings, "cache", true),
+        Duration.ofMillis(number(settings, "cache_max_age_ms", 60_000, 0, Long.MAX_VALUE)));
+  }
+
+  private static boolean flag(Map<String, Object> settings, String key, boolean fallback)
+      throws CapabilityException {
+    Object v = settings.get(key);
+    if (v == null) {
+      return fallback;
+    }
+    if (!(v instanceof Boolean b)) {
+      throw new CapabilityException("imap setting '" + key + "' must be true or false", false);
+    }
+    return b;
   }
 
   /** The login on this server, for keys and messages. */

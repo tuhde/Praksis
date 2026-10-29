@@ -25,8 +25,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.eclipse.angus.mail.imap.IMAPFolder;
 
 /**
@@ -42,6 +44,16 @@ import org.eclipse.angus.mail.imap.IMAPFolder;
 public final class ImapSource implements EventSource {
   private static final System.Logger LOG = System.getLogger(ImapSource.class.getName());
   private static final int BATCH = 200;
+
+  /**
+   * Flags can change without a notice the poll can see, so the cache is synced this often. Less
+   * than the time a watched folder is trusted ({@link HeaderCache#WATCHED_MAX_AGE_MILLIS}).
+   */
+  private static final long FULL_SYNC_MILLIS = 4 * 60 * 1000;
+
+  /** How long the watcher waits before it connects again. */
+  private static final long RECONNECT_MILLIS = 5000;
+
   private static final List<String> HEADERS =
       List.of(
           "From",
@@ -61,6 +73,20 @@ public final class ImapSource implements EventSource {
   private long validity = -1;
   private long lastUid = -1;
 
+  /** The header cache of the account, if the daemon gave the module a directory. */
+  private HeaderCache cache;
+
+  /** Set when the server said something changed: the next poll syncs the cache whatever it sees. */
+  private final AtomicBoolean changed = new AtomicBoolean();
+
+  private final AtomicBoolean pollQueued = new AtomicBoolean();
+  private volatile boolean stopping;
+  private volatile Connection idleConnection;
+  private Thread watcher;
+  private long syncedNext = -1;
+  private int syncedTotal = -1;
+  private long syncedAt;
+
   @Override
   public String name() {
     return "imap.inbox";
@@ -74,6 +100,17 @@ public final class ImapSource implements EventSource {
   @Override
   public synchronized void useCredentials(Credentials credentials) {
     this.credentials = credentials;
+  }
+
+  @Override
+  public synchronized void useDataDirectory(java.nio.file.Path directory) {
+    if (settings != null && settings.cache() && cache == null) {
+      try {
+        cache = HeaderCache.open(directory, settings);
+      } catch (java.sql.SQLException e) {
+        LOG.log(System.Logger.Level.WARNING, "imap: no header cache: " + e.getMessage());
+      }
+    }
   }
 
   @Override
@@ -93,8 +130,12 @@ public final class ImapSource implements EventSource {
               t.setDaemon(true);
               return t;
             });
+    stopping = false;
     poller.scheduleWithFixedDelay(
         () -> poll(sink), 0, settings.pollInterval().toMillis(), TimeUnit.MILLISECONDS);
+    watcher = new Thread(() -> watch(sink), "imap-idle");
+    watcher.setDaemon(true);
+    watcher.start();
   }
 
   @Override
@@ -102,14 +143,107 @@ public final class ImapSource implements EventSource {
     if (poller == null) {
       return;
     }
+    stopping = true;
+    Connection idle = idleConnection;
+    if (idle != null) {
+      idle.close(); // ends the IDLE that the watcher is waiting in
+    }
+    watcher.interrupt();
     poller.shutdownNow();
     try {
       poller.awaitTermination(5, TimeUnit.SECONDS);
+      watcher.join(5000);
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
     }
     poller = null;
+    watcher = null;
     connection.close();
+    if (cache != null) {
+      cache.release();
+      cache = null;
+    }
+  }
+
+  /**
+   * Waits on the server with IDLE and wakes the poll when it says something changed, so that new
+   * mail and changes are seen at once instead of at the next poll. The poll stays as the fallback:
+   * a server without IDLE, a connection that broke or one that went silent only make it slower.
+   */
+  private void watch(EventSink sink) {
+    while (!stopping) {
+      Connection own = new Connection(settings);
+      own.useCredentials(credentials);
+      idleConnection = own;
+      String shown = null;
+      try {
+        var store = own.store();
+        if (!store.hasCapability("IDLE")) {
+          LOG.log(
+              System.Logger.Level.INFO,
+              "imap " + settings.account() + ": the server has no IDLE, polling only");
+          return;
+        }
+        IMAPFolder folder = (IMAPFolder) store.getFolder(settings.folder());
+        folder.open(Folder.READ_ONLY);
+        shown = ImapRead.display(folder);
+        folder.addMessageCountListener(
+            new jakarta.mail.event.MessageCountAdapter() {
+              @Override
+              public void messagesAdded(jakarta.mail.event.MessageCountEvent e) {
+                wake(sink);
+              }
+
+              @Override
+              public void messagesRemoved(jakarta.mail.event.MessageCountEvent e) {
+                wake(sink);
+              }
+            });
+        folder.addMessageChangedListener(e -> wake(sink));
+        wake(sink); // what happened while there was no connection
+        HeaderCache c = cache;
+        if (c != null) {
+          c.watching(shown, true);
+        }
+        while (!stopping) {
+          folder.idle();
+        }
+      } catch (MessagingException | CapabilityException | RuntimeException e) {
+        if (!stopping) {
+          LOG.log(
+              System.Logger.Level.WARNING,
+              "imap " + settings.account() + ": waiting for news failed: " + e.getMessage());
+        }
+      } finally {
+        HeaderCache c = cache;
+        if (c != null && shown != null) {
+          c.watching(shown, false);
+        }
+        own.close();
+      }
+      try {
+        Thread.sleep(RECONNECT_MILLIS);
+      } catch (InterruptedException e) {
+        return;
+      }
+    }
+  }
+
+  /** The server reported a change: poll now, once, however many reports there are. */
+  private void wake(EventSink sink) {
+    changed.set(true);
+    ScheduledExecutorService executor = poller;
+    if (executor != null && pollQueued.compareAndSet(false, true)) {
+      try {
+        executor.execute(
+            () -> {
+              pollQueued.set(false);
+              poll(sink);
+            });
+      } catch (RejectedExecutionException e) {
+        pollQueued.set(false); // stopping
+      }
+    }
   }
 
   private void poll(EventSink sink) {
@@ -118,6 +252,7 @@ public final class ImapSource implements EventSource {
       folder.open(Folder.READ_ONLY);
       try {
         announceNew(folder, sink);
+        syncCache(folder, sink);
       } finally {
         try {
           folder.close(false);
@@ -130,6 +265,61 @@ public final class ImapSource implements EventSource {
       LOG.log(System.Logger.Level.WARNING, "imap " + settings.account() + ": " + e.getMessage());
       connection.close();
     }
+  }
+
+  /**
+   * Brings the cache of the folder up to date when something shows that it changed: the server said
+   * so, the number of mails or the next UID moved, or it was not done for a while (flags change
+   * without either). Announces what changed as {@code mail.changed}.
+   */
+  private void syncCache(IMAPFolder folder, EventSink sink) throws MessagingException {
+    HeaderCache c = cache;
+    if (c == null) {
+      return;
+    }
+    long next = folder.getUIDNext();
+    int total = folder.getMessageCount();
+    long now = System.currentTimeMillis();
+    boolean due =
+        changed.getAndSet(false)
+            || next != syncedNext
+            || total != syncedTotal
+            || now - syncedAt > FULL_SYNC_MILLIS;
+    if (!due) {
+      return;
+    }
+    String shown = ImapRead.display(folder);
+    try {
+      HeaderCache.Change change = c.sync(folder, shown);
+      syncedNext = next;
+      syncedTotal = total;
+      syncedAt = now;
+      if (change.any()) {
+        sink.accept(changedEvent(shown, change));
+      }
+    } catch (java.sql.SQLException e) {
+      LOG.log(System.Logger.Level.WARNING, "imap: header cache failed: " + e.getMessage());
+      cache = null;
+      c.release();
+    }
+  }
+
+  private Event changedEvent(String folder, HeaderCache.Change change) {
+    Map<String, Object> data = new HashMap<>();
+    data.put("folder", folder);
+    data.put("added", (long) change.added());
+    data.put("removed", (long) change.removed());
+    data.put("changed", (long) change.changed());
+    return new Event(
+        UUID.randomUUID().toString(),
+        "mail.changed",
+        "imap",
+        Instant.now(),
+        "mail:imap:" + settings.account() + ":" + folder,
+        Optional.empty(),
+        Optional.empty(),
+        0,
+        data);
   }
 
   private void announceNew(IMAPFolder folder, EventSink sink) throws MessagingException {

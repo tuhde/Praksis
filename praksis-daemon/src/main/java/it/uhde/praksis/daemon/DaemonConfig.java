@@ -133,6 +133,11 @@ public record DaemonConfig(
     return home.resolve("layers");
   }
 
+  /** Where the modules keep their own files: {@code <home>/data/<module>}. */
+  public Path dataDirectory() {
+    return home.resolve("data");
+  }
+
   /** The socket of the daemon with this home directory. */
   public Path socket() {
     return home.resolve("praksis.sock");

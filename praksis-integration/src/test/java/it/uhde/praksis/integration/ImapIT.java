@@ -127,6 +127,8 @@ class ImapIT {
       // mail that arrives later is handled too
       server.deliver("later");
       Harness.await("the later mail to be archived", () -> server.count("Archive") == 6);
+      // the module keeps the headers of the account in a directory of its own in the home
+      assertThat(h.home.resolve("data/imap/me@127.0.0.1.cache.db")).isRegularFile();
       java.nio.file.Path status =
           java.nio.file.Path.of("/proc", String.valueOf(daemon.pid()), "status");
       if (Files.exists(status)) {

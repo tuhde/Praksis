@@ -8,6 +8,8 @@ module it.uhde.praksis.module.imap {
   requires jakarta.mail;
   requires org.eclipse.angus.mail;
   requires java.logging;
+  requires java.sql;
+  requires org.xerial.sqlitejdbc;
 
   provides it.uhde.praksis.capability.Capability with
       it.uhde.praksis.module.imap.ImapEdit.Delete,

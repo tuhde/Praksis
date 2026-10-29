@@ -29,6 +29,13 @@
       <artifactId>angus-mail</artifactId>
     </dependency>
 
+    <!-- The header cache; the driver (and its native library) is the engine's, in the boot layer. -->
+    <dependency>
+      <groupId>org.xerial</groupId>
+      <artifactId>sqlite-jdbc</artifactId>
+      <scope>provided</scope>
+    </dependency>
+
     <!-- Tests load the built module the way the daemon does. -->
     <dependency>
       <groupId>it.uhde</groupId>
