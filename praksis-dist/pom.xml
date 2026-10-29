@@ -65,6 +65,18 @@
       <version>${project.version}</version>
       <scope>runtime</scope>
     </dependency>
+    <!-- The HTML sanitizer and jsoup travel in the directories of the modules that use them. -->
+    <dependency>
+      <groupId>it.uhde</groupId>
+      <artifactId>praksis-mail-html</artifactId>
+      <version>${project.version}</version>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.jsoup</groupId>
+      <artifactId>jsoup</artifactId>
+      <scope>runtime</scope>
+    </dependency>
     <!-- Like the IMAP module: its Angus Mail jars go to its own directory. -->
     <dependency>
       <groupId>it.uhde</groupId>
@@ -89,7 +101,7 @@
             <configuration>
               <outputDirectory>${project.build.directory}/mp</outputDirectory>
               <includeScope>runtime</includeScope>
-              <excludeArtifactIds>praksis-expression-cel,praksis-module-maildir,praksis-module-imap,praksis-module-smtp,angus-mail,jakarta.mail-api,jakarta.activation-api,angus-activation</excludeArtifactIds>
+              <excludeArtifactIds>praksis-expression-cel,praksis-module-maildir,praksis-module-imap,praksis-module-smtp,praksis-mail-html,jsoup,angus-mail,jakarta.mail-api,jakarta.activation-api,angus-activation</excludeArtifactIds>
             </configuration>
           </execution>
           <execution>
@@ -101,7 +113,7 @@
             <configuration>
               <outputDirectory>${project.build.directory}/imap</outputDirectory>
               <includeScope>runtime</includeScope>
-              <includeArtifactIds>praksis-module-imap,angus-mail,jakarta.mail-api,jakarta.activation-api,angus-activation</includeArtifactIds>
+              <includeArtifactIds>praksis-module-imap,praksis-mail-html,jsoup,angus-mail,jakarta.mail-api,jakarta.activation-api,angus-activation</includeArtifactIds>
             </configuration>
           </execution>
           <execution>
@@ -117,6 +129,18 @@
             </configuration>
           </execution>
           <execution>
+            <id>maildir-module</id>
+            <phase>package</phase>
+            <goals>
+              <goal>copy-dependencies</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/maildir</outputDirectory>
+              <includeScope>runtime</includeScope>
+              <includeArtifactIds>praksis-module-maildir,praksis-mail-html,jsoup</includeArtifactIds>
+            </configuration>
+          </execution>
+          <execution>
             <id>loaded-from-disk</id>
             <phase>package</phase>
             <goals>
@@ -124,7 +148,7 @@
             </goals>
             <configuration>
               <outputDirectory>${project.build.directory}/disk</outputDirectory>
-              <includeArtifactIds>praksis-expression-cel,praksis-module-maildir</includeArtifactIds>
+              <includeArtifactIds>praksis-expression-cel</includeArtifactIds>
             </configuration>
           </execution>
         </executions>
@@ -169,7 +193,7 @@
                 </copy>
                 <mkdir dir="${image.dir}/lib/praksis/modules/maildir"/>
                 <copy todir="${image.dir}/lib/praksis/modules/maildir">
-                  <fileset dir="${project.build.directory}/disk" includes="praksis-module-maildir-*.jar"/>
+                  <fileset dir="${project.build.directory}/maildir" includes="*.jar"/>
                   <fileset dir="${project.basedir}/../modules/praksis-module-maildir" includes="module.toml"/>
                 </copy>
                 <mkdir dir="${image.dir}/lib/praksis/modules/imap"/>

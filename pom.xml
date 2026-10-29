@@ -40,6 +40,7 @@
     <module>praksis-cli</module>
     <module>praksis-dist</module>
     <module>praksis-integration</module>
+    <module>modules/praksis-mail-html</module>
     <module>modules/praksis-module-maildir</module>
     <module>modules/praksis-module-imap</module>
     <module>modules/praksis-module-smtp</module>
@@ -58,6 +59,7 @@
     <picocli.version>4.7.7</picocli.version>
     <sqlite-jdbc.version>3.53.4.0</sqlite-jdbc.version>
     <angus-mail.version>2.0.5</angus-mail.version>
+    <jsoup.version>1.22.1</jsoup.version>
     <greenmail.version>2.1.4</greenmail.version>
 
     <!-- plugins -->
@@ -109,6 +111,11 @@
         <groupId>org.eclipse.angus</groupId>
         <artifactId>angus-mail</artifactId>
         <version>${angus-mail.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.jsoup</groupId>
+        <artifactId>jsoup</artifactId>
+        <version>${jsoup.version}</version>
       </dependency>
       <dependency>
         <groupId>com.icegreen</groupId>

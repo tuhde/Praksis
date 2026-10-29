@@ -23,6 +23,7 @@ class ModuleDescriptorTest {
     Path moduleDir = Files.createDirectories(modules.resolve("maildir"));
     Files.copy(Path.of("module.toml"), moduleDir.resolve("module.toml"));
     Jars.pack(classes, moduleDir.resolve("praksis-module-maildir.jar"));
+    Jars.copyLibraries(moduleDir);
     Path lock = dir.resolve("modules.lock");
     ModuleLoader.lock(modules, lock);
 

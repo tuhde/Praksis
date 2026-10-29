@@ -83,7 +83,17 @@ public record View(
   private static final Pattern NAME = Pattern.compile("[a-z][a-z0-9_]*");
   private static final Pattern HASH = Pattern.compile("sha256:[0-9a-f]{64}");
   private static final Set<String> TYPES =
-      Set.of("text", "table", "list", "detail", "button", "form", "input", "row", "column");
+      Set.of(
+          "text",
+          "table",
+          "list",
+          "detail",
+          "button",
+          "form",
+          "input",
+          "richtext",
+          "row",
+          "column");
   private static final Set<String> FORMATS = Set.of("text", "datetime", "date", "number", "bytes");
   private static final Set<String> STYLES = Set.of("normal", "title", "muted", "code");
   private static final JsonMapper CANONICAL =
@@ -141,10 +151,33 @@ public record View(
     }
   }
 
-  /** A command that a person can start from the view, with arguments from the view. */
+  /**
+   * Something a person can start from the view: a command with arguments from the view, or the
+   * download of a file. A download reads one capability (read-only, under the grants of the layer
+   * that owns the view) and hands the {@code content} it answers with to the person, who chooses
+   * where to save it. Nothing is opened or run.
+   */
   public record Action(
-      String label, String command, Map<String, Arg> args, Optional<String> confirm) {
+      String label,
+      String command,
+      Map<String, Arg> args,
+      Optional<String> confirm,
+      Optional<Download> download) {
     public Action {
+      args = Map.copyOf(args);
+    }
+
+    public Action(String label, String command, Map<String, Arg> args, Optional<String> confirm) {
+      this(label, command, args, confirm, Optional.empty());
+    }
+  }
+
+  /**
+   * A file to download: the capability to call (it must answer with {@code content}, bytes), its
+   * arguments, and the suggested name of the file.
+   */
+  public record Download(String capability, Map<String, Arg> args, Arg filename) {
+    public Download {
       args = Map.copyOf(args);
     }
   }
@@ -370,20 +403,48 @@ public record View(
       case "button" -> {
         t.onlyKeys(
             Set.of(
-                "type", "label", "enabled", "command", "args", "confirm", "sets", "visible",
+                "type",
+                "label",
+                "enabled",
+                "command",
+                "args",
+                "confirm",
+                "sets",
+                "download",
+                "visible",
                 "width"));
         literal(t, "label", null, values);
         value(t, "enabled", false, values);
         select = select(t, "sets");
-        Optional<String> command = t.string("command", select.isEmpty());
-        command.ifPresent(
-            c ->
-                actions.add(
-                    new Action(
-                        t.string("label", false).orElse(c),
-                        c,
-                        args(t),
-                        t.string("confirm", false))));
+        Optional<Download> download = download(t);
+        if (download.isPresent()) {
+          if (t.has("command")) {
+            t.problem("a button starts a command or downloads a file, not both");
+          }
+          actions.add(
+              new Action(
+                  t.string("label", false).orElse("Save"),
+                  "",
+                  Map.of(),
+                  t.string("confirm", false),
+                  download));
+        } else {
+          Optional<String> command = t.string("command", select.isEmpty());
+          command.ifPresent(
+              c ->
+                  actions.add(
+                      new Action(
+                          t.string("label", false).orElse(c),
+                          c,
+                          args(t),
+                          t.string("confirm", false))));
+        }
+      }
+      case "richtext" -> {
+        t.onlyKeys(Set.of("type", "blocks", "blocked", "images_param", "visible", "width"));
+        value(t, "blocks", true, values);
+        value(t, "blocked", false, values);
+        literal(t, "images_param", null, values);
       }
       case "input" -> {
         t.onlyKeys(Set.of("type", "param", "placeholder", "visible", "width"));
@@ -518,13 +579,44 @@ public record View(
 
   private static void rowActions(Table t, List<Action> out) {
     for (Table a : t.tables("row_action")) {
-      a.onlyKeys(Set.of("label", "command", "args", "confirm"));
+      a.onlyKeys(Set.of("label", "command", "args", "confirm", "download"));
       Optional<String> label = a.string("label", true);
+      Optional<Download> download = download(a);
+      if (download.isPresent()) {
+        if (a.has("command")) {
+          a.problem("an action starts a command or downloads a file, not both");
+        }
+        label.ifPresent(
+            l -> out.add(new Action(l, "", Map.of(), a.string("confirm", false), download)));
+        continue;
+      }
       Optional<String> command = a.string("command", true);
       if (label.isPresent() && command.isPresent()) {
         out.add(new Action(label.get(), command.get(), args(a), a.string("confirm", false)));
       }
     }
+  }
+
+  /** The {@code download = { capability, args, filename }} of an action, if it has one. */
+  private static Optional<Download> download(Table t) {
+    Optional<Table> d = t.table("download", false);
+    if (d.isEmpty()) {
+      return Optional.empty();
+    }
+    d.get().onlyKeys(Set.of("capability", "args", "filename"));
+    Optional<String> capability = d.get().string("capability", true);
+    Optional<Object> filename = d.get().raw("filename");
+    if (filename.isEmpty()) {
+      d.get().problem("missing 'filename'");
+    }
+    if (capability.isEmpty() || filename.isEmpty()) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        new Download(
+            capability.get(),
+            args(d.get()),
+            RulesetLoader.arg(d.get(), "filename", filename.get())));
   }
 
   private static Optional<Select> select(Table t, String key) {

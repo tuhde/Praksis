@@ -4,6 +4,7 @@ package it.uhde.praksis.module.maildir;
 import it.uhde.praksis.capability.Capability;
 import it.uhde.praksis.capability.CapabilityContext;
 import it.uhde.praksis.capability.CapabilityException;
+import it.uhde.praksis.mail.html.Sanitizer;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -16,7 +17,6 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * Reads one mail for showing: the headers a reader needs, the plain text, the HTML as text (it is
@@ -44,8 +44,9 @@ public final class MailGet implements Capability {
     if (settings == null) {
       throw new CapabilityException("mail.get is not configured", false);
     }
-    Path file = Path.of((String) args.get("message")).toAbsolutePath().normalize();
-    inside(file);
+    // the id may be from before the mail was marked, which renames the file
+    Path file = MailFiles.resolve(settings, (String) args.get("message"));
+    boolean images = Boolean.TRUE.equals(args.get("images"));
     try {
       byte[] bytes;
       try (InputStream in = Files.newInputStream(file)) {
@@ -66,6 +67,9 @@ public final class MailGet implements Capability {
       out.put("message_id", headers.getOrDefault("message-id", ""));
       out.put("text", body.text());
       out.put("html", body.html());
+      Sanitizer.Result safe = Sanitizer.sanitize(body.html(), images);
+      out.put("blocks", safe.blocks());
+      out.put("blocked", (long) safe.blockedImages());
       List<Object> attachments = new ArrayList<>();
       for (MailBody.Attachment a : body.attachments()) {
         Map<String, Object> m = new LinkedHashMap<>();
@@ -94,22 +98,6 @@ public final class MailGet implements Capability {
       } catch (IOException ex) {
         return Instant.EPOCH;
       }
-    }
-  }
-
-  /** Only a file directly in {@code new} or {@code cur} of a folder of the root. */
-  private void inside(Path file) throws CapabilityException {
-    Path dir = file.getParent();
-    Path folder = dir == null ? null : dir.getParent();
-    boolean mailDir = dir != null && Set.of("new", "cur").contains(dir.getFileName().toString());
-    boolean inRoot =
-        folder != null
-            && (folder.equals(settings.root())
-                || (settings.root().equals(folder.getParent())
-                    && folder.getFileName().toString().startsWith(".")));
-    if (!mailDir || !inRoot) {
-      throw new CapabilityException(
-          "path " + file + " is not a mail in the Maildir " + settings.root(), false);
     }
   }
 }

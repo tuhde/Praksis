@@ -87,7 +87,9 @@ class WireTest {
             new Request.RunCommand(
                 "mail.file", Map.of("folder", "Archive", "n", 3), "praksis-desktop"),
             new Request.RunCommand("mail.file", null, null),
-            new Request.Outcome("e1"))) {
+            new Request.Outcome("e1"),
+            new Request.Fetch("mail.reader", "mail.attachment", Map.of("name", "a.pdf"), "a.pdf"),
+            new Request.Fetch("v", "c", null, null))) {
       assertThat(Wire.decodeRequest(Wire.encode(r))).isEqualTo(r);
     }
     var finding = new Response.Verification.Finding("ERROR", "test", "x", "y");
@@ -148,6 +150,76 @@ class WireTest {
                     0)),
             new Response.Verification(false, "t", 0, 0, 0, List.of(), null, null, null),
             new Response.ProposalList(List.of(proposal), null),
+            new Response.Fetched(
+                "/home/me/.praksis/downloads/x.part", "a.pdf", "application/pdf", 12),
+            new Response.ResolvedView(
+                "id",
+                "t",
+                1,
+                List.of(),
+                List.of(
+                    new Response.ViewComponent(
+                        "richtext",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        new Response.ViewComponent.Rich(
+                            List.of(
+                                new Response.ViewComponent.Block(
+                                    "paragraph",
+                                    0,
+                                    false,
+                                    List.of(
+                                        new Response.ViewComponent.Run(
+                                            "hi",
+                                            true,
+                                            false,
+                                            false,
+                                            false,
+                                            "https://x.example/",
+                                            null)),
+                                    List.of())),
+                            2,
+                            "images")),
+                    new Response.ViewComponent(
+                        "table",
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        List.of(new Response.ViewComponent.Column("n", "text")),
+                        List.of(
+                            new Response.ViewComponent.Row(
+                                List.of("a.pdf"),
+                                null,
+                                List.of(
+                                    new Response.ViewComponent.Action(
+                                        "Save",
+                                        "",
+                                        Map.of(),
+                                        null,
+                                        new Response.ViewComponent.Download(
+                                            "mail.attachment",
+                                            Map.of("name", "a.pdf"),
+                                            "a.pdf"))))),
+                        null,
+                        null,
+                        null,
+                        null,
+                        null)),
+                List.of()),
             new Response.ResolvedView(
                 "id",
                 "t",

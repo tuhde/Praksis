@@ -659,6 +659,25 @@ public final class Praksis {
       return 0;
     }
 
+    private void showBlocks(java.util.List<Response.ViewComponent.Block> blocks, String pad) {
+      for (Response.ViewComponent.Block b : blocks) {
+        String text =
+            b.runs().stream().map(Response.ViewComponent.Run::text).reduce("", String::concat);
+        switch (b.kind()) {
+          case "heading" ->
+              out().printf("%s%s %s%n", pad, "#".repeat(Math.max(1, b.level())), text);
+          case "rule" -> out().printf("%s----%n", pad);
+          case "item" -> out().printf("%s- %s%n", pad, text);
+          default -> {
+            if (!text.isEmpty()) {
+              out().printf("%s%s%s%n", pad, b.kind().equals("quote") ? "> " : "", text);
+            }
+          }
+        }
+        showBlocks(b.children(), pad + "  ");
+      }
+    }
+
     private void show(Response.ViewComponent c, int depth) {
       String pad = "  ".repeat(depth + 1);
       if (c.error() != null) {
@@ -687,7 +706,16 @@ public final class Praksis {
                         ? ""
                         : "   [select " + row.select().param() + "=" + row.select().value() + "]");
             row.actions()
-                .forEach(a -> out().printf("%s    -> %s (%s)%n", pad, a.label(), a.command()));
+                .forEach(
+                    a ->
+                        out()
+                            .printf(
+                                "%s    -> %s (%s)%n",
+                                pad,
+                                a.label(),
+                                a.download() != null
+                                    ? "download " + a.download().filename()
+                                    : a.command()));
           }
           if (c.rows().isEmpty() && c.empty() != null) {
             out().printf("%s%s%n", pad, c.empty());
@@ -700,6 +728,14 @@ public final class Praksis {
                 .printf(
                     "%s[%s]%s%n",
                     pad, c.label(), Boolean.FALSE.equals(c.enabled()) ? " (disabled)" : "");
+        case "input" ->
+            out().printf("%s[%s: %s]%n", pad, c.label() == null ? "input" : c.label(), c.text());
+        case "richtext" -> {
+          showBlocks(c.rich().blocks(), pad);
+          if (c.rich().blocked() > 0) {
+            out().printf("%s(%d remote images are not loaded)%n", pad, c.rich().blocked());
+          }
+        }
         case "form" ->
             out()
                 .printf(

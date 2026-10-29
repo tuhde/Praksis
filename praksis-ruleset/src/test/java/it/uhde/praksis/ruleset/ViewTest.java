@@ -37,6 +37,22 @@ class ViewTest {
                           List.of(new FieldDescriptor("folder", ValueType.STRING, true, true)),
                           List.of(new FieldDescriptor("items", ValueType.LIST, true, false))),
                       new CapabilityDescriptor(
+                          "mail.get",
+                          EffectClass.READ_ONLY,
+                          true,
+                          List.of(new FieldDescriptor("message", ValueType.STRING, true, false)),
+                          List.of(
+                              new FieldDescriptor("blocks", ValueType.LIST, true, false),
+                              new FieldDescriptor("blocked", ValueType.INT, true, false))),
+                      new CapabilityDescriptor(
+                          "mail.attachment",
+                          EffectClass.READ_ONLY,
+                          true,
+                          List.of(
+                              new FieldDescriptor("message", ValueType.STRING, true, false),
+                              new FieldDescriptor("name", ValueType.STRING, true, false)),
+                          List.of(new FieldDescriptor("content", ValueType.BYTES, true, false))),
+                      new CapabilityDescriptor(
                           "mail.move",
                           EffectClass.LOCAL_WRITE,
                           true,
@@ -391,5 +407,98 @@ class ViewTest {
             COMMAND);
     assertThatThrownBy(() -> LayerStack.resolve(List.of(new Source("u", bad)), Map.of()))
         .hasMessageContaining("missing 'param'");
+  }
+
+  private static final String READER =
+      """
+      title = "Reader"
+      [param.message]
+      type = "string"
+      default = ""
+      [param.images]
+      type = "bool"
+      default = false
+      [source.current]
+      capability = "mail.get"
+      args = { message = { cel = "view.message" } }
+
+      [[component]]
+      type = "richtext"
+      blocks = { cel = "source.current.blocks" }
+      blocked = { cel = "source.current.blocked" }
+      images_param = "images"
+
+      [[component]]
+      type = "table"
+      rows = { cel = "[{'name': 'a.pdf'}]" }
+      columns = [ { title = "Name", value = { cel = "item.name" } } ]
+      [[component.row_action]]
+      label = "Save"
+      download = { capability = "mail.attachment", args = { message = { cel = "view.message" }, name = { cel = "item.name" } }, filename = { cel = "item.name" } }
+      """;
+
+  @Test
+  void richTextAndDownloadsAreParsedAndChecked() throws Exception {
+    assertThat(problems(READER)).isEmpty();
+    Path l = layer("r" + System.nanoTime(), Map.of("mail.inbox", READER), COMMAND);
+    View v = LayerStack.resolve(List.of(new Source("r", l)), Map.of()).ruleset().views().get(0);
+    assertThat(v.components().get(0).type()).isEqualTo("richtext");
+    assertThat(v.components().get(0).values()).containsKeys("blocks", "blocked", "images_param");
+    View.Download download = v.components().get(1).actions().get(0).download().get();
+    assertThat(download.capability()).isEqualTo("mail.attachment");
+    assertThat(download.args()).containsKeys("message", "name");
+
+    // what cannot work is said
+    assertThat(problems(READER.replace("images_param = \"images\"", "images_param = \"nope\"")))
+        .anyMatch(p -> p.message().contains("images_param names 'nope'"));
+    assertThat(
+            problems(
+                READER.replace("capability = \"mail.attachment\"", "capability = \"mail.move\"")))
+        .anyMatch(p -> p.message().contains("a download may only read"))
+        .anyMatch(p -> p.message().contains("does not answer with 'content'"));
+    assertThat(
+            problems(
+                READER.replace("capability = \"mail.attachment\"", "capability = \"mail.get\"")))
+        .anyMatch(p -> p.message().contains("does not answer with 'content'"));
+    assertThat(
+            problems(
+                READER.replace("capability = \"mail.attachment\"", "capability = \"mail.nope\"")))
+        .anyMatch(p -> p.message().contains("unknown capability 'mail.nope'"));
+    assertThat(
+            problems(
+                READER.replace(
+                    "name = { cel = \"item.name\" } }, filename", "nope = 1 }, filename")))
+        .anyMatch(p -> p.message().contains("no such parameter"))
+        .anyMatch(p -> p.message().contains("missing required argument 'name'"));
+    assertThat(
+            problems(
+                READER.replace(
+                    "filename = { cel = \"item.name\" }", "filename = { cel = \"nope.x\" }")))
+        .anyMatch(p -> p.location().contains("filename"));
+    // an action downloads or runs a command, and a download needs its parts
+    Path both =
+        layer(
+            "b" + System.nanoTime(),
+            Map.of(
+                "mail.inbox",
+                READER.replace("label = \"Save\"", "label = \"Save\"\ncommand = \"mail.file\"")),
+            COMMAND);
+    assertThatThrownBy(() -> LayerStack.resolve(List.of(new Source("b", both)), Map.of()))
+        .hasMessageContaining("not both");
+    Path nameless =
+        layer(
+            "n" + System.nanoTime(),
+            Map.of("mail.inbox", READER.replace(", filename = { cel = \"item.name\" }", "")),
+            COMMAND);
+    assertThatThrownBy(() -> LayerStack.resolve(List.of(new Source("n", nameless)), Map.of()))
+        .hasMessageContaining("missing 'filename'");
+    Path blocks =
+        layer(
+            "c" + System.nanoTime(),
+            Map.of(
+                "mail.inbox", READER.replace("blocks = { cel = \"source.current.blocks\" }", "")),
+            COMMAND);
+    assertThatThrownBy(() -> LayerStack.resolve(List.of(new Source("c", blocks)), Map.of()))
+        .hasMessageContaining("missing 'blocks'");
   }
 }

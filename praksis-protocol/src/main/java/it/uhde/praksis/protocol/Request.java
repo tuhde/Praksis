@@ -35,6 +35,7 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.Outcome.class, name = "outcome"),
   @JsonSubTypes.Type(value = Request.Views.class, name = "views"),
   @JsonSubTypes.Type(value = Request.ViewResolve.class, name = "view"),
+  @JsonSubTypes.Type(value = Request.Fetch.class, name = "fetch"),
   @JsonSubTypes.Type(value = Request.Stop.class, name = "stop")
 })
 public sealed interface Request {
@@ -256,6 +257,24 @@ public sealed interface Request {
       implements Request {
     public ViewResolve {
       params = params == null ? java.util.Map.of() : params;
+    }
+  }
+
+  /**
+   * Fetches a file that a view offers for download, because a person asked for it. The daemon
+   * checks that the view has such a download, reads the capability under the grants of the layer
+   * that owns the view (the call is audited) and answers with {@link Response.Fetched}, or with an
+   * error if there is no such download, the grants do not cover the call or the capability fails.
+   *
+   * @param view the view id
+   * @param capability the capability of the download
+   * @param args its arguments, as the description of the view gave them
+   * @param filename the name to suggest
+   */
+  record Fetch(String view, String capability, java.util.Map<String, Object> args, String filename)
+      implements Request {
+    public Fetch {
+      args = args == null ? java.util.Map.of() : args;
     }
   }
 

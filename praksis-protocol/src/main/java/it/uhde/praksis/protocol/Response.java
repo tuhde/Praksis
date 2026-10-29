@@ -28,6 +28,7 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Response.Outcome.class, name = "outcome"),
   @JsonSubTypes.Type(value = Response.ViewList.class, name = "views"),
   @JsonSubTypes.Type(value = Response.ResolvedView.class, name = "view"),
+  @JsonSubTypes.Type(value = Response.Fetched.class, name = "fetched"),
   @JsonSubTypes.Type(value = Response.Done.class, name = "done"),
   @JsonSubTypes.Type(value = Response.Stopped.class, name = "stopped"),
   @JsonSubTypes.Type(value = Response.Error.class, name = "error")
@@ -504,6 +505,18 @@ public sealed interface Response {
   }
 
   /**
+   * A file that a download fetched. The daemon put it in its private downloads directory, which
+   * only this user can read, so that the client can copy it where the person wants it and delete
+   * it; the daemon deletes what is left after an hour.
+   *
+   * @param path where the file is now
+   * @param name the suggested name of the file, cleaned of anything that is not part of a name
+   * @param type the media type, as the capability said
+   * @param size the number of bytes
+   */
+  record Fetched(String path, String name, String type, long size) implements Response {}
+
+  /**
    * A view with its data.
    *
    * @param id the view id
@@ -562,7 +575,30 @@ public sealed interface Response {
       List<ViewComponent> children,
       String error,
       Integer width,
-      Select select) {
+      Select select,
+      Rich rich) {
+    /** A part that is not rich text. */
+    public ViewComponent(
+        String type,
+        String text,
+        String style,
+        String label,
+        Boolean enabled,
+        String empty,
+        List<Column> columns,
+        List<Row> rows,
+        List<Field> fields,
+        List<Action> actions,
+        Form form,
+        List<ViewComponent> children,
+        String error,
+        Integer width,
+        Select select) {
+      this(
+          type, text, style, label, enabled, empty, columns, rows, fields, actions, form, children,
+          error, width, select, null);
+    }
+
     /** A part without a selection of its own. */
     public ViewComponent(
         String type,
@@ -581,7 +617,7 @@ public sealed interface Response {
         Integer width) {
       this(
           type, text, style, label, enabled, empty, columns, rows, fields, actions, form, children,
-          error, width, null);
+          error, width, null, null);
     }
 
     /** A part without a width of its own. */
@@ -651,7 +687,59 @@ public sealed interface Response {
      * @param confirm a question to ask first, or null
      */
     public record Action(
-        String label, String command, java.util.Map<String, Object> args, String confirm) {}
+        String label,
+        String command,
+        java.util.Map<String, Object> args,
+        String confirm,
+        Download download) {
+      /** A command. */
+      public Action(
+          String label, String command, java.util.Map<String, Object> args, String confirm) {
+        this(label, command, args, confirm, null);
+      }
+    }
+
+    /**
+     * A file to download instead of a command: ask the daemon to {@link Request.Fetch} it, and let
+     * the person choose where to save it.
+     *
+     * @param capability the read-only capability that answers with the file
+     * @param args its arguments, as the view gave them
+     * @param filename the name to suggest
+     */
+    public record Download(
+        String capability, java.util.Map<String, Object> args, String filename) {}
+
+    /**
+     * Rich text that was made safe: it is only text, in blocks, with a few styles and links. The
+     * client draws it and must never treat anything in it as markup.
+     *
+     * @param blocks the blocks, in order
+     * @param blocked how many remote images were left out, and could be loaded
+     * @param imagesParam the view parameter that allows them (the client sets it to true), or null
+     */
+    public record Rich(List<Block> blocks, int blocked, String imagesParam) {}
+
+    /**
+     * A block of rich text. {@code kind}: paragraph, heading ({@code level} 1 to 6), quote, list
+     * ({@code ordered} or not; its children are items), item, pre or rule.
+     */
+    public record Block(
+        String kind, int level, boolean ordered, List<Run> runs, List<Block> children) {}
+
+    /**
+     * Text with a style. A {@code link} is an http, https or mailto address; an {@code image} is an
+     * https address of a picture that the person allowed to be loaded, with {@code text} as its
+     * alternative text.
+     */
+    public record Run(
+        String text,
+        boolean bold,
+        boolean italic,
+        boolean code,
+        boolean muted,
+        String link,
+        String image) {}
 
     /**
      * A form for a command.

@@ -123,8 +123,24 @@ public final class Permissions {
             .computeIfAbsent(requirement(owner, call, params, catalog), k -> new TreeSet<>())
             .add("view:" + view.id());
       }
+      // and so do its downloads, which read when a person asks for them
+      for (View.Download download : downloads(view.components())) {
+        Action.Call call = new Action.Call("download", download.capability(), download.args());
+        found
+            .computeIfAbsent(requirement(owner, call, params, catalog), k -> new TreeSet<>())
+            .add("view:" + view.id());
+      }
     }
     return new Needs(found);
+  }
+
+  private static List<View.Download> downloads(List<View.Component> components) {
+    List<View.Download> out = new java.util.ArrayList<>();
+    for (View.Component c : components) {
+      c.actions().forEach(a -> a.download().ifPresent(out::add));
+      out.addAll(downloads(c.children()));
+    }
+    return out;
   }
 
   private static Requirement requirement(

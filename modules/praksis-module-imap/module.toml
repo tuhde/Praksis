@@ -92,7 +92,10 @@ results = [
 name = "mail.get"
 effect = "read-only"
 dry_run = true
-params = [{ name = "message", type = "string", required = true, scopable = false }]
+params = [
+  { name = "message", type = "string", required = true, scopable = false },
+  { name = "images", type = "bool", required = false, scopable = false },
+]
 results = [
   { name = "from", type = "string", required = true },
   { name = "to", type = "string", required = true },
@@ -103,6 +106,8 @@ results = [
   { name = "message_id", type = "string", required = true },
   { name = "text", type = "string", required = true },
   { name = "html", type = "string", required = true },
+  { name = "blocks", type = "list", required = true },
+  { name = "blocked", type = "int", required = true },
   { name = "attachments", type = "list", required = true },
   { name = "size", type = "int", required = true },
 ]

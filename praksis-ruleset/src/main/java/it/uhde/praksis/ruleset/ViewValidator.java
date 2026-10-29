@@ -155,7 +155,11 @@ final class ViewValidator {
     }
     boolean perRow = c.type().equals("table") || c.type().equals("list");
     for (View.Action a : c.actions()) {
-      command(a.command(), a.args(), perRow ? row : screen, ruleset, at, out);
+      if (a.download().isPresent()) {
+        download(a.download().get(), perRow ? row : screen, at, out);
+      } else {
+        command(a.command(), a.args(), perRow ? row : screen, ruleset, at, out);
+      }
     }
     c.select()
         .ifPresent(
@@ -180,6 +184,13 @@ final class ViewValidator {
               s.then()
                   .ifPresent(a -> command(a.command(), a.args(), selectScope, ruleset, at, out));
             });
+    if (c.type().equals("richtext")
+        && c.values().get("images_param") instanceof Arg.Literal l
+        && !viewParams.contains(String.valueOf(l.value()))) {
+      out.add(
+          new Problem(
+              at, "images_param names '" + l.value() + "', which the view does not declare"));
+    }
     if (c.type().equals("input")
         && c.values().get("param") instanceof Arg.Literal l
         && !viewParams.contains(String.valueOf(l.value()))) {
@@ -208,6 +219,43 @@ final class ViewValidator {
     }
     for (View.Component child : c.children()) {
       component(child, where, view, ruleset, screen, row, viewParams, out);
+    }
+  }
+
+  /** A download reads one read-only capability that answers with the bytes of a file. */
+  private void download(View.Download d, Scope scope, String at, List<Problem> out) {
+    String where = at + ", download";
+    Optional<CapabilityDescriptor> capability = catalog.capability(d.capability());
+    if (capability.isEmpty()) {
+      out.add(new Problem(where, "unknown capability '" + d.capability() + "'"));
+      return;
+    }
+    if (capability.get().effect() != EffectClass.READ_ONLY) {
+      out.add(
+          new Problem(
+              where,
+              "'"
+                  + capability.get().name()
+                  + "' has the effect '"
+                  + capability.get().effect().id()
+                  + "'; a download may only read"));
+    }
+    if (capability.get().results().stream()
+        .noneMatch(
+            r ->
+                r.name().equals("content")
+                    && r.type() == it.uhde.praksis.capability.ValueType.BYTES)) {
+      out.add(
+          new Problem(where, "'" + d.capability() + "' does not answer with 'content' (bytes)"));
+    }
+    sourceArgs(
+        new View.Source(d.capability(), d.args(), Optional.empty()),
+        capability.get(),
+        scope,
+        where,
+        out);
+    if (d.filename() instanceof Arg.Expr e) {
+      expression(e.source(), scope, where + " filename", out);
     }
   }
 

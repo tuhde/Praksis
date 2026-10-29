@@ -48,6 +48,24 @@ class ViewResolverTest {
                           List.of(new FieldDescriptor("folder", ValueType.STRING, true, true)),
                           List.of(new FieldDescriptor("items", ValueType.LIST, true, false))),
                       new CapabilityDescriptor(
+                          "mail.get",
+                          EffectClass.READ_ONLY,
+                          true,
+                          List.of(new FieldDescriptor("message", ValueType.STRING, true, false)),
+                          List.of(
+                              new FieldDescriptor("blocks", ValueType.LIST, true, false),
+                              new FieldDescriptor("blocked", ValueType.INT, true, false))),
+                      new CapabilityDescriptor(
+                          "mail.attachment",
+                          EffectClass.READ_ONLY,
+                          true,
+                          List.of(
+                              new FieldDescriptor("message", ValueType.STRING, true, false),
+                              new FieldDescriptor("name", ValueType.STRING, true, false)),
+                          List.of(
+                              new FieldDescriptor("content", ValueType.BYTES, true, false),
+                              new FieldDescriptor("type", ValueType.STRING, true, false))),
+                      new CapabilityDescriptor(
                           "mail.move",
                           EffectClass.LOCAL_WRITE,
                           true,
@@ -105,6 +123,68 @@ class ViewResolverTest {
         }
       };
 
+  /** What a mail module answers for the HTML of a mail: blocks, some of them hostile. */
+  private final Capability get =
+      new Capability() {
+        @Override
+        public String name() {
+          return "mail.get";
+        }
+
+        @Override
+        public Map<String, Object> invoke(CapabilityContext c, Map<String, Object> args) {
+          Map<String, Object> bad = new java.util.LinkedHashMap<>();
+          bad.put("kind", "script"); // not a kind
+          bad.put("runs", List.of(Map.of("text", "evil")));
+          return Map.of(
+              "blocks",
+              List.of(
+                  Map.of(
+                      "kind",
+                      "heading",
+                      "level",
+                      2L,
+                      "runs",
+                      List.of(Map.of("text", "Title", "bold", true)),
+                      "children",
+                      List.of()),
+                  bad,
+                  Map.of(
+                      "kind",
+                      "paragraph",
+                      "runs",
+                      List.of(
+                          Map.of("text", "ok ", "link", "https://ok.example/x"),
+                          Map.of("text", "bad link", "link", "javascript:alert(1)"),
+                          Map.of("text", "spaced", "link", "https://a b"),
+                          Map.of("text", "pic", "image", "http://insecure.example/p.png"),
+                          Map.of("text", "pic2", "image", "https://t.example/p.png"),
+                          Map.of("nottext", 1)),
+                      "children",
+                      List.of())),
+              "blocked",
+              2L);
+        }
+      };
+
+  private final Map<String, Object> asked = new java.util.LinkedHashMap<>();
+  private final List<String> allowedCalls = new ArrayList<>();
+
+  /** What an attachment answers: the bytes, whatever its name says. */
+  private final Capability attachment =
+      new Capability() {
+        @Override
+        public String name() {
+          return "mail.attachment";
+        }
+
+        @Override
+        public Map<String, Object> invoke(CapabilityContext c, Map<String, Object> args) {
+          asked.putAll(args);
+          return Map.of("content", new byte[] {1, 2, 3, 4}, "type", "application/pdf");
+        }
+      };
+
   private ViewResolver resolver(String view, String command) throws IOException, Exception {
     Path layer = dir.resolve("l" + System.nanoTime());
     Files.createDirectories(layer.resolve("views"));
@@ -123,7 +203,7 @@ class ViewResolverTest {
         Map.of("v", "mine"),
         CATALOG,
         Expressions.compiler(),
-        Map.of("mail.list", list),
+        Map.of("mail.list", list, "mail.get", get, "mail.attachment", attachment),
         (rule, capability, args) ->
             allow
                 ? AccessPolicy.Decision.allow()
@@ -131,6 +211,8 @@ class ViewResolverTest {
         (time, rule, capability, args, allowed, error) -> {
           if (!allowed) {
             denied.add(rule + " " + capability + " " + error.orElse(""));
+          } else {
+            allowedCalls.add(rule + " " + capability + " " + args);
           }
         },
         Clock.fixed(NOW, ZoneOffset.UTC));
@@ -440,5 +522,194 @@ class ViewResolverTest {
     assertThat(input.text()).isEqualTo("inv");
     assertThat(input.label()).isEqualTo("Search");
     assertThat(input.select().param()).isEqualTo("query");
+  }
+
+  private static final String RICH =
+      """
+      title = "Reader"
+      [param.message]
+      type = "string"
+      default = "m1"
+      [param.images]
+      type = "bool"
+      default = false
+      [source.current]
+      capability = "mail.get"
+      args = { message = { cel = "view.message" } }
+
+      [[component]]
+      type = "richtext"
+      blocks = { cel = "source.current.blocks" }
+      blocked = { cel = "source.current.blocked" }
+      images_param = "images"
+
+      [[component]]
+      type = "table"
+      rows = { cel = "[{'name': 'report.pdf'}]" }
+      columns = [ { title = "Name", value = { cel = "item.name" } } ]
+      [[component.row_action]]
+      label = "Save"
+      download = { capability = "mail.attachment", args = { message = { cel = "view.message" }, name = { cel = "item.name" } }, filename = { cel = "item.name" } }
+      """;
+
+  @Test
+  void richTextIsDescribedWithOnlyWhatIsSafeAndAnythingElseIsDropped() throws Exception {
+    Response.ResolvedView r =
+        (Response.ResolvedView) resolver(RICH, null).resolve("v", Map.of(), 1);
+
+    ViewComponent rich = r.components().get(0);
+    assertThat(rich.error()).isNull();
+    assertThat(rich.rich().blocked()).isEqualTo(2);
+    assertThat(rich.rich().imagesParam()).isEqualTo("images");
+    // the block of an unknown kind is gone, and so is the run that has no text
+    assertThat(rich.rich().blocks())
+        .extracting(b -> b.kind())
+        .containsExactly("heading", "paragraph");
+    assertThat(rich.rich().blocks().get(0).level()).isEqualTo(2);
+    assertThat(rich.rich().blocks().get(0).runs().get(0).bold()).isTrue();
+    var runs = rich.rich().blocks().get(1).runs();
+    assertThat(runs)
+        .extracting(x -> x.text())
+        .containsExactly("ok ", "bad link", "spaced", "pic", "pic2");
+    // links only http, https, mailto; images only https; no white space in an address
+    assertThat(runs)
+        .extracting(x -> x.link())
+        .containsExactly("https://ok.example/x", null, null, null, null);
+    assertThat(runs)
+        .extracting(x -> x.image())
+        .containsExactly(null, null, null, null, "https://t.example/p.png");
+  }
+
+  @Test
+  void aHostileValueCannotMakeADescriptionLargerThanTheLimitsOrDeeper() {
+    List<Object> deep = List.of(Map.of("kind", "paragraph", "runs", List.of(Map.of("text", "x"))));
+    for (int i = 0; i < 40; i++) {
+      deep = List.of(Map.of("kind", "quote", "children", deep));
+    }
+    ViewComponent.Rich cut =
+        RichText.convert(deep, 0L, null).blocks().isEmpty()
+            ? null
+            : RichText.convert(deep, 0L, null);
+    int depth = 0;
+    var level = cut.blocks();
+    while (!level.isEmpty()) {
+      depth++;
+      level = level.get(0).children();
+    }
+    assertThat(depth).isLessThanOrEqualTo(RichText.MAX_DEPTH + 1);
+
+    List<Object> many = new ArrayList<>();
+    for (int i = 0; i < RichText.MAX_BLOCKS + 100; i++) {
+      many.add(Map.of("kind", "rule"));
+    }
+    assertThat(RichText.convert(many, 0L, null).blocks()).hasSize(RichText.MAX_BLOCKS);
+    String big = "x".repeat(RichText.MAX_CHARS + 10);
+    var one =
+        RichText.convert(
+            List.of(Map.of("kind", "paragraph", "runs", List.of(Map.of("text", big)))), 0L, null);
+    assertThat(one.blocks().get(0).runs().get(0).text()).hasSize(RichText.MAX_CHARS);
+    assertThat(RichText.convert("not a list", "no", null).blocks()).isEmpty();
+    assertThat(RichText.convert(null, -5L, null).blocked()).isZero();
+  }
+
+  @Test
+  void aDownloadIsDescribedWithItsArgumentsAndNothingIsReadUntilAPersonAsks() throws Exception {
+    Response.ResolvedView r =
+        (Response.ResolvedView) resolver(RICH, null).resolve("v", Map.of(), 1);
+
+    var action = r.components().get(1).rows().get(0).actions().get(0);
+    assertThat(action.download().capability()).isEqualTo("mail.attachment");
+    assertThat(action.download().args())
+        .containsEntry("message", "m1")
+        .containsEntry("name", "report.pdf");
+    assertThat(action.download().filename()).isEqualTo("report.pdf");
+    assertThat(asked).isEmpty();
+  }
+
+  @Test
+  void fetchReadsTheAttachmentUnderTheGrantsOfTheViewAndKeepsTheFileAway() throws Exception {
+    ViewResolver resolver = resolver(RICH, null);
+    Path downloads = dir.resolve("downloads");
+
+    Response answer =
+        resolver.fetch(
+            "v",
+            "mail.attachment",
+            Map.of("message", "m1", "name", "report.pdf"),
+            "../../etc/Rep:ort.pdf",
+            downloads);
+
+    assertThat(answer).isInstanceOf(Response.Fetched.class);
+    Response.Fetched fetched = (Response.Fetched) answer;
+    assertThat(fetched.name()).isEqualTo("Rep_ort.pdf");
+    assertThat(fetched.type()).isEqualTo("application/pdf");
+    assertThat(fetched.size()).isEqualTo(4);
+    Path file = Path.of(fetched.path());
+    assertThat(file.getParent()).isEqualTo(downloads);
+    assertThat(file.getFileName().toString()).doesNotContain("report").doesNotContain("Rep");
+    assertThat(Files.readAllBytes(file)).containsExactly(1, 2, 3, 4);
+    assertThat(java.nio.file.Files.getPosixFilePermissions(file))
+        .containsExactlyInAnyOrder(
+            java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+            java.nio.file.attribute.PosixFilePermission.OWNER_WRITE);
+    assertThat(java.nio.file.Files.getPosixFilePermissions(downloads))
+        .containsExactlyInAnyOrder(
+            java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+            java.nio.file.attribute.PosixFilePermission.OWNER_WRITE,
+            java.nio.file.attribute.PosixFilePermission.OWNER_EXECUTE);
+    assertThat(allowedCalls).anyMatch(c -> c.startsWith("view:v mail.attachment"));
+  }
+
+  @Test
+  void fetchRefusesWhatTheViewDoesNotOfferWhatTheGrantsDoNotCoverAndBadArguments()
+      throws Exception {
+    ViewResolver resolver = resolver(RICH, null);
+    Path downloads = dir.resolve("d2");
+
+    assertThat(resolver.fetch("nope", "mail.attachment", Map.of(), "x", downloads))
+        .isEqualTo(new Response.Error("there is no view 'nope'"));
+    // the view has no download of this capability: it cannot be used to read anything else
+    assertThat(resolver.fetch("v", "mail.list", Map.of("folder", "INBOX"), "x", downloads))
+        .isEqualTo(new Response.Error("view 'v' has no download of 'mail.list'"));
+    assertThat(reads).isEmpty();
+    assertThat(resolver.fetch("v", "mail.attachment", Map.of("nope", "x"), "x", downloads))
+        .isInstanceOf(Response.Error.class);
+
+    allow = false;
+    Response denied =
+        resolver.fetch(
+            "v", "mail.attachment", Map.of("message", "m1", "name", "a"), "x", downloads);
+    assertThat(denied).isEqualTo(new Response.Error("layer 'mine' has no grant"));
+    assertThat(asked).isEmpty();
+    assertThat(this.denied.toString()).contains("view:v mail.attachment");
+    assertThat(downloads).doesNotExist();
+  }
+
+  @Test
+  void oldFilesInTheDownloadsDirectoryAreRemoved() throws Exception {
+    ViewResolver resolver = resolver(RICH, null);
+    Path downloads = Files.createDirectories(dir.resolve("d3"));
+    Path old = Files.write(downloads.resolve("old.part"), new byte[] {9});
+    Files.setLastModifiedTime(
+        old, java.nio.file.attribute.FileTime.from(NOW.minusSeconds(2 * 3600)));
+    Path recent = Files.write(downloads.resolve("recent.part"), new byte[] {9});
+    Files.setLastModifiedTime(recent, java.nio.file.attribute.FileTime.from(NOW.minusSeconds(60)));
+
+    resolver.fetch("v", "mail.attachment", Map.of("message", "m1", "name", "a"), "a", downloads);
+
+    assertThat(old).doesNotExist();
+    assertThat(recent).exists();
+  }
+
+  @Test
+  void namesAreCleanedOfAnythingThatIsNotAName() {
+    assertThat(Downloads.cleanName("report.pdf")).isEqualTo("report.pdf");
+    assertThat(Downloads.cleanName("../../etc/passwd")).isEqualTo("passwd");
+    assertThat(Downloads.cleanName("C:\\Users\\x\\a.txt")).isEqualTo("a.txt");
+    assertThat(Downloads.cleanName(".bashrc")).isEqualTo("bashrc");
+    assertThat(Downloads.cleanName("a\nb\u0000c.txt")).isEqualTo("a_b_c.txt");
+    assertThat(Downloads.cleanName("   ")).isEqualTo("download");
+    assertThat(Downloads.cleanName(null)).isEqualTo("download");
+    assertThat(Downloads.cleanName("x".repeat(300) + ".pdf")).hasSize(120).endsWith(".pdf");
   }
 }

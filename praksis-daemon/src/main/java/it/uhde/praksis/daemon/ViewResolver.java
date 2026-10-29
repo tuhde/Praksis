@@ -157,6 +157,94 @@ final class ViewResolver {
         view.id(), view.title(), view.schema(), shown, components, problems);
   }
 
+  /**
+   * The file of a download, because a person asked for it: the view must offer this download, and
+   * the capability is read under the grants of the layer that owns the view, with an audit line.
+   */
+  Response fetch(
+      String id,
+      String capabilityName,
+      Map<String, Object> given,
+      String suggested,
+      java.nio.file.Path directory) {
+    View view = ruleset.views().stream().filter(v -> v.id().equals(id)).findFirst().orElse(null);
+    if (view == null) {
+      return new Response.Error("there is no view '" + id + "'");
+    }
+    if (!offers(view.components(), capabilityName)) {
+      return new Response.Error("view '" + id + "' has no download of '" + capabilityName + "'");
+    }
+    CapabilityDescriptor descriptor = catalog.capability(capabilityName).orElse(null);
+    Capability capability = capabilities.get(capabilityName);
+    if (descriptor == null || capability == null) {
+      return new Response.Error("capability '" + capabilityName + "' is not available");
+    }
+    Map<String, Object> args = new LinkedHashMap<>();
+    try {
+      for (var arg : given.entrySet()) {
+        FieldDescriptor field =
+            descriptor.params().stream()
+                .filter(p -> p.name().equals(arg.getKey()))
+                .findFirst()
+                .orElseThrow(
+                    () ->
+                        new IllegalArgumentException(
+                            "'" + capabilityName + "' has no argument '" + arg.getKey() + "'"));
+        args.put(arg.getKey(), Injection.coerce(field, arg.getValue()));
+      }
+    } catch (IllegalArgumentException e) {
+      return new Response.Error(e.getMessage());
+    }
+    String component = "view:" + view.id();
+    AccessPolicy.Decision decision = access.check(component, descriptor, args);
+    audit.record(
+        clock.instant(),
+        component,
+        capabilityName,
+        args,
+        decision.allowed(),
+        decision.allowed() ? Optional.empty() : Optional.of(decision.reason()));
+    if (!decision.allowed()) {
+      return new Response.Error(decision.reason());
+    }
+    try {
+      Map<String, Object> result =
+          capability.invoke(new ReadContext(component + "/download"), args);
+      if (result == null || !(result.get("content") instanceof byte[] content)) {
+        return new Response.Error("'" + capabilityName + "' gave no content");
+      }
+      if (content.length > Downloads.MAX_BYTES) {
+        return new Response.Error("the file is too big: " + content.length + " bytes");
+      }
+      Downloads.cleanup(directory, clock.instant());
+      java.nio.file.Path file = Downloads.store(directory, content);
+      return new Response.Fetched(
+          file.toString(),
+          Downloads.cleanName(
+              suggested != null && !suggested.isBlank()
+                  ? suggested
+                  : String.valueOf(result.getOrDefault("name", ""))),
+          String.valueOf(result.getOrDefault("type", "application/octet-stream")),
+          content.length);
+    } catch (Exception e) {
+      return new Response.Error(String.valueOf(e.getMessage()));
+    }
+  }
+
+  private static boolean offers(List<View.Component> components, String capability) {
+    for (View.Component c : components) {
+      for (View.Action a : c.actions()) {
+        if (a.download().isPresent() && a.download().get().capability().equals(capability)) {
+          return true;
+        }
+      }
+      if (offers(c.children(), capability)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /** Whether the source is to be read at all: its {@code when} is true, or it has none. */
   private boolean wanted(
       View view,
@@ -300,6 +388,7 @@ final class ViewResolver {
         case "button" -> button(view, c, dynamic, ruleParams);
         case "form" -> form(view, c, dynamic, ruleParams);
         case "input" -> input(c, dynamic);
+        case "richtext" -> richtext(view, c, dynamic, ruleParams);
         default -> {
           List<ViewComponent> children = new ArrayList<>();
           c.children()
@@ -466,6 +555,35 @@ final class ViewResolver {
         sets);
   }
 
+  private ViewComponent richtext(
+      View view, View.Component c, Map<String, Object> dynamic, Map<String, Object> ruleParams)
+      throws ExpressionException {
+    Set<String> names = Set.of("view", "source");
+    Object blocks = evaluate(view, c.values().get("blocks"), dynamic, ruleParams, names);
+    Object blocked =
+        c.values().containsKey("blocked")
+            ? evaluate(view, c.values().get("blocked"), dynamic, ruleParams, names)
+            : 0L;
+    ViewComponent.Rich rich = RichText.convert(blocks, blocked, literal(c, "images_param", null));
+    return new ViewComponent(
+        "richtext",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        rich);
+  }
+
   private ViewComponent input(View.Component c, Map<String, Object> dynamic) {
     String param = literal(c, "param", "");
     Object current = dynamic.get("view") instanceof Map<?, ?> m ? m.get(param) : null;
@@ -545,6 +663,20 @@ final class ViewResolver {
       Map<String, Object> ruleParams,
       Set<String> names)
       throws ExpressionException {
+    if (a.download().isPresent()) {
+      View.Download d = a.download().get();
+      Map<String, Object> given = new LinkedHashMap<>();
+      for (var arg : d.args().entrySet()) {
+        given.put(arg.getKey(), show(evaluate(view, arg.getValue(), dynamic, ruleParams, names)));
+      }
+      String filename = text(evaluate(view, d.filename(), dynamic, ruleParams, names));
+      return new ViewComponent.Action(
+          a.label(),
+          "",
+          Map.of(),
+          a.confirm().orElse(null),
+          new ViewComponent.Download(d.capability(), given, filename));
+    }
     Map<String, Object> args = new LinkedHashMap<>();
     for (var arg : a.args().entrySet()) {
       args.put(arg.getKey(), show(evaluate(view, arg.getValue(), dynamic, ruleParams, names)));

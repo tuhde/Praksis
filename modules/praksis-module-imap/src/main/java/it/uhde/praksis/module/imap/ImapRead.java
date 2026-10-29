@@ -5,6 +5,7 @@ import it.uhde.praksis.capability.Capability;
 import it.uhde.praksis.capability.CapabilityContext;
 import it.uhde.praksis.capability.CapabilityException;
 import it.uhde.praksis.capability.Credentials;
+import it.uhde.praksis.mail.html.Sanitizer;
 import jakarta.mail.FetchProfile;
 import jakarta.mail.Flags;
 import jakarta.mail.Folder;
@@ -620,6 +621,10 @@ public abstract class ImapRead implements Capability {
         out.put("message_id", id.messageId());
         out.put("text", cut(body.text));
         out.put("html", cut(body.html));
+        Sanitizer.Result safe =
+            Sanitizer.sanitize(cut(body.html), Boolean.TRUE.equals(args.get("images")));
+        out.put("blocks", safe.blocks());
+        out.put("blocked", (long) safe.blockedImages());
         out.put("attachments", body.attachments);
         out.put("size", (long) Math.max(0, m.getSize()));
         return out;

@@ -258,4 +258,33 @@ class ImapManageTest {
     assertThatThrownBy(() -> append.invoke(context(false), args("folder", "Sent")))
         .hasMessageContaining("needs the content");
   }
+
+  @Test
+  void getReturnsTheHtmlAsSafeBlocksAndCountsTheImagesItBlocked() throws Exception {
+    server.deliverRaw(
+        true,
+        """
+        From: a@x
+        Subject: rich
+        Message-ID: <h1@x>
+        MIME-Version: 1.0
+        Content-Type: text/html; charset=utf-8
+
+        <p>Hello <b>world</b> <a href="javascript:alert(1)">x</a><script>alert(2)</script></p>
+        <img src="https://t.example/p.png" alt="logo">
+        """);
+    var list = make(new ImapRead.Listing());
+    var get = make(new ImapRead.Get());
+    String id =
+        (String) items(list.invoke(context(false), args("folder", "INBOX"))).get(0).get("id");
+
+    Map<String, Object> blocked = get.invoke(context(false), args("message", id));
+    assertThat(blocked).containsEntry("blocked", 1L);
+    assertThat(blocked.get("blocks").toString())
+        .contains("Hello", "world", "[image: logo]")
+        .doesNotContain("alert")
+        .doesNotContain("javascript");
+    assertThat(get.invoke(context(false), args("message", id, "images", true)))
+        .containsEntry("blocked", 0L);
+  }
 }

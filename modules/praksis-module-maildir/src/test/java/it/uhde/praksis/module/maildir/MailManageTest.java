@@ -246,4 +246,45 @@ class MailManageTest {
     assertThatThrownBy(() -> call(append, "folder", "../x", "content", mail))
         .isInstanceOf(CapabilityException.class);
   }
+
+  @Test
+  void aMailCanStillBeReadWithTheIdFromBeforeItWasMarked() throws Exception {
+    Path file = mail("new", "7.a.host", "a@x", "still there", "the body", 0);
+    String old = file.toString();
+    call(make(new MailMark()), "message", old, "seen", true);
+    assertThat(file).doesNotExist();
+
+    Map<String, Object> got = call(make(new MailGet()), "message", old);
+
+    assertThat(got).containsEntry("subject", "still there");
+    assertThat((String) got.get("text")).contains("the body");
+  }
+
+  @Test
+  void getReturnsTheHtmlAsSafeBlocksAndCountsTheImagesItBlocked() throws Exception {
+    Path file = root.resolve("cur/8.a.host:2,S");
+    Files.writeString(
+        file,
+        """
+        From: a@x
+        Subject: rich
+        MIME-Version: 1.0
+        Content-Type: text/html; charset=utf-8
+
+        <p>Hello <b>world</b> <a href="javascript:alert(1)">x</a><script>alert(2)</script></p>
+        <img src="https://t.example/p.png" alt="logo">
+        """);
+    MailGet get = make(new MailGet());
+
+    Map<String, Object> blocked = call(get, "message", file.toString());
+    assertThat(blocked).containsEntry("blocked", 1L);
+    assertThat(blocked.get("blocks").toString())
+        .contains("Hello", "world", "[image: logo]")
+        .doesNotContain("alert")
+        .doesNotContain("javascript");
+
+    Map<String, Object> allowed = call(get, "message", file.toString(), "images", true);
+    assertThat(allowed).containsEntry("blocked", 0L);
+    assertThat(allowed.get("blocks").toString()).contains("image=https://t.example/p.png");
+  }
 }

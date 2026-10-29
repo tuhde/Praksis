@@ -133,6 +133,11 @@ public record DaemonConfig(
     return home.resolve("layers");
   }
 
+  /** Where a file waits that a person asked for, until the frontend has copied it. */
+  public Path downloadsDirectory() {
+    return home.resolve("downloads");
+  }
+
   /** Where the modules keep their own files: {@code <home>/data/<module>}. */
   public Path dataDirectory() {
     return home.resolve("data");

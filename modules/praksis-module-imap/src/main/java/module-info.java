@@ -5,6 +5,7 @@
  */
 module it.uhde.praksis.module.imap {
   requires it.uhde.praksis.capability;
+  requires it.uhde.praksis.mail.html;
   requires jakarta.mail;
   requires org.eclipse.angus.mail;
   requires java.logging;

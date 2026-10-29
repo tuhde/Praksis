@@ -30,6 +30,14 @@ class PermissionsTest {
                   List.of(),
                   List.of(
                       new CapabilityDescriptor(
+                          "mail.attachment",
+                          EffectClass.READ_ONLY,
+                          true,
+                          List.of(
+                              new FieldDescriptor("message", ValueType.STRING, true, false),
+                              new FieldDescriptor("name", ValueType.STRING, true, false)),
+                          List.of(new FieldDescriptor("content", ValueType.BYTES, true, false))),
+                      new CapabilityDescriptor(
                           "mail.move",
                           EffectClass.LOCAL_WRITE,
                           true,
@@ -139,5 +147,32 @@ class PermissionsTest {
         .extracting(Requirement::describe)
         .containsExactly("base: mail.move folder=\"Archive\"");
     assertThat(Permissions.diff(before, before).isEmpty()).isTrue();
+  }
+
+  @Test
+  void aDownloadOfAViewIsARequirementOfTheViewLikeASource() throws Exception {
+    Path layer = dir.resolve("viewlayer");
+    write(layer, "ruleset.toml", "format_version = 1\nname = \"v\"\n");
+    write(
+        layer,
+        "views/v.toml",
+        """
+        title = "V"
+        [param.message]
+        type = "string"
+        default = ""
+        [[component]]
+        type = "button"
+        label = "Save"
+        download = { capability = "mail.attachment", args = { message = { cel = "view.message" }, name = "a.pdf" }, filename = "a.pdf" }
+        """);
+
+    Permissions.Needs needs =
+        Permissions.of(LayerStack.resolve(List.of(new Source("v", layer)), Map.of()), CATALOG);
+
+    assertThat(needs.requirements())
+        .extracting(Requirement::describe)
+        .containsExactly("v: mail.attachment");
+    assertThat(needs.rules().values().iterator().next()).containsExactly("view:v");
   }
 }

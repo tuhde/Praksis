@@ -17,6 +17,12 @@
   <description>Reads mail from a local Maildir: the mail.received event and the mail.move capability.</description>
 
   <dependencies>
+    <!-- Turns the HTML of a mail into a safe description; travels in this module's directory. -->
+    <dependency>
+      <groupId>it.uhde</groupId>
+      <artifactId>praksis-mail-html</artifactId>
+      <version>${project.version}</version>
+    </dependency>
     <!-- Provided by the engine's boot layer at run time. -->
     <dependency>
       <groupId>it.uhde</groupId>

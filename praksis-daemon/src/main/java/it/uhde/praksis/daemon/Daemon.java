@@ -123,6 +123,7 @@ public final class Daemon implements AutoCloseable {
       auditRules(effective, layers, compiler, modules.catalog(), store, Admin.trust(config));
       modules.useCredentials(new CredentialResolver(access::policy, store, clock)::forComponent);
       modules.useDataDirectory(config.dataDirectory());
+      Downloads.cleanup(config.downloadsDirectory(), clock.instant());
       approvals = new Approvals(config, store, access, modules.catalog(), clock);
       Map<String, Capability> capabilities = modules.capabilities();
       shadows = new Shadows(config, store, clock, effective);
@@ -344,6 +345,9 @@ public final class Daemon implements AutoCloseable {
         case Request.Outcome o -> screens.outcome(o.event());
         case Request.Views v -> views.list();
         case Request.ViewResolve v -> views.resolve(v.view(), v.params(), v.maxSchema());
+        case Request.Fetch f ->
+            views.fetch(
+                f.view(), f.capability(), f.args(), f.filename(), config.downloadsDirectory());
         case Request.Stop s -> new Response.Stopped();
       };
     } catch (Injection.Invalid | Approvals.Failure | Shadows.Failure | DaemonException e) {
