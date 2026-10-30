@@ -42,10 +42,6 @@
     <module>praksis-integration</module>
     <module>modules/praksis-mail-html</module>
     <module>modules/praksis-module-maildir</module>
-    <module>modules/praksis-module-imap</module>
-    <module>modules/praksis-module-smtp</module>
-    <module>modules/praksis-module-contacts</module>
-    <module>modules/praksis-module-notify</module>
   </modules>
 
   <properties>

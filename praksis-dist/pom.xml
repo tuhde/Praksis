@@ -57,14 +57,6 @@
         </exclusion>
       </exclusions>
     </dependency>
-    <!-- The IMAP module is loaded from disk with the Angus Mail jars next to it; those jars come
-         in as its dependencies and are copied to the module's directory, not to the image. -->
-    <dependency>
-      <groupId>it.uhde</groupId>
-      <artifactId>praksis-module-imap</artifactId>
-      <version>${project.version}</version>
-      <scope>runtime</scope>
-    </dependency>
     <!-- The HTML sanitizer and jsoup travel in the directories of the modules that use them. -->
     <dependency>
       <groupId>it.uhde</groupId>
@@ -75,25 +67,6 @@
     <dependency>
       <groupId>org.jsoup</groupId>
       <artifactId>jsoup</artifactId>
-      <scope>runtime</scope>
-    </dependency>
-    <dependency>
-      <groupId>it.uhde</groupId>
-      <artifactId>praksis-module-notify</artifactId>
-      <version>${project.version}</version>
-      <scope>runtime</scope>
-    </dependency>
-    <dependency>
-      <groupId>it.uhde</groupId>
-      <artifactId>praksis-module-contacts</artifactId>
-      <version>${project.version}</version>
-      <scope>runtime</scope>
-    </dependency>
-    <!-- Like the IMAP module: its Angus Mail jars go to its own directory. -->
-    <dependency>
-      <groupId>it.uhde</groupId>
-      <artifactId>praksis-module-smtp</artifactId>
-      <version>${project.version}</version>
       <scope>runtime</scope>
     </dependency>
   </dependencies>
@@ -113,55 +86,7 @@
             <configuration>
               <outputDirectory>${project.build.directory}/mp</outputDirectory>
               <includeScope>runtime</includeScope>
-              <excludeArtifactIds>praksis-expression-cel,praksis-module-maildir,praksis-module-imap,praksis-module-smtp,praksis-module-contacts,praksis-module-notify,praksis-mail-html,jsoup,angus-mail,jakarta.mail-api,jakarta.activation-api,angus-activation</excludeArtifactIds>
-            </configuration>
-          </execution>
-          <execution>
-            <id>imap-module</id>
-            <phase>package</phase>
-            <goals>
-              <goal>copy-dependencies</goal>
-            </goals>
-            <configuration>
-              <outputDirectory>${project.build.directory}/imap</outputDirectory>
-              <includeScope>runtime</includeScope>
-              <includeArtifactIds>praksis-module-imap,praksis-mail-html,jsoup,angus-mail,jakarta.mail-api,jakarta.activation-api,angus-activation</includeArtifactIds>
-            </configuration>
-          </execution>
-          <execution>
-            <id>notify-module</id>
-            <phase>package</phase>
-            <goals>
-              <goal>copy-dependencies</goal>
-            </goals>
-            <configuration>
-              <outputDirectory>${project.build.directory}/notify</outputDirectory>
-              <includeScope>runtime</includeScope>
-              <includeArtifactIds>praksis-module-notify</includeArtifactIds>
-            </configuration>
-          </execution>
-          <execution>
-            <id>contacts-module</id>
-            <phase>package</phase>
-            <goals>
-              <goal>copy-dependencies</goal>
-            </goals>
-            <configuration>
-              <outputDirectory>${project.build.directory}/contacts</outputDirectory>
-              <includeScope>runtime</includeScope>
-              <includeArtifactIds>praksis-module-contacts,angus-mail,jakarta.mail-api,jakarta.activation-api,angus-activation</includeArtifactIds>
-            </configuration>
-          </execution>
-          <execution>
-            <id>smtp-module</id>
-            <phase>package</phase>
-            <goals>
-              <goal>copy-dependencies</goal>
-            </goals>
-            <configuration>
-              <outputDirectory>${project.build.directory}/smtp</outputDirectory>
-              <includeScope>runtime</includeScope>
-              <includeArtifactIds>praksis-module-smtp,angus-mail,jakarta.mail-api,jakarta.activation-api,angus-activation</includeArtifactIds>
+              <excludeArtifactIds>praksis-expression-cel,praksis-module-maildir,praksis-mail-html,jsoup</excludeArtifactIds>
             </configuration>
           </execution>
           <execution>
@@ -232,34 +157,10 @@
                   <fileset dir="${project.build.directory}/maildir" includes="*.jar"/>
                   <fileset dir="${project.basedir}/../modules/praksis-module-maildir" includes="module.toml"/>
                 </copy>
-                <mkdir dir="${image.dir}/lib/praksis/modules/imap"/>
-                <copy todir="${image.dir}/lib/praksis/modules/imap">
-                  <fileset dir="${project.build.directory}/imap" includes="*.jar"/>
-                  <fileset dir="${project.basedir}/../modules/praksis-module-imap" includes="module.toml"/>
-                </copy>
-                <mkdir dir="${image.dir}/lib/praksis/modules/notify"/>
-                <copy todir="${image.dir}/lib/praksis/modules/notify">
-                  <fileset dir="${project.build.directory}/notify" includes="*.jar"/>
-                  <fileset dir="${project.basedir}/../modules/praksis-module-notify" includes="module.toml"/>
-                </copy>
-                <mkdir dir="${image.dir}/lib/praksis/modules/contacts"/>
-                <copy todir="${image.dir}/lib/praksis/modules/contacts">
-                  <fileset dir="${project.build.directory}/contacts" includes="*.jar"/>
-                  <fileset dir="${project.basedir}/../modules/praksis-module-contacts" includes="module.toml"/>
-                </copy>
-                <mkdir dir="${image.dir}/lib/praksis/modules/smtp"/>
-                <copy todir="${image.dir}/lib/praksis/modules/smtp">
-                  <fileset dir="${project.build.directory}/smtp" includes="*.jar"/>
-                  <fileset dir="${project.basedir}/../modules/praksis-module-smtp" includes="module.toml"/>
-                </copy>
                 <!-- the same modules as archives for "praksis modules install": the files of the
                      module directory at the top level of a zip -->
                 <mkdir dir="${project.build.directory}/archives"/>
                 <zip destfile="${project.build.directory}/archives/maildir.praksis-module" basedir="${image.dir}/lib/praksis/modules/maildir"/>
-                <zip destfile="${project.build.directory}/archives/imap.praksis-module" basedir="${image.dir}/lib/praksis/modules/imap"/>
-                <zip destfile="${project.build.directory}/archives/notify.praksis-module" basedir="${image.dir}/lib/praksis/modules/notify"/>
-                <zip destfile="${project.build.directory}/archives/contacts.praksis-module" basedir="${image.dir}/lib/praksis/modules/contacts"/>
-                <zip destfile="${project.build.directory}/archives/smtp.praksis-module" basedir="${image.dir}/lib/praksis/modules/smtp"/>
                 <copy file="${project.basedir}/../LICENSE" todir="${image.dir}"/>
                 <copy file="${project.basedir}/../NOTICE" todir="${image.dir}"/>
               </target>
