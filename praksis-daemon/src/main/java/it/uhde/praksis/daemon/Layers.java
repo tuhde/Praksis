@@ -83,6 +83,9 @@ final class Layers {
     } catch (it.uhde.praksis.engine.ModuleLoadException e) {
       names = null; // the modules are reported where they are loaded
     }
+    if (names != null) {
+      names.add(Builtins.MODULE); // the part of the daemon that offers the praksis.* capabilities
+    }
     this.modules = names;
   }
 
@@ -98,12 +101,8 @@ final class Layers {
     return out;
   }
 
-  /**
-   * Who wrote the current version of a rule: the last commit of the owner layer that changed the
-   * file with which that layer added, replaced or patched it. Uses the local copy of the repository
-   * only.
-   */
-  Provenance provenance(LayerStack.Origin origin, Map<String, String> commits) {
+  /** The file of the owner layer with which it added, replaced or patched the rule. */
+  static String fileOf(LayerStack.Origin origin) {
     String last =
         origin.history().isEmpty() ? "" : origin.history().get(origin.history().size() - 1);
     String operation = last.contains(": ") ? last.substring(last.indexOf(": ") + 2) : "add";
@@ -113,7 +112,16 @@ final class Layers {
           case "patch" -> "patch";
           default -> "rules";
         };
-    String file = directory + "/" + origin.ruleId() + ".toml";
+    return directory + "/" + origin.ruleId() + ".toml";
+  }
+
+  /**
+   * Who wrote the current version of a rule: the last commit of the owner layer that changed the
+   * file with which that layer added, replaced or patched it. Uses the local copy of the repository
+   * only.
+   */
+  Provenance provenance(LayerStack.Origin origin, Map<String, String> commits) {
+    String file = fileOf(origin);
     Optional<GitSource.Change> change = Optional.empty();
     String commit = commits.get(origin.owner());
     if (commit != null) {

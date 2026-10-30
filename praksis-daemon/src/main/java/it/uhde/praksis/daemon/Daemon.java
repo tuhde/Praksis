@@ -112,8 +112,11 @@ public final class Daemon implements AutoCloseable {
               config.lockfile(),
               config.moduleSettings(),
               config.enabledModules());
+      Agent agent = new Agent();
+      modules = Builtins.add(modules, agent);
       ExpressionCompiler compiler = compiler(config);
       Layers layers = new Layers(config, new GitCli(config.gitCache()));
+      agent.bind(config, layers, modules);
       LayerStack.Effective effective = layers.effective();
       if (!effective.skipped().isEmpty()) {
         LOG.log(

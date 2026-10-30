@@ -28,6 +28,24 @@ public final class LoadedModules implements AutoCloseable {
     this.sources = List.copyOf(sources);
   }
 
+  /**
+   * These modules and one that is part of the daemon itself (it needs the daemon's own objects, so
+   * it is not loaded from disk). The result owns all the capabilities; the original is not used
+   * again.
+   */
+  public LoadedModules with(ModuleDescriptor builtIn, Map<String, Capability> capabilities) {
+    List<ModuleDescriptor> all = new ArrayList<>(descriptors);
+    all.add(builtIn);
+    Map<String, Capability> merged = new java.util.HashMap<>(this.capabilities);
+    capabilities.forEach(
+        (name, c) -> {
+          if (merged.putIfAbsent(name, c) != null) {
+            throw new IllegalArgumentException("capability '" + name + "' is provided twice");
+          }
+        });
+    return new LoadedModules(all, merged, sources);
+  }
+
   public List<ModuleDescriptor> descriptors() {
     return descriptors;
   }

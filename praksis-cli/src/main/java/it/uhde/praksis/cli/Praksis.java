@@ -32,6 +32,7 @@ import picocli.CommandLine.Spec;
       Praksis.Status.class,
       Praksis.Inject.class,
       Praksis.Modules.class,
+      Praksis.Agent.class,
       Praksis.Layers.class,
       Praksis.Effective.class,
       Praksis.Verify.class,
@@ -532,7 +533,10 @@ public final class Praksis {
         if (o.done()) {
           boolean ok = true;
           for (Response.LogLines.Line line : o.lines()) {
-            ok &= line.outcome().equals("OK");
+            // a step that was left out because its condition is false is no failure
+            ok &=
+                line.outcome().equals("OK")
+                    || (line.outcome().equals("SKIPPED") && line.actionId() != null);
             out()
                 .printf(
                     "  %-7s %s%s%n",
@@ -1004,6 +1008,68 @@ public final class Praksis {
           return 0;
         }
         return exitCodeFor(response);
+      }
+    }
+  }
+
+  @Command(
+      name = "agent",
+      description =
+          "What the maintenance agent has staged: tests that it wrote for rules without one."
+              + " Nothing is changed in a layer; 'export' copies the files into your own"
+              + " checkout, where you commit them.",
+      subcommands = {
+        Praksis.Agent.ListCommand.class,
+        Praksis.Agent.ShowCommand.class,
+        Praksis.Agent.ExportCommand.class,
+        Praksis.Agent.DropCommand.class
+      })
+  static final class Agent {
+    @Command(name = "list", description = "Lists the staged changes.")
+    static final class ListCommand extends Base {
+      @Override
+      public Integer call() throws InterruptedException {
+        return runDaemonCommand("--admin", "agent", "list");
+      }
+    }
+
+    @Command(
+        name = "show",
+        description = "Shows a staged change and runs the checks on the layer with it.")
+    static final class ShowCommand extends Base {
+      @CommandLine.Parameters(paramLabel = "<id>", description = "The id.")
+      String id;
+
+      @Override
+      public Integer call() throws InterruptedException {
+        return runDaemonCommand("--admin", "agent", "show", id);
+      }
+    }
+
+    @Command(
+        name = "export",
+        description = "Writes the files of a staged change into a directory (your checkout).")
+    static final class ExportCommand extends Base {
+      @CommandLine.Parameters(index = "0", paramLabel = "<id>", description = "The id.")
+      String id;
+
+      @CommandLine.Parameters(index = "1", paramLabel = "<directory>", description = "Where.")
+      String directory;
+
+      @Override
+      public Integer call() throws InterruptedException {
+        return runDaemonCommand("--admin", "agent", "export", id, directory);
+      }
+    }
+
+    @Command(name = "drop", description = "Throws a staged change away.")
+    static final class DropCommand extends Base {
+      @CommandLine.Parameters(paramLabel = "<id>", description = "The id.")
+      String id;
+
+      @Override
+      public Integer call() throws InterruptedException {
+        return runDaemonCommand("--admin", "agent", "drop", id);
       }
     }
   }
