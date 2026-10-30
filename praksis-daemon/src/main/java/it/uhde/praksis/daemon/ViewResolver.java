@@ -880,6 +880,15 @@ final class ViewResolver {
       Map<String, Object> ruleParams,
       Set<String> names)
       throws ExpressionException {
+    if (a.opens().isPresent() && a.opens().get().screen().isPresent()) {
+      return new ViewComponent.Action(
+          a.label(),
+          "",
+          Map.of(),
+          null,
+          null,
+          new ViewComponent.Opens("", Map.of(), a.opens().get().screen().get()));
+    }
     if (a.opens().isPresent()) {
       View.Opens o = a.opens().get();
       Map<String, Object> params = new LinkedHashMap<>();

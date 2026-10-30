@@ -431,6 +431,44 @@ final class Screens {
     }
   }
 
+  /**
+   * The rules without a test in the layers that take proposals: what the agent can write tests for.
+   */
+  Response untested() throws DaemonException {
+    StringWriter err = new StringWriter();
+    Admin.Checked checked =
+        Admin.check(
+            config,
+            layers,
+            new Admin.Check.Options(false, false, 0, Map.of()),
+            new PrintWriter(err, true),
+            modules);
+    if (checked == null) {
+      return new Response.Error(err.toString().strip());
+    }
+    java.util.Set<String> takers = new java.util.HashSet<>();
+    config.aiMaintainedLayers().forEach(l -> takers.add(l.name()));
+    Map<String, String> owners = new HashMap<>();
+    inUse.origins().forEach(o -> owners.put(o.ruleId(), o.owner()));
+    List<Response.UntestedRules.Rule> out = new ArrayList<>();
+    for (var f : checked.report().findings()) {
+      if (f.check().equals("coverage") && f.where().startsWith("rules/")) {
+        String id = f.where().substring("rules/".length(), f.where().length() - ".toml".length());
+        String owner = owners.getOrDefault(id, "");
+        if (takers.contains(owner)) {
+          String effect =
+              inUse.ruleset().rules().stream()
+                  .filter(r -> r.id().equals(id))
+                  .map(r -> r.effect().id())
+                  .findFirst()
+                  .orElse("");
+          out.add(new Response.UntestedRules.Rule(id, owner, effect));
+        }
+      }
+    }
+    return new Response.UntestedRules(out);
+  }
+
   /** One staged change with the checks on the layer with it. */
   Response stagedDetail(String id) throws DaemonException {
     try {

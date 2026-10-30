@@ -194,10 +194,32 @@ public record View(
    * Another view to show, with this state: how a reply opens the view for writing with the mail it
    * answers. The parameters must be declared by that view.
    */
-  public record Opens(String view, Map<String, Arg> params) {
+  public record Opens(String view, Map<String, Arg> params, Optional<String> screen) {
     public Opens {
       params = Map.copyOf(params);
     }
+
+    /** Another view. */
+    public Opens(String view, Map<String, Arg> params) {
+      this(view, params, Optional.empty());
+    }
+
+    /**
+     * The names of the screens of the generic frontend that a view may open: the ones that the API
+     * of the daemon gives (what is staged by the agent, the requests for permissions, ...).
+     */
+    public static final Set<String> SCREENS =
+        Set.of(
+            "overview",
+            "requests",
+            "ruleset",
+            "shadow",
+            "grants",
+            "log",
+            "commands",
+            "agent",
+            "views",
+            "proposals");
   }
 
   /**
@@ -871,7 +893,15 @@ public record View(
     if (o.isEmpty()) {
       return Optional.empty();
     }
-    o.get().onlyKeys(Set.of("view", "params"));
+    o.get().onlyKeys(Set.of("view", "screen", "params"));
+    Optional<String> screen = o.get().string("screen", false);
+    if (screen.isPresent()) {
+      // a screen of the frontend: no view and no state
+      if (o.get().has("view") || o.get().has("params")) {
+        o.get().problem("'screen' is used alone: no 'view' and no 'params'");
+      }
+      return Optional.of(new Opens("", Map.of(), screen));
+    }
     Optional<String> view = o.get().string("view", true);
     Map<String, Arg> params = new LinkedHashMap<>();
     o.get()

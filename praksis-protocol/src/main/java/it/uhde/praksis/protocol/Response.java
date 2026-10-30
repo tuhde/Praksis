@@ -33,6 +33,7 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Response.Suggestions.class, name = "suggestions"),
   @JsonSubTypes.Type(value = Response.Dictated.class, name = "dictated"),
   @JsonSubTypes.Type(value = Response.StagedList.class, name = "staged-list"),
+  @JsonSubTypes.Type(value = Response.UntestedRules.class, name = "untested-rules"),
   @JsonSubTypes.Type(value = Response.StagedDetail.class, name = "staged-detail"),
   @JsonSubTypes.Type(value = Response.Done.class, name = "done"),
   @JsonSubTypes.Type(value = Response.Stopped.class, name = "stopped"),
@@ -522,6 +523,17 @@ public sealed interface Response {
   }
 
   /**
+   * The rules that no test makes fire and that sit in an AI-maintained layer, so that the agent can
+   * write tests for them.
+   *
+   * @param items the rules
+   */
+  record UntestedRules(List<Rule> items) implements Response {
+    /** A rule without a test. */
+    public record Rule(String id, String layer, String effect) {}
+  }
+
+  /**
    * The changes that the maintenance agent has staged, newest first.
    *
    * @param items the changes
@@ -860,7 +872,12 @@ public sealed interface Response {
      * Another view to show, with this state (for example the reply to a mail opens the view for
      * writing with the mail it answers).
      */
-    public record Opens(String view, java.util.Map<String, Object> params) {}
+    public record Opens(String view, java.util.Map<String, Object> params, String screen) {
+      /** Another view. */
+      public Opens(String view, java.util.Map<String, Object> params) {
+        this(view, params, null);
+      }
+    }
 
     /**
      * A file to download instead of a command: ask the daemon to {@link Request.Fetch} it, and let

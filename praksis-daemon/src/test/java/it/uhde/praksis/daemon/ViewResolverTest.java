@@ -1043,4 +1043,22 @@ class ViewResolverTest {
     assertThat(listened).hasSize(2);
     assertThat(this.denied).anyMatch(d -> d.startsWith("view:v speech.listen"));
   }
+
+  @Test
+  void aButtonThatOpensAScreenSaysWhichAndKeepsNoViewOrState() throws Exception {
+    String view =
+        """
+        title = "T"
+        [[component]]
+        type = "button"
+        label = "Staged changes"
+        opens = { screen = "agent" }
+        """;
+
+    Response.ResolvedView r =
+        (Response.ResolvedView) resolver(view, null).resolve("v", Map.of(), 1);
+
+    assertThat(r.components().get(0).actions().get(0).opens())
+        .isEqualTo(new ViewComponent.Opens("", Map.of(), "agent"));
+  }
 }

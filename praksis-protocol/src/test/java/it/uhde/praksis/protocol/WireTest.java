@@ -57,6 +57,81 @@ class WireTest {
   }
 
   @Test
+  void theMessagesOfTheAgentAndTheMicrophoneSurviveTheRoundTrip() throws Exception {
+    for (Request r :
+        List.of(
+            new Request.Untested(),
+            new Request.Staged(),
+            new Request.StagedShow("0001-abc"),
+            new Request.StagedDrop("0001-abc"),
+            new Request.Dictate("mail.reader", "speech.listen"))) {
+      assertThat(Wire.decodeRequest(Wire.encode(r))).isEqualTo(r);
+    }
+    var staged =
+        new Response.StagedList.Staged(
+            "0001-abc", "mine", "r1", "why", "2026-10-30T10:00:00Z", List.of("tests/r1.toml"));
+    var verification =
+        new Response.Verification(false, "t", 1, 0, 0, List.of(), null, List.of(), null);
+    for (Response r :
+        List.of(
+            new Response.UntestedRules(
+                List.of(new Response.UntestedRules.Rule("r1", "mine", "local-write"))),
+            new Response.StagedList(List.of(staged)),
+            new Response.StagedDetail(
+                staged, Map.of("tests/r1.toml", "format_version = 1\n"), verification),
+            new Response.Dictated("lunch on friday", true))) {
+      assertThat(Wire.decodeResponse(Wire.encode(r))).isEqualTo(r);
+    }
+    // a part of a view with a microphone, and an action that opens a screen
+    var input =
+        new Response.ViewComponent(
+            "input",
+            "",
+            null,
+            "Search",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            new Response.ViewComponent.Select("query", null),
+            null,
+            null,
+            new Response.ViewComponent.Dictate("speech.listen"));
+    var button =
+        new Response.ViewComponent(
+            "button",
+            null,
+            null,
+            "Staged",
+            null,
+            null,
+            null,
+            null,
+            null,
+            List.of(
+                new Response.ViewComponent.Action(
+                    "Staged",
+                    "",
+                    Map.of(),
+                    null,
+                    null,
+                    new Response.ViewComponent.Opens("", Map.of(), "agent"))),
+            null,
+            null,
+            null,
+            null);
+    Response view =
+        new Response.ResolvedView("v", "T", 1, List.of(), List.of(input, button), List.of());
+    assertThat(Wire.decodeResponse(Wire.encode(view))).isEqualTo(view);
+  }
+
+  @Test
   void aStatusSaysWhichProtocolTheDaemonSpeaksAndAnOldOneSaysNothing() throws Exception {
     var status = new Response.StatusReport(1, "t", "mail", 2, List.of(), 0);
     assertThat(status.protocol()).isEqualTo(Wire.PROTOCOL_VERSION);

@@ -412,6 +412,18 @@ final class ViewValidator {
   /** Opening a view names a view that exists and parameters that it declares. */
   private void opens(View.Opens o, Scope scope, Ruleset ruleset, String at, List<Problem> out) {
     String where = at + ", opens";
+    if (o.screen().isPresent()) {
+      if (!View.Opens.SCREENS.contains(o.screen().get())) {
+        out.add(
+            new Problem(
+                where,
+                "there is no screen '"
+                    + o.screen().get()
+                    + "'; the screens are "
+                    + new java.util.TreeSet<>(View.Opens.SCREENS)));
+      }
+      return;
+    }
     View target =
         ruleset.views().stream().filter(v -> v.id().equals(o.view())).findFirst().orElse(null);
     if (target == null) {

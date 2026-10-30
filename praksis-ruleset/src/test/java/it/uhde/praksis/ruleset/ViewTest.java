@@ -884,4 +884,25 @@ class ViewTest {
             () -> searchProblems(SEARCH.replace("seconds = 6", "seconds = { cel = \"1\" }")))
         .hasMessageContaining("is a value, not an expression");
   }
+
+  @Test
+  void aButtonCanOpenAScreenOfTheFrontendByItsNameAndNothingElse() throws Exception {
+    String view =
+        CHAIN.replace(
+            "opens = { view = \"mail.inbox\", params = { m = { cel = \"view.m\" } } }",
+            "opens = { screen = \"agent\" }");
+    assertThat(problems(view)).isEmpty();
+    Path l = layer("sc" + System.nanoTime(), Map.of("mail.inbox", view), COMMAND);
+    View v = LayerStack.resolve(List.of(new Source("sc", l)), Map.of()).ruleset().views().get(0);
+    assertThat(v.components().get(0).actions().get(0).opens().get().screen()).contains("agent");
+
+    assertThat(problems(view.replace("screen = \"agent\"", "screen = \"nowhere\"")))
+        .anyMatch(p -> p.message().contains("there is no screen 'nowhere'"));
+    assertThatThrownBy(
+            () ->
+                problems(
+                    view.replace(
+                        "screen = \"agent\"", "screen = \"agent\", view = \"mail.inbox\"")))
+        .hasMessageContaining("'screen' is used alone");
+  }
 }
