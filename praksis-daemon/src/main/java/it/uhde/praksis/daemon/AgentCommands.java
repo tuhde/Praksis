@@ -106,17 +106,7 @@ final class AgentCommands {
           out.println(content.stripTrailing());
         });
     out.println();
-    Path source = null;
-    for (var s : layers.sources(layers.readLock())) {
-      if (s.name().equals(staged.layer())) {
-        source = s.directory();
-      }
-    }
-    if (source == null) {
-      err.println("the layer '" + staged.layer() + "' is not there any more");
-      return 1;
-    }
-    Path candidate = Files.createTempDirectory("praksis-agent-");
+    Admin.Checked checked;
     try (LoadedModules modules =
         Builtins.add(
             ModuleLoader.load(
@@ -125,37 +115,64 @@ final class AgentCommands {
                 config.moduleSettings(),
                 config.enabledModules()),
             new Agent())) {
+      StringWriter errors = new StringWriter();
+      checked = checkWith(config, layers, staged, files, modules, new PrintWriter(errors));
+      if (checked == null) {
+        err.println(errors.toString().strip());
+        return 1;
+      }
+    } catch (ModuleLoadException e) {
+      err.println("cannot check against the modules: " + e.getMessage());
+      return 1;
+    }
+    Admin.print(checked, out);
+    out.println();
+    out.println(
+        "To take it: praksis agent export "
+            + staged.id()
+            + " <your checkout of "
+            + staged.layer()
+            + ">");
+    return checked.report().ok() ? 0 : 1;
+  }
+
+  /**
+   * The checks on the layer with the staged files, as the layer is now.
+   *
+   * @return the result, or null if they could not be run (the reason is written to {@code err})
+   */
+  static Admin.Checked checkWith(
+      DaemonConfig config,
+      Layers layers,
+      AgentStore.Staged staged,
+      Map<String, String> files,
+      LoadedModules modules,
+      PrintWriter err)
+      throws IOException, DaemonException {
+    Path source = null;
+    for (var s : layers.sources(layers.readLock())) {
+      if (s.name().equals(staged.layer())) {
+        source = s.directory();
+      }
+    }
+    if (source == null) {
+      err.println("the layer '" + staged.layer() + "' is not there any more");
+      return null;
+    }
+    Path candidate = Files.createTempDirectory("praksis-agent-");
+    try {
       Agent.copy(source, candidate);
       for (var e : files.entrySet()) {
         Path target = candidate.resolve(e.getKey());
         Files.createDirectories(target.getParent());
         Files.writeString(target, e.getValue(), StandardCharsets.UTF_8);
       }
-      StringWriter errors = new StringWriter();
-      Admin.Checked checked =
-          Admin.check(
-              config,
-              layers,
-              new Admin.Check.Options(
-                  false, false, 0, Map.of(staged.layer(), candidate.toString())),
-              new PrintWriter(errors),
-              modules);
-      if (checked == null) {
-        err.println(errors.toString().strip());
-        return 1;
-      }
-      Admin.print(checked, out);
-      out.println();
-      out.println(
-          "To take it: praksis agent export "
-              + staged.id()
-              + " <your checkout of "
-              + staged.layer()
-              + ">");
-      return checked.report().ok() ? 0 : 1;
-    } catch (ModuleLoadException e) {
-      err.println("cannot check against the modules: " + e.getMessage());
-      return 1;
+      return Admin.check(
+          config,
+          layers,
+          new Admin.Check.Options(false, false, 0, Map.of(staged.layer(), candidate.toString())),
+          err,
+          modules);
     } finally {
       Agent.delete(candidate);
     }

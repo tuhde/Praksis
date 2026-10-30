@@ -39,6 +39,9 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.Upload.class, name = "upload"),
   @JsonSubTypes.Type(value = Request.Lookup.class, name = "lookup"),
   @JsonSubTypes.Type(value = Request.Dictate.class, name = "dictate"),
+  @JsonSubTypes.Type(value = Request.Staged.class, name = "staged"),
+  @JsonSubTypes.Type(value = Request.StagedShow.class, name = "staged-show"),
+  @JsonSubTypes.Type(value = Request.StagedDrop.class, name = "staged-drop"),
   @JsonSubTypes.Type(value = Request.Stop.class, name = "stop")
 })
 public sealed interface Request {
@@ -287,6 +290,28 @@ public sealed interface Request {
       args = args == null ? java.util.Map.of() : args;
     }
   }
+
+  /**
+   * Asks for the changes that the maintenance agent has staged. Answered with {@link
+   * Response.StagedList}.
+   */
+  record Staged() implements Request {}
+
+  /**
+   * Asks for one staged change: its files, and the checks on the layer with them as it is now.
+   * Answered with {@link Response.StagedDetail}, or with an error.
+   *
+   * @param id the id of the change
+   */
+  record StagedShow(String id) implements Request {}
+
+  /**
+   * Throws a staged change away (only the staged copy: nothing in a layer is touched). Answered
+   * with {@link Response.Done}, or with an error.
+   *
+   * @param id the id of the change
+   */
+  record StagedDrop(String id) implements Request {}
 
   /**
    * Listens for what a person says into the microphone button of an input of a view. The view must

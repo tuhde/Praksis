@@ -338,6 +338,9 @@ public final class Daemon implements AutoCloseable {
         case Request.Verify v -> screens.verify(v);
         case Request.Proposals p -> screens.proposals();
         case Request.ProposalShow p -> screens.proposalDetail(p.name());
+        case Request.Staged s -> screens.staged();
+        case Request.StagedShow s -> screens.stagedDetail(s.id());
+        case Request.StagedDrop s -> screens.stagedDrop(s.id());
         case Request.ProposalApprove a -> {
           java.util.List<String> args =
               new java.util.ArrayList<>(java.util.List.of("approve", a.name(), a.commit()));

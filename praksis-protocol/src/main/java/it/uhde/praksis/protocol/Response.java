@@ -32,6 +32,8 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Response.Uploaded.class, name = "uploaded"),
   @JsonSubTypes.Type(value = Response.Suggestions.class, name = "suggestions"),
   @JsonSubTypes.Type(value = Response.Dictated.class, name = "dictated"),
+  @JsonSubTypes.Type(value = Response.StagedList.class, name = "staged-list"),
+  @JsonSubTypes.Type(value = Response.StagedDetail.class, name = "staged-detail"),
   @JsonSubTypes.Type(value = Response.Done.class, name = "done"),
   @JsonSubTypes.Type(value = Response.Stopped.class, name = "stopped"),
   @JsonSubTypes.Type(value = Response.Error.class, name = "error")
@@ -518,6 +520,37 @@ public sealed interface Response {
     /** A parameter of a view. */
     public record Param(String name, String type, Object value) {}
   }
+
+  /**
+   * The changes that the maintenance agent has staged, newest first.
+   *
+   * @param items the changes
+   */
+  record StagedList(List<Staged> items) implements Response {
+    /**
+     * One staged change: new test files for a rule, waiting for a person.
+     *
+     * @param id its id
+     * @param layer the layer that the files are for
+     * @param rule the rule that they test
+     * @param reason why, as the agent said
+     * @param created when
+     * @param files the paths of the files, below the layer
+     */
+    public record Staged(
+        String id, String layer, String rule, String reason, String created, List<String> files) {}
+  }
+
+  /**
+   * One staged change with its files and the checks on the layer with them.
+   *
+   * @param change the change
+   * @param files the content of each file by its path
+   * @param verification the result of the checks
+   */
+  record StagedDetail(
+      StagedList.Staged change, java.util.Map<String, String> files, Verification verification)
+      implements Response {}
 
   /**
    * What was said into a microphone.

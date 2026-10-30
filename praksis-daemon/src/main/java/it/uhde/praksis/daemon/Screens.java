@@ -17,6 +17,7 @@ import it.uhde.praksis.ruleset.RulesetValidator;
 import it.uhde.praksis.ruleset.Trust;
 import it.uhde.praksis.ruleset.Verifier;
 import it.uhde.praksis.store.Store;
+import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.ArrayList;
@@ -409,6 +410,64 @@ final class Screens {
       throw e;
     } catch (Exception e) {
       return new Response.Error(e.getMessage());
+    }
+  }
+
+  private AgentStore agentStore() {
+    return new AgentStore(config.dataDirectory().resolve(Builtins.MODULE));
+  }
+
+  private static Response.StagedList.Staged staged(AgentStore.Staged s) {
+    return new Response.StagedList.Staged(
+        s.id(), s.layer(), s.rule(), s.reason(), s.created(), s.files());
+  }
+
+  /** The changes that the maintenance agent has staged. */
+  Response staged() throws DaemonException {
+    try {
+      return new Response.StagedList(agentStore().list().stream().map(Screens::staged).toList());
+    } catch (IOException e) {
+      throw new DaemonException("cannot read the staged changes: " + e.getMessage(), e);
+    }
+  }
+
+  /** One staged change with the checks on the layer with it. */
+  Response stagedDetail(String id) throws DaemonException {
+    try {
+      return stagedDetail0(id);
+    } catch (IOException e) {
+      throw new DaemonException("cannot read the staged change: " + e.getMessage(), e);
+    }
+  }
+
+  private Response stagedDetail0(String id) throws IOException, DaemonException {
+    AgentStore store = agentStore();
+    AgentStore.Staged found = store.find(id).orElse(null);
+    if (found == null) {
+      return new Response.Error("nothing is staged with the id '" + id + "'");
+    }
+    Map<String, String> files = store.files(found);
+    StringWriter err = new StringWriter();
+    Admin.Checked checked =
+        AgentCommands.checkWith(config, layers, found, files, modules, new PrintWriter(err, true));
+    if (checked == null) {
+      return new Response.Error(err.toString().strip());
+    }
+    return new Response.StagedDetail(staged(found), files, verification(checked));
+  }
+
+  /** Throws a staged change away. */
+  Response stagedDrop(String id) throws DaemonException {
+    try {
+      AgentStore store = agentStore();
+      AgentStore.Staged found = store.find(id).orElse(null);
+      if (found == null) {
+        return new Response.Error("nothing is staged with the id '" + id + "'");
+      }
+      store.drop(found);
+      return new Response.Done("Dropped " + id + ".");
+    } catch (IOException e) {
+      throw new DaemonException("cannot drop the staged change: " + e.getMessage(), e);
     }
   }
 
