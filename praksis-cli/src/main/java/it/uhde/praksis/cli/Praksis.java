@@ -1011,7 +1011,12 @@ public final class Praksis {
   @Command(
       name = "modules",
       description = "Manages the modules.",
-      subcommands = Praksis.Modules.Lock.class)
+      subcommands = {
+        Praksis.Modules.Lock.class,
+        Praksis.Modules.Install.class,
+        Praksis.Modules.Remove.class,
+        Praksis.Modules.ListCommand.class
+      })
   static final class Modules {
     @Command(
         name = "lock",
@@ -1022,6 +1027,47 @@ public final class Praksis {
       @Override
       public Integer call() throws InterruptedException {
         return runDaemonCommand("--lock-modules");
+      }
+    }
+
+    @Command(
+        name = "install",
+        description =
+            "Installs a module from its archive (a .praksis-module file) in the home directory and"
+                + " accepts it in modules.lock. A module is code that runs with the rights of the"
+                + " daemon: install only what you trust. A module of the same name that ships with"
+                + " the runtime image is hidden by it.")
+    static final class Install extends Base {
+      @Option(names = "--replace", description = "Replace the module of the same name in the home.")
+      boolean replace;
+
+      @CommandLine.Parameters(paramLabel = "<archive>", description = "The module archive.")
+      String archive;
+
+      @Override
+      public Integer call() throws InterruptedException {
+        return replace
+            ? runDaemonCommand("--install-module", archive, "--replace")
+            : runDaemonCommand("--install-module", archive);
+      }
+    }
+
+    @Command(name = "remove", description = "Removes a module that was installed in the home.")
+    static final class Remove extends Base {
+      @CommandLine.Parameters(paramLabel = "<name>", description = "The name of the module.")
+      String name;
+
+      @Override
+      public Integer call() throws InterruptedException {
+        return runDaemonCommand("--remove-module", name);
+      }
+    }
+
+    @Command(name = "list", description = "Lists the modules and where each one is.")
+    static final class ListCommand extends Base {
+      @Override
+      public Integer call() throws InterruptedException {
+        return runDaemonCommand("--list-modules");
       }
     }
   }

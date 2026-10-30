@@ -53,6 +53,10 @@ final class Lockfile {
     return hashes.get(module);
   }
 
+  void remove(String module) {
+    hashes.remove(module);
+  }
+
   void put(String module, String sha256) {
     hashes.put(module, sha256);
   }

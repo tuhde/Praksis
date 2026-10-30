@@ -67,13 +67,27 @@ public final class ModuleLoader {
       Map<String, Map<String, Object>> settings,
       Set<String> enabled)
       throws ModuleLoadException {
+    return load(List.of(modulesDir), lockfile, settings, enabled);
+  }
+
+  /**
+   * Loads the enabled modules of several directories, the first first. A module that is in an
+   * earlier directory hides the one of the same name in a later one: what a person installed in the
+   * home directory replaces what the runtime image ships.
+   */
+  public static LoadedModules load(
+      List<Path> modulesDirs,
+      Path lockfile,
+      Map<String, Map<String, Object>> settings,
+      Set<String> enabled)
+      throws ModuleLoadException {
     Lockfile locked = Lockfile.read(lockfile);
     Set<String> found = new HashSet<>();
     List<ModuleDescriptor> descriptors = new ArrayList<>();
     Map<String, Capability> capabilities = new HashMap<>();
     List<EventSource> sources = new ArrayList<>();
 
-    for (Path dir : moduleDirs(modulesDir)) {
+    for (Path dir : moduleDirs(modulesDirs)) {
       ModuleDescriptorReader.Result read = ModuleDescriptorReader.read(dir.resolve("module.toml"));
       ModuleDescriptor descriptor = read.descriptor();
       String name = descriptor.name();
@@ -152,7 +166,7 @@ public final class ModuleLoader {
     }
     for (String name : enabled) {
       if (!found.contains(name)) {
-        throw new ModuleLoadException("module '" + name + "' is enabled but not in " + modulesDir);
+        throw new ModuleLoadException("module '" + name + "' is enabled but not in " + modulesDirs);
       }
     }
     try {
@@ -171,8 +185,14 @@ public final class ModuleLoader {
    */
   public static Set<String> moduleNames(Path modulesDir, Set<String> enabled)
       throws ModuleLoadException {
+    return moduleNames(List.of(modulesDir), enabled);
+  }
+
+  /** As {@link #moduleNames(Path, Set)}, for several directories. */
+  public static Set<String> moduleNames(List<Path> modulesDirs, Set<String> enabled)
+      throws ModuleLoadException {
     Set<String> names = new java.util.TreeSet<>();
-    for (Path dir : moduleDirs(modulesDir)) {
+    for (Path dir : moduleDirs(modulesDirs)) {
       String name = ModuleDescriptorReader.read(dir.resolve("module.toml")).descriptor().name();
       if (enabled.isEmpty() || enabled.contains(name)) {
         names.add(name);
@@ -183,8 +203,13 @@ public final class ModuleLoader {
 
   /** Records the current hash of every module directory, accepting new and changed modules. */
   public static void lock(Path modulesDir, Path lockfile) throws ModuleLoadException {
+    lock(List.of(modulesDir), lockfile);
+  }
+
+  /** As {@link #lock(Path, Path)}, for several directories; a hidden module is not recorded. */
+  public static void lock(List<Path> modulesDirs, Path lockfile) throws ModuleLoadException {
     Lockfile locked = Lockfile.read(lockfile);
-    for (Path dir : moduleDirs(modulesDir)) {
+    for (Path dir : moduleDirs(modulesDirs)) {
       String name = ModuleDescriptorReader.read(dir.resolve("module.toml")).descriptor().name();
       locked.put(name, Lockfile.hashDirectory(dir));
     }
@@ -204,14 +229,30 @@ public final class ModuleLoader {
     }
   }
 
-  private static List<Path> moduleDirs(Path modulesDir) throws ModuleLoadException {
-    if (!Files.isDirectory(modulesDir)) {
+  /** Every module directory of the roots; of two with the same module name the first one counts. */
+  private static List<Path> moduleDirs(List<Path> roots) throws ModuleLoadException {
+    Map<String, Path> byName = new java.util.LinkedHashMap<>();
+    for (Path root : roots) {
+      for (Path dir : subdirectories(root)) {
+        String name = ModuleDescriptorReader.read(dir.resolve("module.toml")).descriptor().name();
+        byName.putIfAbsent(name, dir);
+      }
+    }
+    return List.copyOf(byName.values());
+  }
+
+  /** The directories directly below a root, sorted; none if the root is not there. */
+  static List<Path> subdirectories(Path root) throws ModuleLoadException {
+    if (!Files.isDirectory(root)) {
       return List.of();
     }
-    try (Stream<Path> dirs = Files.list(modulesDir)) {
-      return dirs.filter(Files::isDirectory).sorted().toList();
+    try (Stream<Path> dirs = Files.list(root)) {
+      return dirs.filter(Files::isDirectory)
+          .filter(d -> !d.getFileName().toString().startsWith("."))
+          .sorted()
+          .toList();
     } catch (IOException e) {
-      throw new ModuleLoadException("cannot list " + modulesDir + ": " + e.getMessage(), e);
+      throw new ModuleLoadException("cannot list " + root + ": " + e.getMessage(), e);
     }
   }
 

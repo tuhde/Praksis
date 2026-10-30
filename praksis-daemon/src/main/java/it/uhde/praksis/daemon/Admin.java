@@ -339,7 +339,7 @@ final class Admin {
       throws DaemonException {
     try (LoadedModules modules =
         ModuleLoader.load(
-            config.modules(),
+            config.moduleRoots(),
             config.lockfile(),
             config.moduleSettings(),
             config.enabledModules())) {
@@ -568,7 +568,7 @@ final class Admin {
     RuleTestRunner.Report report;
     try (LoadedModules modules =
         ModuleLoader.load(
-            config.modules(),
+            config.moduleRoots(),
             config.lockfile(),
             config.moduleSettings(),
             config.enabledModules())) {
@@ -609,7 +609,7 @@ final class Admin {
     return effective -> {
       try (LoadedModules modules =
           ModuleLoader.load(
-              config.modules(),
+              config.moduleRoots(),
               config.lockfile(),
               config.moduleSettings(),
               config.enabledModules())) {
@@ -637,7 +637,7 @@ final class Admin {
     return ruleset -> {
       try (LoadedModules modules =
           ModuleLoader.load(
-              config.modules(),
+              config.moduleRoots(),
               config.lockfile(),
               config.moduleSettings(),
               config.enabledModules())) {

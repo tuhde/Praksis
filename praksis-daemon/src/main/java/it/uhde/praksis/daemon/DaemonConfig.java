@@ -25,8 +25,9 @@ import java.util.Set;
  * <pre>
  * format_version = 1
  * ruleset    = "ruleset"       # directory with ruleset.toml and rules/
- * modules    = "modules"       # directory with one subdirectory per module; if it is not set
- *                              # and the home has none, the one that ships with the runtime image
+ * modules    = "modules"       # directory with one subdirectory per module (where 'modules
+ *                              # install' puts them); if it is not set, the ones that ship with
+ *                              # the runtime image are used as well, below the ones in the home
  * enabled_modules = ["maildir"]  # load only these; without it the modules with a [module.*]
  *                              # section below, or every module if there is none
  * lockfile   = "modules.lock"
@@ -76,6 +77,7 @@ public record DaemonConfig(
     Path home,
     Path ruleset,
     Path modules,
+    List<Path> moduleRoots,
     Path lockfile,
     Path database,
     Optional<Path> expression,
@@ -179,7 +181,14 @@ public record DaemonConfig(
       table.problem("'format_version' must be 1");
     }
     Path ruleset = path(table, dir, "ruleset", "ruleset");
-    Path modules = installable(table, dir, "modules");
+    // Modules are installed below the home. They are looked for there first, then in the ones that
+    // ship with the runtime image; a module of the home hides one of the same name. A directory
+    // that the file names is the only one.
+    Path modules = path(table, dir, "modules", "modules");
+    List<Path> moduleRoots = new ArrayList<>(List.of(modules));
+    if (!table.has("modules")) {
+      installed("modules").filter(i -> !i.equals(modules)).ifPresent(moduleRoots::add);
+    }
     Path lockfile = path(table, dir, "lockfile", "modules.lock");
     Path database = path(table, dir, "database", "praksis.db");
     Optional<Path> expression =
@@ -235,6 +244,7 @@ public record DaemonConfig(
         dir,
         ruleset,
         modules,
+        List.copyOf(moduleRoots),
         lockfile,
         database,
         expression,
@@ -250,18 +260,6 @@ public record DaemonConfig(
   private static Optional<Path> installed(String name) {
     Path dir = Path.of(System.getProperty("java.home"), "lib", "praksis", name);
     return Files.isDirectory(dir) ? Optional.of(dir) : Optional.empty();
-  }
-
-  /**
-   * A directory that can be set in the file, else is {@code <home>/<name>} if that exists, else the
-   * one that ships with the runtime image, else {@code <home>/<name>}.
-   */
-  private static Path installable(Table table, Path home, String name) {
-    if (table.has(name)) {
-      return path(table, home, name, name);
-    }
-    Path local = home.resolve(name);
-    return Files.isDirectory(local) ? local : installed(name).orElse(local);
   }
 
   private static Path path(Table table, Path home, String key, String fallback) {

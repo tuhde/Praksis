@@ -79,7 +79,7 @@ final class Layers {
     try {
       names =
           it.uhde.praksis.engine.ModuleLoader.moduleNames(
-              config.modules(), config.enabledModules());
+              config.moduleRoots(), config.enabledModules());
     } catch (it.uhde.praksis.engine.ModuleLoadException e) {
       names = null; // the modules are reported where they are loaded
     }

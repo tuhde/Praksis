@@ -252,6 +252,14 @@
                   <fileset dir="${project.build.directory}/smtp" includes="*.jar"/>
                   <fileset dir="${project.basedir}/../modules/praksis-module-smtp" includes="module.toml"/>
                 </copy>
+                <!-- the same modules as archives for "praksis modules install": the files of the
+                     module directory at the top level of a zip -->
+                <mkdir dir="${project.build.directory}/archives"/>
+                <zip destfile="${project.build.directory}/archives/maildir.praksis-module" basedir="${image.dir}/lib/praksis/modules/maildir"/>
+                <zip destfile="${project.build.directory}/archives/imap.praksis-module" basedir="${image.dir}/lib/praksis/modules/imap"/>
+                <zip destfile="${project.build.directory}/archives/notify.praksis-module" basedir="${image.dir}/lib/praksis/modules/notify"/>
+                <zip destfile="${project.build.directory}/archives/contacts.praksis-module" basedir="${image.dir}/lib/praksis/modules/contacts"/>
+                <zip destfile="${project.build.directory}/archives/smtp.praksis-module" basedir="${image.dir}/lib/praksis/modules/smtp"/>
                 <copy file="${project.basedir}/../LICENSE" todir="${image.dir}"/>
                 <copy file="${project.basedir}/../NOTICE" todir="${image.dir}"/>
               </target>

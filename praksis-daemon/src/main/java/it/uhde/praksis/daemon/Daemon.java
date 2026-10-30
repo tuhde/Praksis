@@ -108,7 +108,7 @@ public final class Daemon implements AutoCloseable {
     try {
       modules =
           ModuleLoader.load(
-              config.modules(),
+              config.moduleRoots(),
               config.lockfile(),
               config.moduleSettings(),
               config.enabledModules());

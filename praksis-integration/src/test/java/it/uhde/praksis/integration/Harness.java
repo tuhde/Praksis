@@ -82,6 +82,13 @@ final class Harness implements AutoCloseable {
     return home.resolve("gitconfig");
   }
 
+  /**
+   * The module archives that the build made next to the image ({@code praksis modules install}).
+   */
+  Path archive(String module) {
+    return image.getParent().resolve("archives").resolve(module + ".praksis-module");
+  }
+
   Path socket() {
     return home.resolve("praksis.sock");
   }
