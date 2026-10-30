@@ -50,7 +50,8 @@ public final class MailFolders implements Capability {
       for (Path dir : dirs) {
         Map<String, Object> folder = new LinkedHashMap<>();
         boolean inbox = dir.equals(settings.root());
-        folder.put("name", inbox ? "INBOX" : dir.getFileName().toString().substring(1));
+        folder.put(
+            "name", inbox ? "INBOX" : dir.getFileName().toString().substring(1).replace('.', '/'));
         long[] counts = count(dir);
         folder.put("unread", counts[0]);
         folder.put("total", counts[1]);

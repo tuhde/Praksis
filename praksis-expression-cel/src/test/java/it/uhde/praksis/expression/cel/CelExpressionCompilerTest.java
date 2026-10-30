@@ -107,6 +107,14 @@ class CelExpressionCompilerTest {
   }
 
   @Test
+  void theTextFunctionsWork() throws Exception {
+    assertThat(eval("params.senders.join(', ')")).isEqualTo("hello, zzz");
+    assertThat(eval("'hello'.substring(1, 3)")).isEqualTo("el");
+    assertThat(eval("'  a b '.trim().split(' ')")).isEqualTo(List.of("a", "b"));
+    assertThat(eval("'ABC'.lowerAscii()")).isEqualTo("abc");
+  }
+
+  @Test
   void returnsStructuredValues() throws Exception {
     assertThat(eval("event.data.headers")).isEqualTo(Map.of("List-Id", "news.example.org"));
     assertThat(eval("[1, 2, 3]")).isEqualTo(List.of(1L, 2L, 3L));

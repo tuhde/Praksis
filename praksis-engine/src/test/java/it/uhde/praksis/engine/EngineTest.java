@@ -145,6 +145,13 @@ class EngineTest {
         + "\" } }\n";
   }
 
+  private static String callWhen(String id, String capability, String valueExpr, String when) {
+    return call(id, capability, valueExpr)
+        + "when = { cel = \""
+        + when.replace("\"", "\\\"")
+        + "\" }\n";
+  }
+
   private Engine engine() throws RulesetException {
     return engine(Engine.Options.defaults());
   }
@@ -201,6 +208,49 @@ class EngineTest {
       run(engine, event("t", "m"));
     }
     assertThat(calls).containsExactly("record:x", "record:echo-x");
+  }
+
+  @Test
+  void aStepWithAConditionIsDoneOnlyWhenItHoldsAndLaterStepsSeeEmptyResultsOfASkippedOne()
+      throws Exception {
+    rule(
+        "r",
+        "",
+        call("one", "test.record", "'x'")
+            + callWhen("two", "test.record", "results.one.echo", "results.one.echo == 'echo-x'")
+            + callWhen("three", "test.record", "'never'", "results.one.echo == 'something else'")
+            + call("four", "test.record", "'after:' + results.three.echo"));
+    try (Engine engine = engine()) {
+      run(engine, event("t", "m"));
+    }
+    assertThat(calls).containsExactly("record:x", "record:echo-x", "record:after:");
+  }
+
+  @Test
+  void aStopWithAConditionStopsOnlyWhenItHolds() throws Exception {
+    rule(
+        "a",
+        "",
+        call("one", "test.record", "'first'")
+            + "\n[[action]]\nstop = true\nwhen = { cel = \"event.data.name == 'enough'\" }\n"
+            + call("two", "test.record", "'more'"));
+    rule("b", "", call("x", "test.record", "'other rule'"));
+    try (Engine engine = engine()) {
+      run(engine, event("t", "enough"), event("u", "go on"));
+    }
+    assertThat(calls)
+        .containsExactlyInAnyOrder(
+            "record:first", "record:first", "record:more", "record:other rule");
+  }
+
+  @Test
+  void aConditionThatIsNotTrueOrFalseIsRefusedWhenTheRulesAreRead() throws Exception {
+    rule(
+        "r",
+        "",
+        callWhen("one", "test.record", "'x'", "event.data.name")
+            + call("two", "test.record", "'y'"));
+    assertThatThrownBy(this::engine).hasMessageContaining("when");
   }
 
   @Test

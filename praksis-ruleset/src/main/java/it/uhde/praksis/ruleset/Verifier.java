@@ -151,7 +151,8 @@ public final class Verifier {
       Rule first = rules.get(i);
       if (!(first.trigger() instanceof Trigger.OnEvent t)
           || t.filter().isPresent()
-          || first.actions().stream().noneMatch(a -> a instanceof Action.Stop)) {
+          || first.actions().stream()
+              .noneMatch(a -> a instanceof Action.Stop stop && stop.when().isEmpty())) {
         continue;
       }
       for (Rule later : rules.subList(i + 1, rules.size())) {

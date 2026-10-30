@@ -124,9 +124,11 @@ public final class RulesetValidator {
         out.add(new Problem(where, "action after 'stop' can never run"));
         break;
       }
-      if (action instanceof Action.Stop) {
-        actions.add(new CompiledRule.CompiledAction.Stop());
-        stopped = true;
+      if (action instanceof Action.Stop stop) {
+        Optional<Expression> when =
+            condition(stop.when(), new Scope(eventType, params, results), where + ", stop", out);
+        actions.add(new CompiledRule.CompiledAction.Stop(when));
+        stopped = stop.when().isEmpty(); // a stop with a condition leaves the later steps reachable
         continue;
       }
       Action.Call call = (Action.Call) action;
@@ -142,11 +144,13 @@ public final class RulesetValidator {
       }
       used.add(call.capability());
       strongest = Math.max(strongest, cap.get().effect().ordinal());
+      Scope scope = new Scope(eventType, params, results);
       actions.add(
           new CompiledRule.CompiledAction.Call(
               call.id(),
               call.capability(),
-              args(call, cap.get(), new Scope(eventType, params, results), at, out)));
+              args(call, cap.get(), scope, at, out),
+              condition(call.when(), scope, at, out)));
       results.put(call.id(), cap.get().results());
     }
 
@@ -173,6 +177,17 @@ public final class RulesetValidator {
                   + "'"));
     }
     return new CompiledRule(rule, filter, actions);
+  }
+
+  /**
+   * The compiled condition of a step; it can read what happened before it, and is true or false.
+   */
+  private Optional<Expression> condition(
+      Optional<String> when, Scope scope, String at, List<Problem> out) {
+    if (when.isEmpty()) {
+      return Optional.empty();
+    }
+    return Optional.ofNullable(check(when.get(), scope, ValueType.BOOL, at + ", when", out));
   }
 
   private Map<String, CompiledRule.CompiledArg> args(

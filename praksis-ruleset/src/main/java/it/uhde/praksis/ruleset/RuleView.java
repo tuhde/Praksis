@@ -82,8 +82,14 @@ public final class RuleView {
                                 new LinkedHashMap<String, Object>(Map.of("cel", e.source()));
                           }));
           a.put("args", args);
+          call.when()
+              .ifPresent(w -> a.put("when", new LinkedHashMap<String, Object>(Map.of("cel", w))));
         }
-        case Action.Stop stop -> a.put("stop", true);
+        case Action.Stop stop -> {
+          a.put("stop", true);
+          stop.when()
+              .ifPresent(w -> a.put("when", new LinkedHashMap<String, Object>(Map.of("cel", w))));
+        }
       }
       actions.add(a);
     }

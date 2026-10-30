@@ -107,4 +107,17 @@ class MailListTest {
     assertThatThrownBy(() -> new MailList().invoke(CONTEXT, Map.of("folder", "INBOX")))
         .hasMessageContaining("not configured");
   }
+
+  @Test
+  void aFolderOfSeveralLevelsIsWrittenWithASlashAndIsADottedDirectory() throws Exception {
+    // Maildir++: Auto/invoice is the directory .Auto.invoice
+    Settings settings = Settings.parse(Map.of("root", root.toString()));
+    assertThat(settings.folderDir("Auto/invoice")).isEqualTo(root.resolve(".Auto.invoice"));
+    assertThat(settings.folderDir("Archive")).isEqualTo(root.resolve(".Archive"));
+    for (String bad : new String[] {"/x", "x/", "a//b", "a/../b", "../x", ".hidden", "a\\b"}) {
+      assertThatThrownBy(() -> settings.folderDir(bad))
+          .as(bad)
+          .hasMessageContaining("invalid mail folder name");
+    }
+  }
 }

@@ -253,6 +253,39 @@ class RulesetTest {
   }
 
   @Test
+  void aStepCanHaveAConditionThatIsCheckedAndASingleConditionalStopLeavesLaterStepsReachable()
+      throws Exception {
+    String base = ARCHIVE.replace("mail.archive-newsletters", "r");
+    String later =
+        "\n[[action]]\nid = \"late\"\ncapability = \"mail.move\"\nargs = { message = \"m\", folder = \"f\" }\n";
+    // a stop with a condition does not make what follows unreachable
+    rule(
+        "r",
+        base
+            + "\n[[action]]\nstop = true\nwhen = { cel = \"event.data.subject == 'x'\" }\n"
+            + later);
+    assertThat(validate()).isEmpty();
+
+    // a condition can read the results of the steps before it, and has to be true or false
+    rule(
+        "r",
+        base + later.replace("args =", "when = { cel = \"results.move.path == 'p'\" }\nargs ="));
+    assertThat(problems(validate())).doesNotContain("when");
+    rule("r", base + later.replace("args =", "when = { cel = \"event.data.subject\" }\nargs ="));
+    assertThat(problems(validate())).contains("action 'late'").contains("when");
+    rule(
+        "r",
+        base + later.replace("args =", "when = { cel = \"results.nothing.path == 'p'\" }\nargs ="));
+    assertThat(problems(validate())).contains("action 'late'").contains("when");
+
+    // it is written as an expression, and only so
+    rule("r", base + later.replace("args =", "when = true\nargs ="));
+    assertThatThrownBy(this::validate).hasMessageContaining("'when' is an expression");
+    rule("r", base + "\n[[action]]\nstop = true\nwhen = { cel = \"true\", x = 1 }\n");
+    assertThatThrownBy(this::validate).hasMessageContaining("'when' is an expression");
+  }
+
+  @Test
   void parameterDefaultsAreTypeChecked() throws Exception {
     write("ruleset.toml", HEADER.replace("default = \"News\"", "default = 5"));
     assertThatThrownBy(() -> RulesetLoader.load(dir))

@@ -7,7 +7,9 @@ import it.uhde.praksis.capability.CapabilityDescriptor;
 import it.uhde.praksis.capability.Event;
 import it.uhde.praksis.capability.EventSink;
 import it.uhde.praksis.expression.Bindings;
+import it.uhde.praksis.expression.Expression;
 import it.uhde.praksis.expression.ExpressionCompiler;
+import it.uhde.praksis.expression.ExpressionException;
 import it.uhde.praksis.ruleset.CompiledRule;
 import it.uhde.praksis.ruleset.CompiledRule.CompiledAction;
 import it.uhde.praksis.ruleset.CompiledRule.CompiledArg;
@@ -410,11 +412,19 @@ public final class Engine implements EventSink, AutoCloseable {
       }
       Map<String, Map<String, Object>> results = new HashMap<>();
       for (CompiledAction action : rule.actions()) {
-        if (action instanceof CompiledAction.Stop) {
-          note = "stop";
-          break;
+        if (action instanceof CompiledAction.Stop stop) {
+          if (holds(stop.when(), event, results)) {
+            note = "stop";
+            break;
+          }
+          continue;
         }
         CompiledAction.Call call = (CompiledAction.Call) action;
+        if (!holds(call.when(), event, results)) {
+          results.put(
+              call.id(), Defaults.results(catalog.capability(call.capability()).orElseThrow()));
+          continue;
+        }
         Map<String, Object> args = new LinkedHashMap<>();
         for (var arg : call.args().entrySet()) {
           args.put(
@@ -538,6 +548,13 @@ public final class Engine implements EventSink, AutoCloseable {
         });
   }
 
+  /** Whether a step is done: it has no condition, or its condition is true. */
+  private boolean holds(
+      Optional<Expression> when, Event event, Map<String, Map<String, Object>> results)
+      throws ExpressionException {
+    return when.isEmpty() || Boolean.TRUE.equals(when.get().evaluate(bindings(event, results)));
+  }
+
   /** Remembers that a rule did not handle this event, so it can be replayed once it may run. */
   private void miss(String ruleId, Event event) throws StoreException {
     Instant now = options.clock().instant();
@@ -551,8 +568,21 @@ public final class Engine implements EventSink, AutoCloseable {
     for (CompiledAction action : rule.actions()) {
       switch (action) {
         case CompiledAction.Stop s -> {
-          log(event, Optional.of(ruleId), Optional.empty(), Outcome.OK, "stop");
-          return true;
+          if (holds(s.when(), event, results)) {
+            log(event, Optional.of(ruleId), Optional.empty(), Outcome.OK, "stop");
+            return true;
+          }
+        }
+        case CompiledAction.Call call when !holds(call.when(), event, results) -> {
+          // later steps read the results of this one: they are empty, as in a dry run
+          results.put(
+              call.id(), Defaults.results(catalog.capability(call.capability()).orElseThrow()));
+          log(
+              event,
+              Optional.of(ruleId),
+              Optional.of(call.id()),
+              Outcome.SKIPPED,
+              call.capability() + ": its condition is false");
         }
         case CompiledAction.Call call -> {
           Map<String, Object> out = call(rule, call, event, results, allowOnce);

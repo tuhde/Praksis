@@ -38,7 +38,11 @@ record Settings(Path root, Duration pollInterval) {
     return new Settings(path, Duration.ofMillis(poll));
   }
 
-  /** The directory of a Maildir folder: {@code INBOX} is the root, others are {@code .Name}. */
+  /**
+   * The directory of a Maildir folder: {@code INBOX} is the root, others are {@code .Name}. Levels
+   * of a folder are written with {@code /} as for every mail module ({@code Auto/invoice}) and are
+   * separated by a dot in the directory ({@code .Auto.invoice}, Maildir++).
+   */
   Path folderDir(String folder) throws CapabilityException {
     if (folder.equals("INBOX")) {
       return root;
@@ -46,11 +50,13 @@ record Settings(Path root, Duration pollInterval) {
     if (folder.isEmpty()
         || folder.startsWith(".")
         || folder.contains("..")
-        || folder.indexOf('/') >= 0
+        || folder.startsWith("/")
+        || folder.endsWith("/")
+        || folder.contains("//")
         || folder.indexOf('\\') >= 0
         || folder.indexOf('\0') >= 0) {
       throw new CapabilityException("invalid mail folder name '" + folder + "'", false);
     }
-    return root.resolve("." + folder);
+    return root.resolve("." + folder.replace('/', '.'));
   }
 }

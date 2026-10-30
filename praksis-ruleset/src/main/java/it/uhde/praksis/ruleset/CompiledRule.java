@@ -21,15 +21,24 @@ public record CompiledRule(Rule rule, Optional<Expression> filter, List<Compiled
   /** One compiled step of a rule. */
   public sealed interface CompiledAction {
     /** A capability call with converted arguments. */
-    record Call(String id, String capability, Map<String, CompiledArg> args)
+    record Call(
+        String id, String capability, Map<String, CompiledArg> args, Optional<Expression> when)
         implements CompiledAction {
       public Call {
         args = Map.copyOf(args);
       }
+
+      public Call(String id, String capability, Map<String, CompiledArg> args) {
+        this(id, capability, args, Optional.empty());
+      }
     }
 
-    /** Ends the handling of the event. */
-    record Stop() implements CompiledAction {}
+    /** Ends the handling of the event, if the condition holds (or there is none). */
+    record Stop(Optional<Expression> when) implements CompiledAction {
+      public Stop() {
+        this(Optional.empty());
+      }
+    }
   }
 
   /** A compiled action argument. */

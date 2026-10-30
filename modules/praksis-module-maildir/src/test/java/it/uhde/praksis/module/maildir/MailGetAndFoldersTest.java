@@ -71,7 +71,7 @@ class MailGetAndFoldersTest {
 
     assertThat(list)
         .extracting(f -> f.get("name"))
-        .containsExactly("INBOX", "Archive", "Archive.2024");
+        .containsExactly("INBOX", "Archive", "Archive/2024");
     assertThat(list.get(0)).containsEntry("unread", 2L).containsEntry("total", 3L);
     assertThat(list.get(1)).containsEntry("unread", 0L).containsEntry("total", 1L);
     assertThat(list.get(2)).containsEntry("total", 0L);

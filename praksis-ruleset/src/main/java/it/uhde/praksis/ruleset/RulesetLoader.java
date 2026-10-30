@@ -259,14 +259,15 @@ public final class RulesetLoader {
   }
 
   private static Optional<Action> action(Table t) {
+    Optional<String> when = when(t);
     if (t.has("stop")) {
-      t.onlyKeys(Set.of("stop"));
+      t.onlyKeys(Set.of("stop", "when"));
       if (!t.bool("stop", false)) {
         t.problem("'stop' must be true");
       }
-      return Optional.of(new Action.Stop());
+      return Optional.of(new Action.Stop(when));
     }
-    t.onlyKeys(Set.of("id", "capability", "args", "requires_modules"));
+    t.onlyKeys(Set.of("id", "capability", "args", "requires_modules", "when"));
     Optional<String> id = t.string("id", true);
     Optional<String> capability = t.string("capability", true);
     Map<String, Arg> args = new LinkedHashMap<>();
@@ -283,7 +284,20 @@ public final class RulesetLoader {
       t.problem("action id '" + id.get() + "' must be an identifier");
     }
     return Optional.of(
-        new Action.Call(id.get(), capability.get(), args, t.strings("requires_modules")));
+        new Action.Call(id.get(), capability.get(), args, t.strings("requires_modules"), when));
+  }
+
+  /** The condition of a step, written {@code when = { cel = "..." }}. */
+  private static Optional<String> when(Table t) {
+    if (!t.has("when")) {
+      return Optional.empty();
+    }
+    Object value = t.raw("when").orElse(null);
+    if (value instanceof Map<?, ?> m && m.size() == 1 && m.get("cel") instanceof String source) {
+      return Optional.of(source);
+    }
+    t.problem("'when' is an expression and is written { cel = \"...\" } and nothing else");
+    return Optional.empty();
   }
 
   static Arg arg(Table table, String name, Object value) {

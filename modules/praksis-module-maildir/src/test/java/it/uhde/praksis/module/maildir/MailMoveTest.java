@@ -125,7 +125,8 @@ class MailMoveTest {
   @Test
   void refusesFolderNamesThatCouldEscape() throws Exception {
     Path file = mail("new", "m1");
-    for (String bad : new String[] {"", "../x", "a/b", ".hidden", "a..b", "a\\b"}) {
+    for (String bad :
+        new String[] {"", "../x", "/a", "a/", "a//b", "a/../b", ".hidden", "a..b", "a\\b"}) {
       assertThatThrownBy(() -> call(file, bad, false))
           .as(bad)
           .hasMessageContaining("invalid mail folder name");

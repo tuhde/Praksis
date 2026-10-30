@@ -11,6 +11,7 @@ import dev.cel.common.types.ListType;
 import dev.cel.common.types.MapType;
 import dev.cel.common.types.SimpleType;
 import dev.cel.common.types.StructTypeReference;
+import dev.cel.extensions.CelExtensions;
 import dev.cel.parser.CelStandardMacro;
 import dev.cel.runtime.CelEvaluationException;
 import it.uhde.praksis.capability.ValueType;
@@ -33,6 +34,9 @@ public final class CelExpressionCompiler implements ExpressionCompiler {
     CelBuilder builder =
         CelFactory.plannerCelBuilder()
             .setStandardMacros(CelStandardMacro.STANDARD_MACROS)
+            // text functions without side effects: substring, split, join, trim, lowerAscii...
+            .addCompilerLibraries(CelExtensions.strings())
+            .addRuntimeLibraries(CelExtensions.strings())
             .addMessageTypes(schema.all)
             .addVar("now", SimpleType.TIMESTAMP)
             .addVar("params", struct(schema.params))
