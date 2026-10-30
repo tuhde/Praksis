@@ -131,12 +131,13 @@
                 <delete dir="${image.dir}"/>
                 <!-- java.logging and jdk.unsupported: used by the shaded CEL layer (guava,
                      protobuf), which the module graph cannot see. java.desktop, java.xml and
-                     java.security.sasl: required by Angus Mail in the IMAP module's layer. -->
+                     java.security.sasl: required by Angus Mail in the IMAP module's layer. java.net.http: the
+                     HTTP client of the AI module, which talks to model servers. -->
                 <exec executable="${java.home}/bin/jlink" failonerror="true">
                   <arg value="--module-path"/>
                   <arg value="${project.build.directory}/mp"/>
                   <arg value="--add-modules"/>
-                  <arg value="it.uhde.praksis.daemon,it.uhde.praksis.cli,java.logging,jdk.unsupported,java.desktop,java.xml,java.security.sasl"/>
+                  <arg value="it.uhde.praksis.daemon,it.uhde.praksis.cli,java.logging,jdk.unsupported,java.desktop,java.xml,java.security.sasl,java.net.http"/>
                   <arg value="--launcher"/>
                   <arg value="praksis=it.uhde.praksis.cli/it.uhde.praksis.cli.Praksis"/>
                   <arg value="--strip-debug"/>
