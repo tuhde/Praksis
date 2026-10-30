@@ -2,3 +2,33 @@ Praksis
 Copyright 2026 Till Uhde
 
 This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+The runtime image and the module archives that are built from this repository contain the
+following third-party software as separate jar files or Java modules. Each keeps its own license.
+
+In the runtime image (lib/, the daemon and the command line):
+- Jackson (annotations, core, databind, dataformat-toml) 2.22 - Apache License 2.0
+  https://github.com/FasterXML/jackson
+- picocli 4.7.7 - Apache License 2.0 - https://picocli.info
+- sqlite-jdbc 3.53 (Xerial) - Apache License 2.0; it contains SQLite, which is in the public domain
+  https://github.com/xerial/sqlite-jdbc
+- The Java runtime that jlink put together (OpenJDK) - GNU General Public License 2 with the
+  Classpath Exception; its legal notices are in the directory legal/ of the image
+  https://openjdk.org
+
+In lib/praksis/expression (the expression layer, one jar with its dependencies inside):
+- CEL-Java 0.15.0 (Google) - Apache License 2.0 - https://github.com/google/cel-java
+- Protocol Buffers for Java - BSD 3-Clause License - https://protobuf.dev
+- Guava, Guava failureaccess and listenablefuture (Google) - Apache License 2.0
+  https://github.com/google/guava
+- Error Prone annotations, J2ObjC annotations, AutoValue annotations (Google) - Apache License 2.0
+- RE2/J (Google) - BSD 3-Clause License - https://github.com/google/re2j
+- ANTLR 4 runtime - BSD 3-Clause License - https://www.antlr.org
+- ThreeTen-Extra - BSD 3-Clause License - https://www.threeten.org/threeten-extra
+- SnakeYAML - Apache License 2.0 - https://bitbucket.org/snakeyaml/snakeyaml
+
+In lib/praksis/modules/maildir (the module, and the HTML library of every mail module):
+- jsoup 1.22.1 - MIT License - https://jsoup.org
+
+What is used only to build and test (JUnit, AssertJ, GreenMail, TestFX) is not part of what is
+shipped. The mail modules that need Eclipse Angus Mail are in Praksis-Modules-Mail, which lists them.
