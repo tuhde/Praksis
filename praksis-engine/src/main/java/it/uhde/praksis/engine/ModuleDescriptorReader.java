@@ -24,6 +24,7 @@ import java.util.stream.Collectors;
  *
  * <pre>
  * format_version = 1
+ * api_version = 1                              # the capability API it was built for
  * name = "maildir"
  * version = "0.1.0"
  * module = "it.uhde.praksis.module.maildir"   # the JPMS module that provides the services
@@ -46,7 +47,7 @@ final class ModuleDescriptorReader {
   private static final TomlMapper MAPPER = new TomlMapper();
 
   /** The descriptor and the name of the JPMS module that provides the services. */
-  record Result(ModuleDescriptor descriptor, String moduleName) {}
+  record Result(ModuleDescriptor descriptor, String moduleName, int apiVersion) {}
 
   private ModuleDescriptorReader() {}
 
@@ -62,6 +63,7 @@ final class ModuleDescriptorReader {
     t.onlyKeys(
         Set.of(
             "format_version",
+            "api_version",
             "name",
             "version",
             "module",
@@ -71,6 +73,14 @@ final class ModuleDescriptorReader {
             "event"));
     if (!t.raw("format_version").map(v -> v.equals(1) || v.equals(1L)).orElse(false)) {
       t.problem("'format_version' must be 1");
+    }
+    int apiVersion =
+        t.raw("api_version")
+            .filter(v -> v instanceof Number)
+            .map(v -> ((Number) v).intValue())
+            .orElse(-1);
+    if (apiVersion < 1) {
+      t.problem("'api_version' is required: the capability API version the module was built for");
     }
     String name = t.string("name", true).orElse("");
     String version = t.string("version", true).orElse("");
@@ -116,7 +126,8 @@ final class ModuleDescriptorReader {
     return new Result(
         new ModuleDescriptor(
             name, version, t.strings("jdk_modules"), capabilities, events, t.strings("sources")),
-        module);
+        module,
+        apiVersion);
   }
 
   private static List<FieldDescriptor> fields(Table owner, String key) {

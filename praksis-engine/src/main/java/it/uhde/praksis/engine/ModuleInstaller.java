@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package it.uhde.praksis.engine;
 
+import it.uhde.praksis.capability.CapabilityApi;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -47,7 +48,7 @@ public final class ModuleInstaller {
 
   /** One module that is there, and whether another one of the same name hides it. */
   public record Entry(
-      String name, String version, Path directory, boolean hidden, boolean locked) {}
+      String name, String version, int api, Path directory, boolean hidden, boolean locked) {}
 
   /**
    * Installs the archive below {@code root} and records the module in the lockfile.
@@ -64,6 +65,10 @@ public final class ModuleInstaller {
       ModuleDescriptorReader.Result read =
           ModuleDescriptorReader.read(staging.resolve("module.toml"));
       String name = read.descriptor().name();
+      var mismatch = CapabilityApi.mismatch(name, read.apiVersion());
+      if (mismatch.isPresent()) {
+        throw new ModuleLoadException(mismatch.get());
+      }
       if (!NAME.matcher(name).matches()) {
         throw new ModuleLoadException(
             "the module name '" + name + "' must be lower case letters, digits and '-'");
@@ -136,7 +141,7 @@ public final class ModuleInstaller {
         String name = read.descriptor().name();
         boolean hidden = !seen.add(name);
         boolean ok = Lockfile.hashDirectory(dir).equals(locked.hashOf(name));
-        out.add(new Entry(name, read.descriptor().version(), dir, hidden, ok));
+        out.add(new Entry(name, read.descriptor().version(), read.apiVersion(), dir, hidden, ok));
       }
     }
     return out;

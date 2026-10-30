@@ -2,6 +2,7 @@
 package it.uhde.praksis.engine;
 
 import it.uhde.praksis.capability.Capability;
+import it.uhde.praksis.capability.CapabilityApi;
 import it.uhde.praksis.capability.CapabilityDescriptor;
 import it.uhde.praksis.capability.CapabilityException;
 import it.uhde.praksis.capability.EventSource;
@@ -94,6 +95,10 @@ public final class ModuleLoader {
       found.add(name);
       if (!enabled.isEmpty() && !enabled.contains(name)) {
         continue;
+      }
+      var mismatch = CapabilityApi.mismatch(name, read.apiVersion());
+      if (mismatch.isPresent()) {
+        throw new ModuleLoadException(mismatch.get() + " (" + dir + ")");
       }
       String expected = locked.hashOf(name);
       if (expected == null) {

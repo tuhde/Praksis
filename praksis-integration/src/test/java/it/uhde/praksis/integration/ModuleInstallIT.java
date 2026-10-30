@@ -81,7 +81,8 @@ class ModuleInstallIT {
       try (ZipOutputStream zip = new ZipOutputStream(Files.newOutputStream(evil))) {
         zip.putNextEntry(new ZipEntry("module.toml"));
         zip.write(
-            "format_version = 1\nname = \"evil\"\nversion = \"1\"\nmodule = \"x\"\n".getBytes());
+            "format_version = 1\napi_version = 1\nname = \"evil\"\nversion = \"1\"\nmodule = \"x\"\n"
+                .getBytes());
         zip.closeEntry();
         zip.putNextEntry(new ZipEntry("../../evil.jar"));
         zip.write(1);
@@ -95,6 +96,38 @@ class ModuleInstallIT {
       assertThat(h.home.resolve("modules/evil")).doesNotExist();
       assertThat(h.home.getParent().resolve("evil.jar")).doesNotExist();
       assertThat(Files.readString(h.home.resolve("modules.lock"))).doesNotContain("evil");
+    }
+  }
+
+  @Test
+  void aModuleBuiltForAnotherApiVersionIsNotInstalledAndSaysWhatToUpdate() throws Exception {
+    try (Harness h = new Harness()) {
+      // the real archive of the module, with the API version of the future
+      Path newer = h.home.resolve("maildir-api9.praksis-module");
+      try (var in = new java.util.zip.ZipFile(h.archive("maildir").toFile());
+          ZipOutputStream out = new ZipOutputStream(Files.newOutputStream(newer))) {
+        for (var e = in.entries(); e.hasMoreElements(); ) {
+          ZipEntry entry = e.nextElement();
+          out.putNextEntry(new ZipEntry(entry.getName()));
+          byte[] bytes = in.getInputStream(entry).readAllBytes();
+          if (entry.getName().equals("module.toml")) {
+            bytes = new String(bytes).replace("api_version = 1", "api_version = 9").getBytes();
+          }
+          out.write(bytes);
+          out.closeEntry();
+        }
+      }
+
+      Harness.CliResult refused = h.cli("modules", "install", newer.toString());
+
+      assertThat(refused.exit()).isEqualTo(1);
+      assertThat(refused.output())
+          .contains("built for capability API version 9")
+          .contains("update Praksis");
+      assertThat(h.home.resolve("modules/maildir")).doesNotExist();
+      // and the real archive says which version it is for
+      assertThat(h.cli("modules", "install", h.archive("maildir").toString()).exit()).isZero();
+      assertThat(h.cli("modules", "list").output()).contains("api 1");
     }
   }
 }

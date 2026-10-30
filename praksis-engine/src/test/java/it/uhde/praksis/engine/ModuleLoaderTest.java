@@ -80,6 +80,7 @@ class ModuleLoaderTest {
   private static final String MODULE_TOML =
       """
       format_version = 1
+      api_version = 1
       name = "testmod"
       version = "0.1.0"
       module = "it.example.testmod"
@@ -215,7 +216,25 @@ class ModuleLoaderTest {
     assertThatThrownBy(() -> ModuleLoader.lock(modules, lockfile))
         .hasMessageContaining("'format_version' must be 1")
         .hasMessageContaining("unknown key 'bogus'")
-        .hasMessageContaining("missing 'version'");
+        .hasMessageContaining("missing 'version'")
+        .hasMessageContaining("'api_version' is required");
+  }
+
+  @Test
+  void aModuleBuiltForAnotherApiVersionIsRefusedWithAMessageThatSaysWhatToUpdate()
+      throws Exception {
+    setUp();
+    Path newer = install("testmod", MODULE_TOML.replace("api_version = 1", "api_version = 2"));
+    ModuleLoader.lock(modules, lockfile);
+    assertThatThrownBy(() -> ModuleLoader.load(modules, lockfile, Map.of()))
+        .hasMessageContaining("built for capability API version 2")
+        .hasMessageContaining("this Praksis provides version 1")
+        .hasMessageContaining("update Praksis")
+        .hasMessageContaining(newer.toString());
+
+    install("testmod", MODULE_TOML.replace("api_version = 1", "api_version = 0"));
+    assertThatThrownBy(() -> ModuleLoader.lock(modules, lockfile))
+        .hasMessageContaining("'api_version' is required");
   }
 
   @Test

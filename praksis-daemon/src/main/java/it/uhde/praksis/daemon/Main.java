@@ -145,7 +145,8 @@ public final class Main {
         for (ModuleInstaller.Entry e :
             ModuleInstaller.list(config.moduleRoots(), config.lockfile())) {
           System.out.println(
-              String.format("%-12s %-10s %s", e.name(), e.version(), e.directory())
+              String.format(
+                      "%-12s %-10s api %-3d %s", e.name(), e.version(), e.api(), e.directory())
                   + (e.hidden() ? "  (hidden by a module of the same name above)" : "")
                   + (e.locked() ? "" : "  (not locked: 'praksis modules lock')"));
         }

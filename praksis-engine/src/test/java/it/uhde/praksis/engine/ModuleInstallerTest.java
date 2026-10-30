@@ -19,7 +19,7 @@ class ModuleInstallerTest {
   @TempDir Path dir;
 
   private static String toml(String name, String version) {
-    return "format_version = 1\nname = \"%s\"\nversion = \"%s\"\nmodule = \"it.example.%s\"\n"
+    return "format_version = 1\napi_version = 1\nname = \"%s\"\nversion = \"%s\"\nmodule = \"it.example.%s\"\n"
         .formatted(name, version, name);
   }
 
@@ -109,6 +109,26 @@ class ModuleInstallerTest {
     try (var files = Files.list(root())) {
       assertThat(files).isEmpty();
     }
+  }
+
+  @Test
+  void aModuleBuiltForAnotherApiVersionIsNotInstalled() throws Exception {
+    for (int api : new int[] {2, 7}) {
+      Map<String, String> files = new LinkedHashMap<>();
+      files.put(
+          "module.toml", toml("demo", "1.0.0").replace("api_version = 1", "api_version = " + api));
+      files.put("demo.jar", "x");
+      assertThatThrownBy(
+              () -> ModuleInstaller.install(archive("api.zip", files), root(), lock(), false))
+          .hasMessageContaining("built for capability API version " + api)
+          .hasMessageContaining("update Praksis");
+    }
+    assertThat(root().resolve("demo")).doesNotExist();
+    assertThat(Files.exists(lock())).isFalse();
+
+    var done = ModuleInstaller.install(good("demo", "1.0.0"), root(), lock(), false);
+    assertThat(done.name()).isEqualTo("demo");
+    assertThat(ModuleInstaller.list(List.of(root()), lock()).get(0).api()).isEqualTo(1);
   }
 
   @Test
