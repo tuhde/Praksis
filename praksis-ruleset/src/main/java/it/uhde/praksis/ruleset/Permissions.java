@@ -130,6 +130,25 @@ public final class Permissions {
             .computeIfAbsent(requirement(owner, call, params, catalog), k -> new TreeSet<>())
             .add("view:" + view.id());
       }
+      // and so do the microphones of its inputs, which listen when a person presses the button
+      for (View.Component c : inputsWithMicrophone(view.components())) {
+        Map<String, Arg> args = new java.util.LinkedHashMap<>();
+        c.values()
+            .forEach(
+                (k, v) -> {
+                  if (k.startsWith("dictate.arg.")) {
+                    args.put(k.substring("dictate.arg.".length()), v);
+                  }
+                });
+        Action.Call call =
+            new Action.Call(
+                "dictate",
+                String.valueOf(((Arg.Literal) c.values().get("dictate.capability")).value()),
+                args);
+        found
+            .computeIfAbsent(requirement(owner, call, params, catalog), k -> new TreeSet<>())
+            .add("view:" + view.id());
+      }
       // and so do its downloads, which read when a person asks for them
       for (View.Download download : downloads(view.components())) {
         Action.Call call = new Action.Call("download", download.capability(), download.args());
@@ -139,6 +158,17 @@ public final class Permissions {
       }
     }
     return new Needs(found);
+  }
+
+  private static List<View.Component> inputsWithMicrophone(List<View.Component> components) {
+    List<View.Component> out = new java.util.ArrayList<>();
+    for (View.Component c : components) {
+      if (c.values().get("dictate.capability") instanceof Arg.Literal) {
+        out.add(c);
+      }
+      out.addAll(inputsWithMicrophone(c.children()));
+    }
+    return out;
   }
 
   private static List<String> lookups(List<View.Component> components) {

@@ -31,6 +31,7 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Response.Fetched.class, name = "fetched"),
   @JsonSubTypes.Type(value = Response.Uploaded.class, name = "uploaded"),
   @JsonSubTypes.Type(value = Response.Suggestions.class, name = "suggestions"),
+  @JsonSubTypes.Type(value = Response.Dictated.class, name = "dictated"),
   @JsonSubTypes.Type(value = Response.Done.class, name = "done"),
   @JsonSubTypes.Type(value = Response.Stopped.class, name = "stopped"),
   @JsonSubTypes.Type(value = Response.Error.class, name = "error")
@@ -519,6 +520,14 @@ public sealed interface Response {
   }
 
   /**
+   * What was said into a microphone.
+   *
+   * @param text what was understood, empty if nothing was
+   * @param heard whether anything was understood
+   */
+  record Dictated(String text, boolean heard) implements Response {}
+
+  /**
    * What a lookup found, best first.
    *
    * @param items the suggestions, each a map of text values
@@ -607,7 +616,38 @@ public sealed interface Response {
       Integer width,
       Select select,
       Rich rich,
-      String key) {
+      String key,
+      Dictate dictate) {
+    /** A part without a microphone. */
+    public ViewComponent(
+        String type,
+        String text,
+        String style,
+        String label,
+        Boolean enabled,
+        String empty,
+        List<Column> columns,
+        List<Row> rows,
+        List<Field> fields,
+        List<Action> actions,
+        Form form,
+        List<ViewComponent> children,
+        String error,
+        Integer width,
+        Select select,
+        Rich rich,
+        String key) {
+      this(
+          type, text, style, label, enabled, empty, columns, rows, fields, actions, form, children,
+          error, width, select, rich, key, null);
+    }
+
+    /**
+     * A microphone that an input offers: the capability that gives the text (see {@link
+     * Request.Dictate}).
+     */
+    public record Dictate(String capability) {}
+
     /** A part without a key. */
     public ViewComponent(
         String type,

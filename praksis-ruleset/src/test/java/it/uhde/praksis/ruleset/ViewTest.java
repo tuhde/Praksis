@@ -53,6 +53,14 @@ class ViewTest {
                               new FieldDescriptor("name", ValueType.STRING, true, false)),
                           List.of(new FieldDescriptor("content", ValueType.BYTES, true, false))),
                       new CapabilityDescriptor(
+                          "speech.listen",
+                          EffectClass.READ_ONLY,
+                          true,
+                          List.of(
+                              new FieldDescriptor("seconds", ValueType.INT, false, false),
+                              new FieldDescriptor("profile", ValueType.STRING, false, true)),
+                          List.of(new FieldDescriptor("text", ValueType.STRING, true, false))),
+                      new CapabilityDescriptor(
                           "contacts.search",
                           EffectClass.READ_ONLY,
                           true,
@@ -815,5 +823,65 @@ class ViewTest {
     assertThat(problems(toggle.replace("visible = { cel = \"view.on\" }", "")))
         .anyMatch(p -> p.message().contains("the key 't' is used by 2 parts"))
         .anyMatch(p -> p.message().contains("only allowed if each of them has 'visible'"));
+  }
+
+  private static final String SEARCH =
+      """
+      title = "Search"
+      [param.query]
+      type = "string"
+      default = ""
+
+      [[component]]
+      type = "input"
+      param = "query"
+      placeholder = "Search"
+      dictate = { capability = "speech.listen", args = { seconds = 6, profile = "en" }, requires_modules = ["speech"] }
+      """;
+
+  private List<Problem> searchProblems(String view) throws Exception {
+    Path l = layer("s" + System.nanoTime(), Map.of("search", view));
+    Ruleset ruleset = LayerStack.resolve(List.of(new Source("s", l)), Map.of()).ruleset();
+    return new RulesetValidator(Expressions.compiler(), CATALOG).validate(ruleset);
+  }
+
+  @Test
+  void anInputCanHaveAMicrophoneThatNeedsAReadingCapabilityThatAnswersWithText() throws Exception {
+    assertThat(searchProblems(SEARCH)).isEmpty();
+    Path l = layer("m", Map.of("search", SEARCH));
+    var effective = LayerStack.resolve(List.of(new Source("m", l)), Map.of());
+    View view = effective.ruleset().views().get(0);
+    assertThat(view.components().get(0).values())
+        .containsKeys("dictate.capability", "dictate.arg.seconds", "dictate.arg.profile");
+
+    // it is a requirement of the view like a source: the grants decide, and can limit the profile
+    assertThat(Permissions.of(effective, CATALOG).requirements())
+        .anyMatch(
+            r -> r.capability().equals("speech.listen") && "en".equals(r.known().get("profile")));
+
+    // without the module the microphone goes and the input stays
+    View without = view.available(java.util.Set.of()).orElseThrow();
+    assertThat(without.components().get(0).values().keySet())
+        .noneMatch(k -> k.startsWith("dictate."))
+        .contains("param");
+    assertThat(
+            view.available(java.util.Set.of("speech")).orElseThrow().components().get(0).values())
+        .containsKey("dictate.capability");
+
+    // what cannot work is said
+    assertThat(searchProblems(SEARCH.replace("speech.listen", "mail.move")))
+        .anyMatch(p -> p.message().contains("'mail.move' does not only read"))
+        .anyMatch(p -> p.message().contains("does not answer with 'text'"));
+    assertThat(searchProblems(SEARCH.replace("speech.listen", "mail.list")))
+        .anyMatch(p -> p.message().contains("does not answer with 'text'"));
+    assertThat(searchProblems(SEARCH.replace("speech.listen", "speech.nope")))
+        .anyMatch(p -> p.message().contains("unknown capability 'speech.nope'"));
+    assertThat(searchProblems(SEARCH.replace("seconds = 6", "minutes = 6")))
+        .anyMatch(p -> p.message().contains("has no argument 'minutes'"));
+    assertThat(searchProblems(SEARCH.replace("seconds = 6", "seconds = \"six\"")))
+        .anyMatch(p -> p.message().contains("argument 'seconds' must be a int"));
+    assertThatThrownBy(
+            () -> searchProblems(SEARCH.replace("seconds = 6", "seconds = { cel = \"1\" }")))
+        .hasMessageContaining("is a value, not an expression");
   }
 }

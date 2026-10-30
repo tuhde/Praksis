@@ -38,6 +38,7 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.Fetch.class, name = "fetch"),
   @JsonSubTypes.Type(value = Request.Upload.class, name = "upload"),
   @JsonSubTypes.Type(value = Request.Lookup.class, name = "lookup"),
+  @JsonSubTypes.Type(value = Request.Dictate.class, name = "dictate"),
   @JsonSubTypes.Type(value = Request.Stop.class, name = "stop")
 })
 public sealed interface Request {
@@ -286,6 +287,18 @@ public sealed interface Request {
       args = args == null ? java.util.Map.of() : args;
     }
   }
+
+  /**
+   * Listens for what a person says into the microphone button of an input of a view. The view must
+   * have an input with a microphone that names this capability; the daemon reads it with the
+   * arguments that the view gives (never the ones the caller sends), under the grants of the layer
+   * that owns the view, and audits the call. Answered with {@link Response.Dictated}, or with an
+   * error.
+   *
+   * @param view the view id
+   * @param capability the capability of the microphone
+   */
+  record Dictate(String view, String capability) implements Request {}
 
   /**
    * Fetches a file that a view offers for download, because a person asked for it. The daemon

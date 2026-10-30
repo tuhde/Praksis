@@ -358,6 +358,7 @@ public final class Daemon implements AutoCloseable {
         case Request.Views v -> views.list();
         case Request.ViewResolve v -> views.resolve(v.view(), v.params(), v.maxSchema());
         case Request.Lookup l -> views.lookup(l.view(), l.capability(), l.args());
+        case Request.Dictate d -> views.dictate(d.view(), d.capability());
         case Request.Upload u -> Uploads.ticket(config.uploadsDirectory(), clock.instant());
         case Request.Fetch f ->
             views.fetch(

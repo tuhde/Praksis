@@ -62,6 +62,14 @@ class ViewResolverTest {
                           List.of(new FieldDescriptor("query", ValueType.STRING, true, false)),
                           List.of(new FieldDescriptor("items", ValueType.LIST, true, false))),
                       new CapabilityDescriptor(
+                          "speech.listen",
+                          EffectClass.READ_ONLY,
+                          true,
+                          List.of(
+                              new FieldDescriptor("seconds", ValueType.INT, false, false),
+                              new FieldDescriptor("profile", ValueType.STRING, false, true)),
+                          List.of(new FieldDescriptor("text", ValueType.STRING, true, false))),
+                      new CapabilityDescriptor(
                           "mail.attachment",
                           EffectClass.READ_ONLY,
                           true,
@@ -194,6 +202,23 @@ class ViewResolverTest {
       };
 
   private final List<String> searched = new ArrayList<>();
+  private final List<Map<String, Object>> listened = new ArrayList<>();
+  private volatile String said = "invoices from anna";
+
+  /** The microphone: says what the test says that was said. */
+  private final Capability microphone =
+      new Capability() {
+        @Override
+        public String name() {
+          return "speech.listen";
+        }
+
+        @Override
+        public Map<String, Object> invoke(CapabilityContext c, Map<String, Object> args) {
+          listened.add(args);
+          return Map.of("text", said);
+        }
+      };
 
   /** The address book: matches by the start of the name. */
   private final Capability contacts =
@@ -248,7 +273,8 @@ class ViewResolverTest {
             "mail.list", list,
             "mail.get", get,
             "mail.attachment", attachment,
-            "contacts.search", contacts),
+            "contacts.search", contacts,
+            "speech.listen", microphone),
         (rule, capability, args) ->
             allow
                 ? AccessPolicy.Decision.allow()
@@ -960,5 +986,61 @@ class ViewResolverTest {
         (Response.ResolvedView) resolver(view, null).resolve("v", Map.of(), 1);
     assertThat(r.components().get(0).width()).isEqualTo(400);
     assertThat(r.components().get(0).rich().blocks()).isNotEmpty();
+  }
+
+  private static final String SEARCH =
+      """
+      title = "Search"
+      [param.query]
+      type = "string"
+      default = ""
+      [[component]]
+      type = "input"
+      param = "query"
+      placeholder = "Search"
+      key = "/"
+      width = 40
+      dictate = { capability = "speech.listen", args = { seconds = 6, profile = "en" } }
+      """;
+
+  @Test
+  void anInputWithAMicrophoneSaysSoAndNothingListensUntilAPersonPressesTheButton()
+      throws Exception {
+    ViewResolver resolver = resolverWith(SEARCH, Map.of());
+
+    Response.ResolvedView r = (Response.ResolvedView) resolver.resolve("v", Map.of(), 1);
+
+    assertThat(r.components().get(0).dictate())
+        .isEqualTo(new ViewComponent.Dictate("speech.listen"));
+    assertThat(listened).isEmpty();
+  }
+
+  @Test
+  void dictatingListensWithTheArgumentsOfTheViewUnderItsGrantsAndEveryUseIsAudited()
+      throws Exception {
+    ViewResolver resolver = resolverWith(SEARCH, Map.of());
+
+    Response answer = resolver.dictate("v", "speech.listen");
+
+    assertThat(answer).isEqualTo(new Response.Dictated("invoices from anna", true));
+    assertThat(listened).containsExactly(Map.of("seconds", 6L, "profile", "en"));
+    assertThat(allowedCalls).anyMatch(c -> c.startsWith("view:v speech.listen"));
+
+    said = "  ";
+    assertThat(resolver.dictate("v", "speech.listen"))
+        .isEqualTo(new Response.Dictated("  ", false));
+
+    // the view cannot be used to listen with anything else, or for views that do not exist
+    assertThat(resolver.dictate("v", "mail.list"))
+        .isEqualTo(new Response.Error("view 'v' has no microphone for 'mail.list'"));
+    assertThat(resolver.dictate("nope", "speech.listen"))
+        .isEqualTo(new Response.Error("there is no view 'nope'"));
+    assertThat(listened).hasSize(2);
+
+    allow = false;
+    assertThat(resolver.dictate("v", "speech.listen"))
+        .isEqualTo(new Response.Error("layer 'mine' has no grant"));
+    assertThat(listened).hasSize(2);
+    assertThat(this.denied).anyMatch(d -> d.startsWith("view:v speech.listen"));
   }
 }

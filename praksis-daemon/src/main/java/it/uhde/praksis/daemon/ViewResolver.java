@@ -297,6 +297,82 @@ final class ViewResolver {
     }
   }
 
+  /**
+   * What a person says into the microphone button of an input of a view: the capability of that
+   * button, called with the arguments that the view gives (the caller cannot choose them), under
+   * the grants of the layer that owns the view. Every use is an audit line, whether it was allowed
+   * or not, because a microphone is something to be able to look back on.
+   */
+  Response dictate(String id, String capabilityName) {
+    View view = ruleset.views().stream().filter(v -> v.id().equals(id)).findFirst().orElse(null);
+    if (view == null) {
+      return new Response.Error("there is no view '" + id + "'");
+    }
+    View.Component input = microphone(view.components(), capabilityName);
+    if (input == null) {
+      return new Response.Error("view '" + id + "' has no microphone for '" + capabilityName + "'");
+    }
+    CapabilityDescriptor descriptor = catalog.capability(capabilityName).orElse(null);
+    Capability capability = capabilities.get(capabilityName);
+    if (descriptor == null || capability == null) {
+      return new Response.Error("capability '" + capabilityName + "' is not available");
+    }
+    Map<String, Object> args = new LinkedHashMap<>();
+    try {
+      for (var v : input.values().entrySet()) {
+        if (v.getKey().startsWith("dictate.arg.")) {
+          String name = v.getKey().substring("dictate.arg.".length());
+          FieldDescriptor field =
+              descriptor.params().stream()
+                  .filter(p -> p.name().equals(name))
+                  .findFirst()
+                  .orElseThrow();
+          args.put(name, Injection.coerce(field, ((Arg.Literal) v.getValue()).value()));
+        }
+      }
+    } catch (RuntimeException e) {
+      return new Response.Error(String.valueOf(e.getMessage()));
+    }
+    String component = "view:" + view.id();
+    AccessPolicy.Decision decision = access.check(component, descriptor, args);
+    if (!decision.allowed()) {
+      audit.record(
+          clock.instant(), component, capabilityName, args, false, Optional.of(decision.reason()));
+      return new Response.Error(decision.reason());
+    }
+    try {
+      Map<String, Object> result =
+          it.uhde.praksis.engine.ModuleCalls.invoke(
+              capability, new ReadContext(component + "/dictate"), args);
+      audit.record(clock.instant(), component, capabilityName, args, true, Optional.empty());
+      String text = result != null && result.get("text") instanceof String t ? t : "";
+      return new Response.Dictated(text, !text.isBlank());
+    } catch (Exception e) {
+      audit.record(
+          clock.instant(),
+          component,
+          capabilityName,
+          args,
+          true,
+          Optional.of(String.valueOf(e.getMessage())));
+      return new Response.Error(String.valueOf(e.getMessage()));
+    }
+  }
+
+  private static View.Component microphone(List<View.Component> components, String capability) {
+    for (View.Component c : components) {
+      if (c.values().get("dictate.capability") instanceof Arg.Literal l
+          && String.valueOf(l.value()).equals(capability)) {
+        return c;
+      }
+      View.Component inner = microphone(c.children(), capability);
+      if (inner != null) {
+        return inner;
+      }
+    }
+    return null;
+  }
+
   private static boolean hasLookup(List<View.Component> components, String capability) {
     for (View.Component c : components) {
       if (c.values().get("lookup.capability") instanceof Arg.Literal l
@@ -450,7 +526,8 @@ final class ViewResolver {
         width != null ? width : c.width(),
         c.select(),
         c.rich(),
-        key != null ? key : c.key());
+        key != null ? key : c.key(),
+        c.dictate());
   }
 
   private ViewComponent build(
@@ -717,7 +794,12 @@ final class ViewResolver {
         null,
         null,
         null,
-        new ViewComponent.Select(param, null));
+        new ViewComponent.Select(param, null),
+        null,
+        null,
+        c.values().get("dictate.capability") instanceof Arg.Literal d
+            ? new ViewComponent.Dictate(String.valueOf(d.value()))
+            : null);
   }
 
   private ViewComponent.Select select(

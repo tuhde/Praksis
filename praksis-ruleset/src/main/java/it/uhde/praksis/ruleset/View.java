@@ -277,12 +277,15 @@ public record View(
     for (Component c : parts) {
       if (wanted(c, modules)) {
         Map<String, Arg> values = c.values();
-        // the suggestions of a form are dropped, and the form stays, if their module is not there
-        if (values.get("lookup.requires_modules") instanceof Arg.Literal l
-            && l.value() instanceof List<?> list
-            && !modules.containsAll(list.stream().map(String::valueOf).toList())) {
-          values = new LinkedHashMap<>(values);
-          values.keySet().removeIf(k -> k.startsWith("lookup."));
+        // the suggestions of a form and the microphone of an input are dropped, and the part stays,
+        // if their module is not there
+        for (String prefix : List.of("lookup.", "dictate.")) {
+          if (values.get(prefix + "requires_modules") instanceof Arg.Literal l
+              && l.value() instanceof List<?> list
+              && !modules.containsAll(list.stream().map(String::valueOf).toList())) {
+            values = new LinkedHashMap<>(values);
+            values.keySet().removeIf(k -> k.startsWith(prefix));
+          }
         }
         out.add(
             new Component(
@@ -596,10 +599,42 @@ public record View(
       }
       case "input" -> {
         t.onlyKeys(
-            Set.of("type", "param", "placeholder", "key", "visible", "width", "requires_modules"));
+            Set.of(
+                "type",
+                "param",
+                "placeholder",
+                "key",
+                "dictate",
+                "visible",
+                "width",
+                "requires_modules"));
         key(t, values);
         literal(t, "param", null, values);
         literal(t, "placeholder", null, values);
+        // a microphone button: a person speaks, a read-only capability gives the text
+        t.table("dictate", false)
+            .ifPresent(
+                d -> {
+                  d.onlyKeys(Set.of("capability", "args", "requires_modules"));
+                  List<String> needs = d.strings("requires_modules");
+                  if (!needs.isEmpty()) {
+                    values.put("dictate.requires_modules", new Arg.Literal(needs));
+                  }
+                  d.string("capability", true)
+                      .ifPresent(c -> values.put("dictate.capability", new Arg.Literal(c)));
+                  d.table("args", false)
+                      .ifPresent(
+                          a ->
+                              a.rawEntries()
+                                  .forEach(
+                                      (name, v) -> {
+                                        if (v instanceof Map<?, ?>) {
+                                          a.problem("'" + name + "' is a value, not an expression");
+                                        } else {
+                                          values.put("dictate.arg." + name, new Arg.Literal(v));
+                                        }
+                                      }));
+                });
         if (!t.has("param")) {
           t.problem("missing 'param'");
         }

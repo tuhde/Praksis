@@ -258,11 +258,55 @@ final class ViewValidator {
         }
       }
     }
+    if (c.type().equals("input") && c.values().get("dictate.capability") instanceof Arg.Literal d) {
+      dictation(c, String.valueOf(d.value()), at + ", dictate", out);
+    }
     if (c.type().equals("form")) {
       formExtras(c, ruleset, at, out);
     }
     for (View.Component child : c.children()) {
       component(child, where, view, ruleset, screen, row, viewParams, out);
+    }
+  }
+
+  /**
+   * The microphone of an input is a capability that only reads, answers with the text that was said
+   * ({@code text}), and gets only arguments that it has, of the type it wants.
+   */
+  private void dictation(View.Component c, String name, String where, List<Problem> out) {
+    Optional<CapabilityDescriptor> capability = catalog.capability(name);
+    if (capability.isEmpty()) {
+      out.add(new Problem(where, "unknown capability '" + name + "'"));
+      return;
+    }
+    if (capability.get().effect() != EffectClass.READ_ONLY) {
+      out.add(new Problem(where, "'" + name + "' does not only read"));
+    }
+    if (capability.get().results().stream()
+        .noneMatch(
+            r ->
+                r.name().equals("text")
+                    && r.type() == it.uhde.praksis.capability.ValueType.STRING)) {
+      out.add(new Problem(where, "'" + name + "' does not answer with 'text' (a text)"));
+    }
+    for (var v : c.values().entrySet()) {
+      if (!v.getKey().startsWith("dictate.arg.")) {
+        continue;
+      }
+      String arg = v.getKey().substring("dictate.arg.".length());
+      Optional<it.uhde.praksis.capability.FieldDescriptor> field =
+          capability.get().params().stream().filter(p -> p.name().equals(arg)).findFirst();
+      if (field.isEmpty()) {
+        out.add(new Problem(where, "'" + name + "' has no argument '" + arg + "'"));
+      } else if (RulesetLoader.literal(field.get().type(), ((Arg.Literal) v.getValue()).value())
+          .isEmpty()) {
+        out.add(new Problem(where, "argument '" + arg + "' must be a " + field.get().type().id()));
+      }
+    }
+    for (it.uhde.praksis.capability.FieldDescriptor p : capability.get().params()) {
+      if (p.required() && !c.values().containsKey("dictate.arg." + p.name())) {
+        out.add(new Problem(where, "'" + name + "' needs the argument '" + p.name() + "'"));
+      }
     }
   }
 
