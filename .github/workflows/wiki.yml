@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Publishes docs/ to the wiki of this repository. The wiki is output only: edit docs/, never the
+# wiki. NOT ENABLED: it runs only when started by hand from the Actions tab. To publish on every
+# change of the docs, add under "on:":
+#
+#   push:
+#     branches: [main]
+#     paths: ["docs/**", "tools/build-wiki.py"]
+#
+# Before the first run, create the first page of the wiki once in the web interface, because
+# GitHub makes the wiki repository only then.
+name: wiki
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wiki
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Clone the wiki
+        run: git clone "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.wiki.git" wiki
+      - name: Build
+        run: tools/build-wiki.py wiki
+      - name: Push if something changed
+        working-directory: wiki
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "The wiki is up to date."
+            exit 0
+          fi
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git commit -m "Update from docs/ at ${GITHUB_SHA::7}"
+          git push
