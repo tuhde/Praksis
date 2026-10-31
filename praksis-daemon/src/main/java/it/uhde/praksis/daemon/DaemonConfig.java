@@ -46,6 +46,8 @@ import java.util.Set;
  * path = "my-rules"            # a directory, read as it is and not pinned
  * ai_maintained = true         # may an AI propose changes? true for a directory, false for git
  *
+ * [plan]                       # plans that the agent proposes and a person approves run under
+ * layer = "mine"                # the grants of this layer (without it they cannot be run)
  * [shadow]                     # new and changed rules are observed before they run
  * enabled    = false           # off unless set
  * trial_days = 7               # how long a rule is observed
@@ -69,6 +71,7 @@ import java.util.Set;
  * @param layers the ruleset layers, bottom to top; empty means the single directory {@code ruleset}
  * @param params values for ruleset parameters, which win over the defaults in the layers
  * @param shadow the settings for rules on trial
+ * @param plan the layer whose grants plans run under
  * @param enabledModules the modules to load; empty means every module in the directory. Unless
  *     {@code enabled_modules} says otherwise these are the modules that have a {@code [module.*]}
  *     section.
@@ -86,7 +89,8 @@ public record DaemonConfig(
     List<LayerConfig> layers,
     Map<String, Object> params,
     java.util.Set<String> enabledModules,
-    ShadowConfig shadow) {
+    ShadowConfig shadow,
+    PlanConfig plan) {
   private static final String FILE = "praksis.toml";
   private static final Set<String> KEYS =
       Set.of(
@@ -101,7 +105,8 @@ public record DaemonConfig(
           "layer",
           "param",
           "enabled_modules",
-          "shadow");
+          "shadow",
+          "plan");
 
   /** The layers that an AI may propose changes to. */
   public List<LayerConfig> aiMaintainedLayers() {
@@ -233,6 +238,16 @@ public record DaemonConfig(
             .table("shadow", false)
             .map(ShadowConfig::parse)
             .orElse(new ShadowConfig(false, 7, 20));
+    java.util.Set<String> layerNames = new java.util.LinkedHashSet<>();
+    layers.forEach(l -> layerNames.add(l.name()));
+    if (layers.isEmpty()) {
+      layerNames.add("ruleset");
+    }
+    PlanConfig plan =
+        table
+            .table("plan", false)
+            .map(t -> PlanConfig.parse(t, layerNames))
+            .orElse(new PlanConfig(Optional.empty(), 30));
     if (!problems.isEmpty()) {
       throw new DaemonException(
           "invalid "
@@ -253,7 +268,8 @@ public record DaemonConfig(
         layers,
         params,
         enabled,
-        shadow);
+        shadow,
+        plan);
   }
 
   /** The directory of what ships with the runtime image, if this is one: {@code lib/praksis}. */

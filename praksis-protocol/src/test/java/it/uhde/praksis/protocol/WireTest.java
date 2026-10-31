@@ -62,6 +62,10 @@ class WireTest {
         List.of(
             new Request.Untested(),
             new Request.Notes(5),
+            new Request.AgentPlans(),
+            new Request.AgentPlanShow("1-abc"),
+            new Request.AgentPlanRun("1-abc"),
+            new Request.AgentPlanDrop("1-abc"),
             new Request.Staged(),
             new Request.StagedShow("0001-abc"),
             new Request.StagedDrop("0001-abc"),
@@ -71,6 +75,22 @@ class WireTest {
     var staged =
         new Response.StagedList.Staged(
             "0001-abc", "mine", "r1", "why", "2026-10-30T10:00:00Z", List.of("tests/r1.toml"));
+    var plan =
+        new Response.Plan(
+            "1-abc",
+            "2026-10-31T10:00:00Z",
+            "file it",
+            "why",
+            "mine",
+            "PROPOSED",
+            List.of(
+                new Response.PlanStep(
+                    "mail.move",
+                    Map.of("folder", "Reading"),
+                    "local-write",
+                    false,
+                    "no grant",
+                    "")));
     var verification =
         new Response.Verification(false, "t", 1, 0, 0, List.of(), null, List.of(), null);
     for (Response r :
@@ -83,6 +103,8 @@ class WireTest {
                     new Response.NoteList.Note("n1", "2026-10-31T10:00:00Z", "Answer", "text"))),
             new Response.StagedDetail(
                 staged, Map.of("tests/r1.toml", "format_version = 1\n"), verification),
+            new Response.PlanList(List.of(plan)),
+            new Response.PlanDetail(plan, false, "step 1 is not covered"),
             new Response.Dictated("lunch on friday", true))) {
       assertThat(Wire.decodeResponse(Wire.encode(r))).isEqualTo(r);
     }

@@ -196,6 +196,143 @@ final class AgentStore {
     }
   }
 
+  // ---------------------------------------------------------------------------- plans
+
+  static final int MAX_PLANS = 100;
+
+  /** One call of a plan, written out: what it is, whether the grants cover it, what came of it. */
+  record Step(
+      String capability,
+      Map<String, Object> args,
+      String effect,
+      boolean allowed,
+      String refusal,
+      String outcome) {
+    Step withOutcome(String outcome) {
+      return new Step(capability, args, effect, allowed, refusal, outcome);
+    }
+  }
+
+  /**
+   * What a person asked in words and what the agent made of it: literal capability calls that the
+   * person looks at and approves. {@code status}: PROPOSED, RUNNING, DONE or FAILED.
+   */
+  record Plan(
+      String id,
+      String created,
+      String request,
+      String reason,
+      String layer,
+      String status,
+      List<Step> steps) {
+    Plan with(String status, List<Step> steps) {
+      return new Plan(id, created, request, reason, layer, status, steps);
+    }
+  }
+
+  Path plans() {
+    return root.resolve("plans");
+  }
+
+  /** Keeps a new plan; returns it with its id. */
+  synchronized Plan savePlan(String request, String reason, String layer, List<Step> steps)
+      throws IOException {
+    if (listPlans().size() >= MAX_PLANS) {
+      throw new IOException(
+          "there are " + MAX_PLANS + " plans already: drop some (praksis agent plan-drop <id>)");
+    }
+    Plan plan =
+        new Plan(nextId(), Instant.now().toString(), request, reason, layer, "PROPOSED", steps);
+    writePlan(plan);
+    return plan;
+  }
+
+  synchronized void updatePlan(Plan plan) throws IOException {
+    writePlan(plan);
+  }
+
+  private void writePlan(Plan plan) throws IOException {
+    Files.createDirectories(plans());
+    Map<String, Object> m = new LinkedHashMap<>();
+    m.put("id", plan.id());
+    m.put("created", plan.created());
+    m.put("request", plan.request());
+    m.put("reason", plan.reason());
+    m.put("layer", plan.layer());
+    m.put("status", plan.status());
+    List<Object> steps = new ArrayList<>();
+    for (Step st : plan.steps()) {
+      Map<String, Object> o = new LinkedHashMap<>();
+      o.put("capability", st.capability());
+      o.put("args", st.args());
+      o.put("effect", st.effect());
+      o.put("allowed", st.allowed());
+      o.put("refusal", st.refusal());
+      o.put("outcome", st.outcome());
+      steps.add(o);
+    }
+    m.put("steps", steps);
+    Path tmp = Files.createTempFile(plans(), ".plan", ".tmp");
+    JSON.writerWithDefaultPrettyPrinter().writeValue(tmp.toFile(), m);
+    Files.setPosixFilePermissions(tmp, PosixFilePermissions.fromString("rw-------"));
+    Files.move(
+        tmp,
+        plans().resolve(plan.id() + ".json"),
+        StandardCopyOption.ATOMIC_MOVE,
+        StandardCopyOption.REPLACE_EXISTING);
+  }
+
+  /** The plans, newest first. */
+  synchronized List<Plan> listPlans() throws IOException {
+    if (!Files.isDirectory(plans())) {
+      return new ArrayList<>();
+    }
+    List<Plan> out = new ArrayList<>();
+    try (Stream<Path> files = Files.list(plans())) {
+      for (Path f :
+          (Iterable<Path>)
+              files.filter(x -> x.getFileName().toString().endsWith(".json")).sorted()::iterator) {
+        out.add(readPlan(JSON.readTree(f.toFile())));
+      }
+    }
+    java.util.Collections.reverse(out);
+    return out;
+  }
+
+  synchronized Optional<Plan> plan(String id) throws IOException {
+    return listPlans().stream().filter(p -> p.id().equals(id)).findFirst();
+  }
+
+  synchronized boolean dropPlan(String id) throws IOException {
+    if (!id.matches("[0-9]{13}-[0-9a-f]{6}")) {
+      return false;
+    }
+    return Files.deleteIfExists(plans().resolve(id + ".json"));
+  }
+
+  @SuppressWarnings("unchecked")
+  private static Plan readPlan(JsonNode n) {
+    List<Step> steps = new ArrayList<>();
+    for (JsonNode st : n.path("steps")) {
+      steps.add(
+          new Step(
+              st.path("capability").asText(),
+              JSON.convertValue(st.path("args"), Map.class),
+              st.path("effect").asText(),
+              st.path("allowed").asBoolean(),
+              st.path("refusal").asText(),
+              st.path("outcome").asText()));
+    }
+    return new Plan(
+        n.path("id").asText(),
+        n.path("created").asText(),
+        n.path("request").asText(),
+        n.path("reason").asText(),
+        n.path("layer").asText(),
+        n.path("status").asText(),
+        steps);
+  }
+
   private static final java.util.concurrent.atomic.AtomicLong LAST =
       new java.util.concurrent.atomic.AtomicLong();
 

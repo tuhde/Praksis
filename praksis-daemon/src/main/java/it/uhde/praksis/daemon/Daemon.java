@@ -127,7 +127,8 @@ public final class Daemon implements AutoCloseable {
       ruleset = effective.ruleset();
       GrantPolicy access = accessPolicy(config, modules.catalog(), effective);
       store = Store.open(config.database());
-      agent.bind(config, layers, modules, store, () -> effective);
+      agent.bind(
+          config, layers, modules, store, () -> effective, access, new StoreAuditLog(store), clock);
       store.onChange(topics::bump);
       auditPolicy(config, store);
       auditRules(effective, layers, compiler, modules.catalog(), store, Admin.trust(config));
@@ -173,7 +174,8 @@ public final class Daemon implements AutoCloseable {
               modules,
               compiler,
               effective,
-              engine);
+              engine,
+              agent.plansOf());
       approvals.sync();
       engine.recover();
       api = new ApiServer(config.socket(), this::handle, this::requestStop);
@@ -340,6 +342,10 @@ public final class Daemon implements AutoCloseable {
         case Request.ProposalShow p -> screens.proposalDetail(p.name());
         case Request.Staged s -> screens.staged();
         case Request.Untested u -> screens.untested();
+        case Request.AgentPlans p -> screens.plans();
+        case Request.AgentPlanShow p -> screens.planDetail(p.id());
+        case Request.AgentPlanRun p -> screens.planRun(p.id());
+        case Request.AgentPlanDrop p -> screens.planDrop(p.id());
         case Request.Notes n -> screens.notes(n.limit());
         case Request.StagedShow s -> screens.stagedDetail(s.id());
         case Request.StagedDrop s -> screens.stagedDrop(s.id());

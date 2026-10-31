@@ -35,6 +35,8 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Response.StagedList.class, name = "staged-list"),
   @JsonSubTypes.Type(value = Response.UntestedRules.class, name = "untested-rules"),
   @JsonSubTypes.Type(value = Response.NoteList.class, name = "note-list"),
+  @JsonSubTypes.Type(value = Response.PlanList.class, name = "plan-list"),
+  @JsonSubTypes.Type(value = Response.PlanDetail.class, name = "plan-detail"),
   @JsonSubTypes.Type(value = Response.StagedDetail.class, name = "staged-detail"),
   @JsonSubTypes.Type(value = Response.Done.class, name = "done"),
   @JsonSubTypes.Type(value = Response.Stopped.class, name = "stopped"),
@@ -522,6 +524,60 @@ public sealed interface Response {
     /** A parameter of a view. */
     public record Param(String name, String type, Object value) {}
   }
+
+  /**
+   * The plans that the agent made, newest first.
+   *
+   * @param items the plans
+   */
+  record PlanList(List<Plan> items) implements Response {}
+
+  /**
+   * One plan: what a person asked for in words and the literal calls that the agent made of it.
+   *
+   * @param id its id
+   * @param created when
+   * @param request what the person asked
+   * @param reason why the agent chose these steps
+   * @param layer the layer whose grants the steps run under
+   * @param status PROPOSED, RUNNING, DONE or FAILED
+   * @param steps the calls, in order
+   */
+  record Plan(
+      String id,
+      String created,
+      String request,
+      String reason,
+      String layer,
+      String status,
+      List<PlanStep> steps) {}
+
+  /**
+   * One call of a plan.
+   *
+   * @param capability the capability
+   * @param args its arguments
+   * @param effect its effect class
+   * @param allowed whether the grants cover it now
+   * @param refusal why not, if they do not
+   * @param outcome what came of it when the plan ran, else empty
+   */
+  record PlanStep(
+      String capability,
+      java.util.Map<String, Object> args,
+      String effect,
+      boolean allowed,
+      String refusal,
+      String outcome) {}
+
+  /**
+   * A plan, and whether a person can approve it now.
+   *
+   * @param plan the plan, with the steps checked against the grants as they are now
+   * @param runnable whether it is proposed, every step is covered, and a plan layer is set
+   * @param why what stands in the way, if something does
+   */
+  record PlanDetail(Plan plan, boolean runnable, String why) implements Response {}
 
   /**
    * The notes of the maintenance agent, newest first.

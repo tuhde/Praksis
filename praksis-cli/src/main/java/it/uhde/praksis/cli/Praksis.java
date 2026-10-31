@@ -1022,9 +1022,106 @@ public final class Praksis {
         Praksis.Agent.ListCommand.class,
         Praksis.Agent.ShowCommand.class,
         Praksis.Agent.ExportCommand.class,
-        Praksis.Agent.DropCommand.class
+        Praksis.Agent.DropCommand.class,
+        Praksis.Agent.PlansCommand.class,
+        Praksis.Agent.PlanCommand.class,
+        Praksis.Agent.PlanRunCommand.class,
+        Praksis.Agent.PlanDropCommand.class
       })
   static final class Agent {
+    static void print(java.io.PrintWriter out, Response.Plan plan) {
+      out.printf(
+          "%s  %s  %s%n  asked: %s%n", plan.id(), plan.status(), plan.layer(), plan.request());
+      if (!plan.reason().isBlank()) {
+        out.println("  why: " + plan.reason());
+      }
+      int n = 0;
+      for (Response.PlanStep s : plan.steps()) {
+        n++;
+        out.printf(
+            "  %d. %s %s [%s]%s%n",
+            n,
+            s.capability(),
+            s.args(),
+            s.effect(),
+            s.allowed() ? "" : "  NOT COVERED: " + s.refusal());
+        if (!s.outcome().isBlank()) {
+          out.println("     -> " + s.outcome());
+        }
+      }
+    }
+
+    @Command(name = "plans", description = "Lists the plans that the agent made from a request.")
+    static final class PlansCommand extends Base {
+      @Override
+      public Integer call() {
+        Response response = send(new Request.AgentPlans());
+        if (response instanceof Response.PlanList l) {
+          if (l.items().isEmpty()) {
+            out().println("There are no plans.");
+          }
+          l.items().forEach(p -> print(out(), p));
+          return 0;
+        }
+        return exitCodeFor(response);
+      }
+    }
+
+    @Command(
+        name = "plan",
+        description = "Shows a plan, with each step checked against the grants as they are now.")
+    static final class PlanCommand extends Base {
+      @CommandLine.Parameters(paramLabel = "<id>", description = "The id.")
+      String id;
+
+      @Override
+      public Integer call() {
+        Response response = send(new Request.AgentPlanShow(id));
+        if (response instanceof Response.PlanDetail d) {
+          print(out(), d.plan());
+          out().println(d.runnable() ? "It can be run." : "It cannot be run: " + d.why());
+          return 0;
+        }
+        return exitCodeFor(response);
+      }
+    }
+
+    @Command(
+        name = "plan-run",
+        description =
+            "Approves a plan: its steps run one after the other under the grants of the plan"
+                + " layer. Run 'praksis agent plan <id>' first and read the steps.")
+    static final class PlanRunCommand extends Base {
+      @CommandLine.Parameters(paramLabel = "<id>", description = "The id.")
+      String id;
+
+      @Override
+      public Integer call() {
+        Response response = send(new Request.AgentPlanRun(id));
+        if (response instanceof Response.PlanDetail d) {
+          print(out(), d.plan());
+          return d.plan().status().equals("DONE") ? 0 : 1;
+        }
+        return exitCodeFor(response);
+      }
+    }
+
+    @Command(name = "plan-drop", description = "Throws a plan away.")
+    static final class PlanDropCommand extends Base {
+      @CommandLine.Parameters(paramLabel = "<id>", description = "The id.")
+      String id;
+
+      @Override
+      public Integer call() {
+        Response response = send(new Request.AgentPlanDrop(id));
+        if (response instanceof Response.Done d) {
+          out().println(d.message());
+          return 0;
+        }
+        return exitCodeFor(response);
+      }
+    }
+
     @Command(name = "list", description = "Lists the staged changes.")
     static final class ListCommand extends Base {
       @Override

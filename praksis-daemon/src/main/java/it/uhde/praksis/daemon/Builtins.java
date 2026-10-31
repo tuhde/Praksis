@@ -124,6 +124,34 @@ final class Builtins {
                     out("refused", ValueType.LIST),
                     out("report", ValueType.STRING))),
             new CapabilityDescriptor(
+                "praksis.plan.catalog",
+                EffectClass.READ_ONLY,
+                true,
+                List.of(),
+                List.of(out("items", ValueType.LIST), out("report", ValueType.STRING))),
+            new CapabilityDescriptor(
+                "praksis.plan.read",
+                EffectClass.READ_ONLY,
+                true,
+                List.of(
+                    in("reads", ValueType.LIST, false, false),
+                    in("reads_json", ValueType.STRING, false, false)),
+                List.of(out("report", ValueType.STRING), out("count", ValueType.INT))),
+            new CapabilityDescriptor(
+                "praksis.plan.propose",
+                EffectClass.LOCAL_WRITE,
+                true,
+                List.of(
+                    in("request", ValueType.STRING, true, false),
+                    in("steps", ValueType.LIST, false, false),
+                    in("steps_json", ValueType.STRING, false, false),
+                    in("reason", ValueType.STRING, false, false)),
+                List.of(
+                    out("id", ValueType.STRING),
+                    out("steps", ValueType.INT),
+                    out("refused", ValueType.INT),
+                    out("runnable", ValueType.BOOL))),
+            new CapabilityDescriptor(
                 "praksis.notes.list",
                 EffectClass.READ_ONLY,
                 true,

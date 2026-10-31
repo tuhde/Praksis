@@ -39,6 +39,7 @@ final class Screens {
   private final ExpressionCompiler compiler;
   private final LayerStack.Effective inUse;
   private final Engine engine;
+  private final Plans planner;
 
   Screens(
       DaemonConfig config,
@@ -48,7 +49,8 @@ final class Screens {
       LoadedModules modules,
       ExpressionCompiler compiler,
       LayerStack.Effective inUse,
-      Engine engine) {
+      Engine engine,
+      Plans planner) {
     this.config = config;
     this.layers = layers;
     this.git = git;
@@ -57,6 +59,7 @@ final class Screens {
     this.compiler = compiler;
     this.inUse = inUse;
     this.engine = engine;
+    this.planner = planner;
   }
 
   /** The ruleset in use, with where each rule comes from. */
@@ -420,6 +423,75 @@ final class Screens {
   private static Response.StagedList.Staged staged(AgentStore.Staged s) {
     return new Response.StagedList.Staged(
         s.id(), s.layer(), s.rule(), s.reason(), s.created(), s.files());
+  }
+
+  private static Response.Plan plan(AgentStore.Plan p) {
+    return new Response.Plan(
+        p.id(),
+        p.created(),
+        p.request(),
+        p.reason(),
+        p.layer(),
+        p.status(),
+        p.steps().stream()
+            .map(
+                s ->
+                    new Response.PlanStep(
+                        s.capability(),
+                        s.args(),
+                        s.effect(),
+                        s.allowed(),
+                        s.refusal(),
+                        s.outcome()))
+            .toList());
+  }
+
+  /** The plans that the agent made, newest first. */
+  Response plans() throws DaemonException {
+    try {
+      return new Response.PlanList(
+          agentStore().listPlans().stream().map(p -> plan(planner.current(p))).toList());
+    } catch (IOException e) {
+      throw new DaemonException("cannot read the plans: " + e.getMessage(), e);
+    }
+  }
+
+  /** One plan, checked against the grants as they are now. */
+  Response planDetail(String id) throws DaemonException {
+    try {
+      AgentStore.Plan found = agentStore().plan(id).orElse(null);
+      if (found == null) {
+        return new Response.Error("there is no plan '" + id + "'");
+      }
+      AgentStore.Plan current = planner.current(found);
+      return new Response.PlanDetail(
+          plan(current), planner.obstacle(current).isEmpty(), planner.obstacle(current).orElse(""));
+    } catch (IOException e) {
+      throw new DaemonException("cannot read the plan: " + e.getMessage(), e);
+    }
+  }
+
+  /** A person approves a plan: it runs, step by step, under the grants of the plan layer. */
+  Response planRun(String id) throws DaemonException {
+    try {
+      AgentStore.Plan ran = planner.run(id);
+      return new Response.PlanDetail(plan(ran), false, "");
+    } catch (it.uhde.praksis.capability.CapabilityException e) {
+      return new Response.Error(e.getMessage());
+    } catch (IOException e) {
+      throw new DaemonException("cannot run the plan: " + e.getMessage(), e);
+    }
+  }
+
+  /** Throws a plan away. */
+  Response planDrop(String id) throws DaemonException {
+    try {
+      return agentStore().dropPlan(id)
+          ? new Response.Done("Dropped plan " + id + ".")
+          : new Response.Error("there is no plan '" + id + "'");
+    } catch (IOException e) {
+      throw new DaemonException("cannot drop the plan: " + e.getMessage(), e);
+    }
   }
 
   /** The notes that the agent left, newest first. */

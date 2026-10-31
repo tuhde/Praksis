@@ -196,4 +196,27 @@ class DaemonConfigTest {
         .hasMessageContaining("unknown key 'wrong'")
         .hasMessageContaining("'ruleset' and [[layer]] cannot be used together");
   }
+
+  @Test
+  void theLayerOfPlansMustBeOneOfTheLayersAndStepsAreBounded() throws Exception {
+    assertThat(DaemonConfig.load(home).plan().layer()).isEmpty();
+    assertThat(DaemonConfig.load(home).plan().maxSteps()).isEqualTo(30);
+
+    Files.writeString(
+        home.resolve("praksis.toml"),
+        "format_version = 1\n[[layer]]\nname = \"mine\"\npath = \"p\"\n"
+            + "[plan]\nlayer = \"mine\"\nmax_steps = 5\n");
+    DaemonConfig c = DaemonConfig.load(home);
+    assertThat(c.plan().layer()).contains("mine");
+    assertThat(c.plan().maxSteps()).isEqualTo(5);
+
+    Files.writeString(
+        home.resolve("praksis.toml"),
+        "format_version = 1\n[[layer]]\nname = \"mine\"\npath = \"p\"\n"
+            + "[plan]\nlayer = \"other\"\nmax_steps = 500\n");
+    assertThatThrownBy(() -> DaemonConfig.load(home))
+        .isInstanceOf(DaemonException.class)
+        .hasMessageContaining("other")
+        .hasMessageContaining("max_steps");
+  }
 }

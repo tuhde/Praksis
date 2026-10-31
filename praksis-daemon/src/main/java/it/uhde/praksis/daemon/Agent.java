@@ -4,6 +4,7 @@ package it.uhde.praksis.daemon;
 import it.uhde.praksis.capability.Capability;
 import it.uhde.praksis.capability.CapabilityContext;
 import it.uhde.praksis.capability.CapabilityException;
+import it.uhde.praksis.engine.GrantPolicy;
 import it.uhde.praksis.engine.LoadedModules;
 import it.uhde.praksis.ruleset.LayerStack;
 import it.uhde.praksis.ruleset.Rule;
@@ -54,6 +55,7 @@ final class Agent {
   private volatile LoadedModules modules;
   private volatile AgentStore store;
   private volatile History history;
+  private volatile Plans plans;
 
   /** Gives the capabilities what they need; called when the daemon has put itself together. */
   void bind(
@@ -61,12 +63,18 @@ final class Agent {
       Layers layers,
       LoadedModules modules,
       it.uhde.praksis.store.Store log,
-      java.util.function.Supplier<LayerStack.Effective> effective) {
+      java.util.function.Supplier<LayerStack.Effective> effective,
+      GrantPolicy access,
+      it.uhde.praksis.engine.AuditLog audit,
+      java.time.Clock clock) {
     this.config = config;
     this.layers = layers;
     this.modules = modules;
     this.store = new AgentStore(config.dataDirectory().resolve(Builtins.MODULE));
     this.history = new History(log, effective);
+    this.plans =
+        new Plans(
+            config, access, modules.catalog(), modules.capabilities(), audit, clock, () -> store);
   }
 
   Map<String, Capability> capabilities() {
@@ -80,6 +88,9 @@ final class Agent {
     cap(m, "praksis.history.find", (c, a) -> historyOf().find(a));
     cap(m, "praksis.history.trace", (c, a) -> historyOf().trace(a));
     cap(m, "praksis.history.summary", (c, a) -> historyOf().summary(a));
+    cap(m, "praksis.plan.catalog", (c, a) -> plansOf().catalogOfGranted());
+    cap(m, "praksis.plan.read", (c, a) -> plansOf().read(a));
+    cap(m, "praksis.plan.propose", (c, a) -> plansOf().propose(c, a));
     return m;
   }
 
@@ -112,6 +123,11 @@ final class Agent {
             }
           }
         });
+  }
+
+  Plans plansOf() throws CapabilityException {
+    ready();
+    return plans;
   }
 
   private History historyOf() throws CapabilityException {

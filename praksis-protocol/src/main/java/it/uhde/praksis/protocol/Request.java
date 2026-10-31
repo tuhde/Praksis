@@ -41,6 +41,10 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.Dictate.class, name = "dictate"),
   @JsonSubTypes.Type(value = Request.Staged.class, name = "staged"),
   @JsonSubTypes.Type(value = Request.Untested.class, name = "untested"),
+  @JsonSubTypes.Type(value = Request.AgentPlans.class, name = "agent-plans"),
+  @JsonSubTypes.Type(value = Request.AgentPlanShow.class, name = "agent-plan-show"),
+  @JsonSubTypes.Type(value = Request.AgentPlanRun.class, name = "agent-plan-run"),
+  @JsonSubTypes.Type(value = Request.AgentPlanDrop.class, name = "agent-plan-drop"),
   @JsonSubTypes.Type(value = Request.Notes.class, name = "notes"),
   @JsonSubTypes.Type(value = Request.StagedShow.class, name = "staged-show"),
   @JsonSubTypes.Type(value = Request.StagedDrop.class, name = "staged-drop"),
@@ -292,6 +296,37 @@ public sealed interface Request {
       args = args == null ? java.util.Map.of() : args;
     }
   }
+
+  /**
+   * Asks for the plans that the agent made from what a person asked in words. Answered with {@link
+   * Response.PlanList}.
+   */
+  record AgentPlans() implements Request {}
+
+  /**
+   * Asks for one plan with its steps, checked against the grants as they are now. Answered with
+   * {@link Response.PlanDetail}, or with an error.
+   *
+   * @param id the id of the plan
+   */
+  record AgentPlanShow(String id) implements Request {}
+
+  /**
+   * A person approves a plan: every step is checked again, and then the steps run one after the
+   * other under the grants of the layer of {@code [plan]}. Only a request like this can run a plan.
+   * Answered with {@link Response.PlanDetail} (with what came of each step), or with an error that
+   * says why nothing was run.
+   *
+   * @param id the id of the plan
+   */
+  record AgentPlanRun(String id) implements Request {}
+
+  /**
+   * Throws a plan away. Answered with {@link Response.Done}, or with an error.
+   *
+   * @param id the id of the plan
+   */
+  record AgentPlanDrop(String id) implements Request {}
 
   /**
    * Asks for the notes that the maintenance agent left (explanations, answers), newest first.
