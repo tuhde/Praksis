@@ -1,19 +1,16 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # Publishes docs/ to the wiki of this repository. The wiki is output only: edit docs/, never the
-# wiki. NOT ENABLED: it runs only when started by hand from the Actions tab. To publish on every
-# change of the docs, add under "on:":
-#
-#   push:
-#     branches: [main]
-#     paths: ["docs/**", "tools/build-wiki.py"]
-#
-# Before the first run, create the first page of the wiki once in the web interface, because
-# GitHub makes the wiki repository only then.
+# wiki. It runs on every push to main that changes the docs, and by hand from the Actions tab.
+# The first page of the wiki had to be created once in the web interface, because GitHub makes
+# the wiki repository only then.
 name: wiki
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["docs/**", "tools/build-wiki.py"]
 
 permissions:
   contents: write

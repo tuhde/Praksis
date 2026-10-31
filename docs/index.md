@@ -3,6 +3,8 @@
 This is the one source of the documentation. The same files are read in the repository, published
 to the wiki and shown by `praksis help`. A page is a Markdown file; the first line is its title.
 A page is only part of the documentation if it is listed here, in this order.
+The documentation is licensed under
+[CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/); the code is under Apache-2.0.
 
 ## Using Praksis
 

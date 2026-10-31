@@ -8,4 +8,4 @@ The project is in the idea-gathering phase and nothing is implemented yet. The d
 
 ## License
 
-Praksis is open source under the [Apache License 2.0](LICENSE). Source files carry an `SPDX-License-Identifier: Apache-2.0` header.
+Praksis is open source under the [Apache License 2.0](LICENSE). Source files carry an `SPDX-License-Identifier: Apache-2.0` header. The documentation in `docs/` is licensed under [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/).
