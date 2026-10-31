@@ -46,7 +46,8 @@ import picocli.CommandLine.Spec;
       Praksis.CommandsCommand.class,
       Praksis.RunCommand.class,
       Praksis.ViewsCommand.class,
-      Praksis.ViewCommand.class
+      Praksis.ViewCommand.class,
+      Help.class
     })
 public final class Praksis {
   static final int EXIT_FAILED = 1;

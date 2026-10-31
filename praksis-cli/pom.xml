@@ -26,4 +26,17 @@
       <artifactId>picocli</artifactId>
     </dependency>
   </dependencies>
+
+  <build>
+    <resources>
+      <!-- The documentation is shown by "praksis help"; docs/ is its only source. -->
+      <resource>
+        <directory>${project.basedir}/../docs</directory>
+        <targetPath>docs</targetPath>
+        <excludes>
+          <exclude>PLAN.md</exclude>
+        </excludes>
+      </resource>
+    </resources>
+  </build>
 </project>
