@@ -27,6 +27,8 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Response.CommandStarted.class, name = "command-started"),
   @JsonSubTypes.Type(value = Response.Outcome.class, name = "outcome"),
   @JsonSubTypes.Type(value = Response.ViewList.class, name = "views"),
+  @JsonSubTypes.Type(value = Response.HelpTopics.class, name = "help-topics"),
+  @JsonSubTypes.Type(value = Response.HelpPage.class, name = "help-page"),
   @JsonSubTypes.Type(value = Response.ResolvedView.class, name = "view"),
   @JsonSubTypes.Type(value = Response.Fetched.class, name = "fetched"),
   @JsonSubTypes.Type(value = Response.Uploaded.class, name = "uploaded"),
@@ -496,6 +498,30 @@ public sealed interface Response {
    * @param lines the run log of the event, oldest first
    */
   record Outcome(boolean done, List<LogLines.Line> lines) implements Response {}
+
+  /**
+   * The pages of the documentation, in the order of its index.
+   *
+   * @param topics the pages
+   */
+  record HelpTopics(List<Topic> topics) implements Response {
+    /**
+     * One page.
+     *
+     * @param name the topic: the path of the page without {@code .md}
+     * @param title what the index calls it
+     */
+    public record Topic(String name, String title) {}
+  }
+
+  /**
+   * One page of the documentation.
+   *
+   * @param topic the topic
+   * @param title what the index calls it
+   * @param text the page, in Markdown
+   */
+  record HelpPage(String topic, String title, String text) implements Response {}
 
   /**
    * The views of the ruleset in use.

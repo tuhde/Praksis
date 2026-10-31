@@ -429,7 +429,7 @@ public final class Praksis {
       name = "commands",
       description =
           "Lists the commands that a person can start (rules with a command trigger), with their"
-              + " arguments. Start one with: praksis run <command> name=value ...")
+              + " arguments. Start one with: 'praksis run <command> name=value ...'")
   static final class CommandsCommand extends Base {
     @Override
     public Integer call() {

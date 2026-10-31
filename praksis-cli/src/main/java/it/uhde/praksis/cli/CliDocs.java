@@ -33,7 +33,7 @@ final class CliDocs {
 
   private static void command(StringBuilder b, CommandSpec spec, int level) {
     b.append("\n").append("#".repeat(level)).append(" praksis ").append(path(spec)).append("\n\n");
-    String description = String.join(" ", spec.usageMessage().description());
+    String description = code(String.join(" ", spec.usageMessage().description()));
     if (!description.isBlank()) {
       b.append(description).append("\n\n");
     }
@@ -70,7 +70,12 @@ final class CliDocs {
 
   private static String text(ArgSpec a) {
     String d = String.join(" ", a.description());
-    return d.isBlank() ? "" : ": " + d;
+    return d.isBlank() ? "" : ": " + code(d);
+  }
+
+  /** A command in single quotes is set as code, so that "<id>" in it is not taken for HTML. */
+  private static String code(String text) {
+    return text.replaceAll("'([^']*[ <][^']*)'", "`$1`");
   }
 
   private static String path(CommandSpec spec) {

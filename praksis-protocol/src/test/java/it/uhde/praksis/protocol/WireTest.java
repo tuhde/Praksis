@@ -61,6 +61,8 @@ class WireTest {
     for (Request r :
         List.of(
             new Request.Untested(),
+            new Request.Help(null),
+            new Request.Help("user/concepts"),
             new Request.Notes(5),
             new Request.AgentPlans(),
             new Request.AgentPlanShow("1-abc"),
@@ -96,6 +98,8 @@ class WireTest {
         new Response.Verification(false, "t", 1, 0, 0, List.of(), null, List.of(), null);
     for (Response r :
         List.of(
+            new Response.HelpTopics(List.of(new Response.HelpTopics.Topic("user/rules", "Rules"))),
+            new Response.HelpPage("user/rules", "Rules", "# Rules\n"),
             new Response.UntestedRules(
                 List.of(new Response.UntestedRules.Rule("r1", "mine", "local-write"))),
             new Response.StagedList(List.of(staged)),

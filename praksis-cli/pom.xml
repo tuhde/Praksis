@@ -22,21 +22,13 @@
       <version>${project.version}</version>
     </dependency>
     <dependency>
+      <groupId>it.uhde</groupId>
+      <artifactId>praksis-docs</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
       <groupId>info.picocli</groupId>
       <artifactId>picocli</artifactId>
     </dependency>
   </dependencies>
-
-  <build>
-    <resources>
-      <!-- The documentation is shown by "praksis help"; docs/ is its only source. -->
-      <resource>
-        <directory>${project.basedir}/../docs</directory>
-        <targetPath>docs</targetPath>
-        <excludes>
-          <exclude>PLAN.md</exclude>
-        </excludes>
-      </resource>
-    </resources>
-  </build>
 </project>

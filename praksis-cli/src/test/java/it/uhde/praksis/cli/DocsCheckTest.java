@@ -37,6 +37,21 @@ class DocsCheckTest {
   }
 
   @Test
+  void findsWhatTheHelpCannotShow() throws IOException {
+    write("index.md", "# Docs\n\n- [A](a.md)\n");
+    write("p.png", "");
+    write(
+        "a.md",
+        "# A\n\n<!-- fine -->\nText with `<code>` and <b>bold</b>.\n\n![pic](p.png)\n\n"
+            + "- item\n  - nested\n\n    <div>in code</div>\n");
+    assertThat(DocsCheck.problems(dir, null))
+        .containsExactlyInAnyOrder(
+            "a.md has HTML, which the help does not show: Text with `<code>` and <b>bold</b>.",
+            "a.md has an image, which the help does not show: ![pic](p.png)",
+            "a.md has a nested list, which the help does not show: - nested");
+  }
+
+  @Test
   void aModuleWithoutAPageIsReported() throws IOException {
     write("index.md", "# Docs\n");
     write("mods/mail/module.toml", "format_version = 1\nname = \"mail\"\n");

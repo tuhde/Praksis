@@ -19,6 +19,9 @@ import java.util.stream.Stream;
 final class DocsCheck {
   private static final Pattern ENTRY = Pattern.compile("^- \\[[^\\]]+\\]\\(([^)]+\\.md)\\)\\s*$");
   private static final Pattern LINK = Pattern.compile("\\]\\(([^)\\s]+)\\)");
+  private static final Pattern INLINE_CODE = Pattern.compile("`[^`]*`");
+  private static final Pattern HTML = Pattern.compile("<[a-zA-Z/!]");
+  private static final Pattern NESTED_LIST = Pattern.compile("^\\s+[-*]\\s+\\S");
   private static final Pattern MODULE_NAME =
       Pattern.compile("^name\\s*=\\s*\"([^\"]+)\"", Pattern.MULTILINE);
 
@@ -88,9 +91,24 @@ final class DocsCheck {
       problems.add(name + " does not start with a title (# ...)");
     }
     boolean fenced = false;
+    boolean comment = false;
     for (String line : lines) {
       if (line.startsWith("```") || line.startsWith("~~~")) {
         fenced = !fenced;
+      }
+      if (!fenced && !line.startsWith("    ")) {
+        String text = INLINE_CODE.matcher(line).replaceAll("");
+        if (comment || text.contains("<!--")) {
+          comment = !text.contains("-->");
+        } else if (HTML.matcher(text).find()) {
+          problems.add(name + " has HTML, which the help does not show: " + line.strip());
+        }
+        if (text.contains("![")) {
+          problems.add(name + " has an image, which the help does not show: " + line.strip());
+        }
+        if (NESTED_LIST.matcher(line).find()) {
+          problems.add(name + " has a nested list, which the help does not show: " + line.strip());
+        }
       }
       if (fenced || line.startsWith("    ") || name.equals("index.md")) {
         continue;

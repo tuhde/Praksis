@@ -119,7 +119,7 @@ Arguments:
 
 #### praksis agent plan-run
 
-Approves a plan: its steps run one after the other under the grants of the plan layer. Run 'praksis agent plan <id>' first and read the steps.
+Approves a plan: its steps run one after the other under the grants of the plan layer. Run `praksis agent plan <id>` first and read the steps.
 
 Arguments:
 
@@ -166,7 +166,7 @@ Options:
 
 - `--replay`: Also run the stored events through the ruleset in use and through the candidate, and list the events that they treat differently.
 - `-n` `<events>`: How many of the newest stored events to replay (200).
-- `--update`: Check the ruleset that 'layers update' would produce (asks the servers).
+- `--update`: Check the ruleset that `layers update` would produce (asks the servers).
 - `--layer` `<name>=<directory>|<name>=@<ref>`: Check with this layer replaced by a directory, or by a branch or tag of its repository, e.g. an AI's branch of the private layer. Repeatable.
 
 ### praksis test
@@ -308,7 +308,7 @@ Arguments:
 
 ### praksis commands
 
-Lists the commands that a person can start (rules with a command trigger), with their arguments. Start one with: praksis run <command> name=value ...
+Lists the commands that a person can start (rules with a command trigger), with their arguments. Start one with: `praksis run <command> name=value ...`
 
 ### praksis run
 

@@ -34,6 +34,7 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.RunCommand.class, name = "run-command"),
   @JsonSubTypes.Type(value = Request.Outcome.class, name = "outcome"),
   @JsonSubTypes.Type(value = Request.Views.class, name = "views"),
+  @JsonSubTypes.Type(value = Request.Help.class, name = "help"),
   @JsonSubTypes.Type(value = Request.ViewResolve.class, name = "view"),
   @JsonSubTypes.Type(value = Request.Fetch.class, name = "fetch"),
   @JsonSubTypes.Type(value = Request.Upload.class, name = "upload"),
@@ -251,6 +252,14 @@ public sealed interface Request {
    * @param event the event id
    */
   record Outcome(String event) implements Request {}
+
+  /**
+   * Asks for the documentation: the list of pages, or one page. Answered with {@link
+   * Response.HelpTopics} or {@link Response.HelpPage}.
+   *
+   * @param topic the page (the path without {@code .md}), or null for the list
+   */
+  record Help(String topic) implements Request {}
 
   /** Asks for the views of the ruleset in use. Answered with {@link Response.ViewList}. */
   record Views() implements Request {}

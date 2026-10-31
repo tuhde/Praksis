@@ -3,7 +3,6 @@ package it.uhde.praksis.cli;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import org.junit.jupiter.api.Test;
@@ -36,12 +35,5 @@ class HelpTest {
   void anUnknownTopicFails() {
     assertThat(run("help", "nope")).isEqualTo(1);
     assertThat(err.toString()).contains("No help topic 'nope'");
-  }
-
-  @Test
-  void everyPageOfTheIndexExistsAndStartsWithATitle() throws IOException {
-    for (Help.Topic t : Help.topics()) {
-      assertThat(Help.read(t.name())).as(t.name()).startsWith("# ");
-    }
   }
 }

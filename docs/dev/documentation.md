@@ -10,3 +10,7 @@
   `.github/workflows/wiki.yml` pushes the result. Two pages must not have the same title.
 - `docs/reference/cli.md` and `docs/modules/*.md` are generated. After a change to a command or a
   module, run the build with `-Dpraksis.docs.update=true` and commit the result.
+- Pages are shown by `praksis help` and in the Help tab of Praksis Desktop. The tab reads headings,
+  paragraphs, bullet and numbered lists, tables, block quotes, indented or fenced code, and in the
+  text bold, inline code and links. HTML (except comments), images and nested lists are not shown,
+  and the documentation check rejects them.

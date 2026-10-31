@@ -5,6 +5,7 @@ import it.uhde.praksis.capability.Capability;
 import it.uhde.praksis.capability.CapabilityException;
 import it.uhde.praksis.capability.Event;
 import it.uhde.praksis.capability.ModuleDescriptor;
+import it.uhde.praksis.docs.Docs;
 import it.uhde.praksis.engine.CredentialResolver;
 import it.uhde.praksis.engine.Engine;
 import it.uhde.praksis.engine.GrantPolicy;
@@ -371,6 +372,7 @@ public final class Daemon implements AutoCloseable {
         case Request.Commands c -> screens.commands();
         case Request.RunCommand r -> screens.run(r, clock);
         case Request.Outcome o -> screens.outcome(o.event());
+        case Request.Help h -> help(h.topic());
         case Request.Views v -> views.list();
         case Request.ViewResolve v -> views.resolve(v.view(), v.params(), v.maxSchema());
         case Request.Lookup l -> views.lookup(l.view(), l.capability(), l.args());
@@ -389,6 +391,19 @@ public final class Daemon implements AutoCloseable {
       Thread.currentThread().interrupt();
       return new Response.Error("interrupted");
     }
+  }
+
+  /** The documentation that ships with the program: the list of pages, or one of them. */
+  private static Response help(String topic) {
+    if (topic == null) {
+      return new Response.HelpTopics(
+          Docs.topics().stream()
+              .map(t -> new Response.HelpTopics.Topic(t.name(), t.title()))
+              .toList());
+    }
+    return Docs.find(topic)
+        .<Response>map(t -> new Response.HelpPage(t.name(), t.title(), Docs.read(t.name())))
+        .orElseGet(() -> new Response.Error("There is no help topic '" + topic + "'."));
   }
 
   private static Response.AuditLines.Line auditLine(AuditEntry e) {

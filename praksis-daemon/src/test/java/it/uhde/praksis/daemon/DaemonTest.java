@@ -141,6 +141,29 @@ class DaemonTest {
   }
 
   @Test
+  void theDocumentationIsServed() throws Exception {
+    start();
+    {
+      assertThat(ask(new Request.Help(null)))
+          .isInstanceOfSatisfying(
+              Response.HelpTopics.class,
+              t ->
+                  assertThat(t.topics())
+                      .contains(new Response.HelpTopics.Topic("user/concepts", "Concepts")));
+      assertThat(ask(new Request.Help("user/concepts")))
+          .isInstanceOfSatisfying(
+              Response.HelpPage.class,
+              p -> {
+                assertThat(p.title()).isEqualTo("Concepts");
+                assertThat(p.text()).startsWith("# Concepts");
+              });
+      assertThat(ask(new Request.Help("nope")))
+          .isInstanceOfSatisfying(
+              Response.Error.class, e -> assertThat(e.message()).contains("no help topic"));
+    }
+  }
+
+  @Test
   void aMailDroppedIntoTheMaildirIsMovedByTheRule() throws Exception {
     Files.writeString(mail.resolve("new/1700000000.M1P2.host"), "Subject: hi\n\nbody\n");
     {

@@ -36,6 +36,7 @@
     <module>praksis-git</module>
     <module>praksis-engine</module>
     <module>praksis-protocol</module>
+    <module>praksis-docs</module>
     <module>praksis-daemon</module>
     <module>praksis-cli</module>
     <module>praksis-dist</module>
