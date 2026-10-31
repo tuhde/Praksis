@@ -16,6 +16,8 @@ A page is only part of the documentation if it is listed here, in this order.
 ## Modules
 
 - [Modules](modules/overview.md)
+- [Module maildir](modules/maildir.md)
+- [Module praksis](modules/praksis.md)
 
 ## Developing
 

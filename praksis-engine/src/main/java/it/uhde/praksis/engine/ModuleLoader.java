@@ -182,6 +182,11 @@ public final class ModuleLoader {
     return new LoadedModules(descriptors, capabilities, sources);
   }
 
+  /** The descriptor in a {@code module.toml}, read without loading anything. */
+  public static ModuleDescriptor readDescriptor(Path moduleToml) throws ModuleLoadException {
+    return ModuleDescriptorReader.read(moduleToml).descriptor();
+  }
+
   /**
    * The names of the modules that would be loaded, read from their {@code module.toml} without
    * loading anything. This is what a rule or view that {@code requires_modules} is checked against.
