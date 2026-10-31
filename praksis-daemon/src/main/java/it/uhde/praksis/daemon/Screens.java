@@ -442,7 +442,8 @@ final class Screens {
                         s.effect(),
                         s.allowed(),
                         s.refusal(),
-                        s.outcome()))
+                        s.outcome(),
+                        s.warning()))
             .toList());
   }
 

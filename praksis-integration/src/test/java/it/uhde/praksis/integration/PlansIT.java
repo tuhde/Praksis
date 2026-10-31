@@ -99,6 +99,11 @@ class PlansIT {
       Response.PlanDetail shown =
           (Response.PlanDetail) h.ask(new Request.AgentPlanShow(goodPlan.id()));
       assertThat(shown.runnable()).isTrue();
+      // the request said "file the mail": the folder and the mail were named by the rule, so the
+      // plan says that neither is in what the person wrote
+      assertThat(shown.plan().steps().get(0).warning())
+          .contains("not in your request")
+          .contains("folder = \"Archive\"");
       Response.PlanDetail ran =
           (Response.PlanDetail) h.ask(new Request.AgentPlanRun(goodPlan.id()));
       assertThat(ran.plan().status()).isEqualTo("DONE");

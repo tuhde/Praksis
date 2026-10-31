@@ -561,6 +561,8 @@ public sealed interface Response {
    * @param allowed whether the grants cover it now
    * @param refusal why not, if they do not
    * @param outcome what came of it when the plan ran, else empty
+   * @param warning values of the step that are neither in the request nor in what was read, else
+   *     empty
    */
   record PlanStep(
       String capability,
@@ -568,7 +570,8 @@ public sealed interface Response {
       String effect,
       boolean allowed,
       String refusal,
-      String outcome) {}
+      String outcome,
+      String warning) {}
 
   /**
    * A plan, and whether a person can approve it now.

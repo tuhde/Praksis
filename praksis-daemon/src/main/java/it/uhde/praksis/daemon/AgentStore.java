@@ -207,9 +207,10 @@ final class AgentStore {
       String effect,
       boolean allowed,
       String refusal,
-      String outcome) {
+      String outcome,
+      String warning) {
     Step withOutcome(String outcome) {
-      return new Step(capability, args, effect, allowed, refusal, outcome);
+      return new Step(capability, args, effect, allowed, refusal, outcome, warning);
     }
   }
 
@@ -268,6 +269,7 @@ final class AgentStore {
       o.put("effect", st.effect());
       o.put("allowed", st.allowed());
       o.put("refusal", st.refusal());
+      o.put("warning", st.warning());
       o.put("outcome", st.outcome());
       steps.add(o);
     }
@@ -321,7 +323,8 @@ final class AgentStore {
               st.path("effect").asText(),
               st.path("allowed").asBoolean(),
               st.path("refusal").asText(),
-              st.path("outcome").asText()));
+              st.path("outcome").asText(),
+              st.path("warning").asText()));
     }
     return new Plan(
         n.path("id").asText(),

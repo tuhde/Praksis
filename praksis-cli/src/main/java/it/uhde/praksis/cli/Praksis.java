@@ -1045,6 +1045,9 @@ public final class Praksis {
             s.args(),
             s.effect(),
             s.allowed() ? "" : "  NOT COVERED: " + s.refusal());
+        if (!s.warning().isBlank()) {
+          out.println("     CHECK: " + s.warning());
+        }
         if (!s.outcome().isBlank()) {
           out.println("     -> " + s.outcome());
         }

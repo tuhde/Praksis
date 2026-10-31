@@ -145,6 +145,7 @@ final class Builtins {
                     in("request", ValueType.STRING, true, false),
                     in("steps", ValueType.LIST, false, false),
                     in("steps_json", ValueType.STRING, false, false),
+                    in("context", ValueType.STRING, false, false),
                     in("reason", ValueType.STRING, false, false)),
                 List.of(
                     out("id", ValueType.STRING),

@@ -90,7 +90,8 @@ class WireTest {
                     "local-write",
                     false,
                     "no grant",
-                    "")));
+                    "",
+                    "folder = Reading")));
     var verification =
         new Response.Verification(false, "t", 1, 0, 0, List.of(), null, List.of(), null);
     for (Response r :

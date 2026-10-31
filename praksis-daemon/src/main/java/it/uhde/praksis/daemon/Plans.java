@@ -258,6 +258,7 @@ final class Plans {
     String layer = layerOrFail();
     String request = text(args, "request", true);
     String reason = text(args, "reason", false);
+    String seen = args.get("context") instanceof String s ? s : "";
     List<?> list = listArg(args, "steps", false);
     if (list.isEmpty()) {
       throw new CapabilityException("'steps' needs at least one {capability, args}", false);
@@ -294,7 +295,8 @@ final class Plans {
               c.effect().id(),
               decision.allowed(),
               decision.allowed() ? "" : decision.reason(),
-              ""));
+              "",
+              ungrounded(coerced, request + "\n" + seen)));
     }
     long refused = steps.stream().filter(s -> !s.allowed()).count();
     String id = "";
@@ -317,6 +319,32 @@ final class Plans {
     return out;
   }
 
+  /**
+   * Which values of a step the person did not write and the agent did not read: a text that a model
+   * took from a mail can lead it to name a folder, an address or a file that nobody asked for.
+   * Every text of the arguments should be found in the request or in what was read; the others are
+   * said so in the plan, for the person to look at before approving.
+   */
+  static String ungrounded(Object args, String seen) {
+    List<String> odd = new ArrayList<>();
+    collect("", args, seen.toLowerCase(java.util.Locale.ROOT), odd);
+    return odd.isEmpty()
+        ? ""
+        : "not in your request or in what was read: " + String.join(", ", odd);
+  }
+
+  private static void collect(String key, Object value, String seen, List<String> odd) {
+    if (value instanceof Map<?, ?> m) {
+      m.forEach((k, v) -> collect(String.valueOf(k), v, seen, odd));
+    } else if (value instanceof List<?> l) {
+      l.forEach(v -> collect(key, v, seen, odd));
+    } else if (value instanceof String s
+        && !s.isBlank()
+        && !seen.contains(s.toLowerCase(java.util.Locale.ROOT))) {
+      odd.add(key + " = " + Reports.shorten(s, 60));
+    }
+  }
+
   // ------------------------------------------------------------------------------- show
 
   /** The plan with its steps checked against the grants as they are now. */
@@ -335,7 +363,13 @@ final class Plans {
       } catch (IllegalArgumentException e) {
         steps.add(
             new AgentStore.Step(
-                st.capability(), st.args(), st.effect(), false, e.getMessage(), st.outcome()));
+                st.capability(),
+                st.args(),
+                st.effect(),
+                false,
+                e.getMessage(),
+                st.outcome(),
+                st.warning()));
         continue;
       }
       AccessPolicy.Decision d = check(layer, c, coerced);
@@ -346,7 +380,8 @@ final class Plans {
               c.effect().id(),
               d.allowed(),
               d.allowed() ? "" : d.reason(),
-              st.outcome()));
+              st.outcome(),
+              st.warning()));
     }
     return plan.with(plan.status(), steps);
   }
@@ -415,7 +450,9 @@ final class Plans {
         throw new CapabilityException(
             "step " + n + " is refused and nothing was run: " + decision.reason(), false);
       }
-      now.add(new AgentStore.Step(st.capability(), coerced, c.effect().id(), true, "", ""));
+      now.add(
+          new AgentStore.Step(
+              st.capability(), coerced, c.effect().id(), true, "", "", st.warning()));
     }
     agent.updatePlan(plan.with("RUNNING", now));
     audit.record(
