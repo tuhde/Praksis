@@ -8,6 +8,12 @@ A page is only part of the documentation if it is listed here, in this order.
 
 - [Getting started](user/getting-started.md)
 - [Concepts](user/concepts.md)
+- [Rules](user/rules.md)
+- [Layers](user/layers.md)
+- [Permissions](user/permissions.md)
+- [Verification and trials](user/verification.md)
+- [The AI features](user/ai.md)
+- [Offline mode](user/offline.md)
 
 ## Reference
 
