@@ -114,6 +114,11 @@ public final class Daemon implements AutoCloseable {
               config.enabledModules());
       Agent agent = new Agent();
       modules = Builtins.add(modules, agent);
+      if (config.offline()) {
+        modules = modules.offline();
+        LOG.log(
+            System.Logger.Level.INFO, "offline = true: modules that need the network are not used");
+      }
       ExpressionCompiler compiler = compiler(config);
       Layers layers = new Layers(config, new GitCli(config.gitCache()));
       LayerStack.Effective effective = layers.effective();

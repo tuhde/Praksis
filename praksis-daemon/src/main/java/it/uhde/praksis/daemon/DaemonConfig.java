@@ -35,6 +35,7 @@ import java.util.Set;
  * expression = "lib/expression"  # directory with the CEL jar; else the one that ships with the
  *                              # runtime image; else the class path is used
  * dry_run    = false
+ * offline    = false            # true: modules that need the network are not used
  *
  * [[layer]]                    # ruleset layers, bottom to top; without any, "ruleset" is used
  * name = "mail"
@@ -72,6 +73,8 @@ import java.util.Set;
  * @param params values for ruleset parameters, which win over the defaults in the layers
  * @param shadow the settings for rules on trial
  * @param plan the layer whose grants plans run under
+ * @param offline whether nothing may leave this machine: modules that reach other machines are not
+ *     used
  * @param enabledModules the modules to load; empty means every module in the directory. Unless
  *     {@code enabled_modules} says otherwise these are the modules that have a {@code [module.*]}
  *     section.
@@ -90,7 +93,8 @@ public record DaemonConfig(
     Map<String, Object> params,
     java.util.Set<String> enabledModules,
     ShadowConfig shadow,
-    PlanConfig plan) {
+    PlanConfig plan,
+    boolean offline) {
   private static final String FILE = "praksis.toml";
   private static final Set<String> KEYS =
       Set.of(
@@ -106,7 +110,8 @@ public record DaemonConfig(
           "param",
           "enabled_modules",
           "shadow",
-          "plan");
+          "plan",
+          "offline");
 
   /** The layers that an AI may propose changes to. */
   public List<LayerConfig> aiMaintainedLayers() {
@@ -202,6 +207,7 @@ public record DaemonConfig(
             .map(s -> dir.resolve(s).normalize())
             .or(() -> installed("expression"));
     boolean dryRun = table.bool("dry_run", false);
+    boolean offline = table.bool("offline", false);
     Map<String, Map<String, Object>> settings = new LinkedHashMap<>();
     table
         .table("module", false)
@@ -269,7 +275,8 @@ public record DaemonConfig(
         params,
         enabled,
         shadow,
-        plan);
+        plan,
+        offline);
   }
 
   /** The directory of what ships with the runtime image, if this is one: {@code lib/praksis}. */

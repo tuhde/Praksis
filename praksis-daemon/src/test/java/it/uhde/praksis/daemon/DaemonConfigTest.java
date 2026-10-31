@@ -219,4 +219,11 @@ class DaemonConfigTest {
         .hasMessageContaining("other")
         .hasMessageContaining("max_steps");
   }
+
+  @Test
+  void offlineIsOffUnlessTheFileSaysSo() throws Exception {
+    assertThat(DaemonConfig.load(home).offline()).isFalse();
+    Files.writeString(home.resolve("praksis.toml"), "format_version = 1\noffline = true\n");
+    assertThat(DaemonConfig.load(home).offline()).isTrue();
+  }
 }

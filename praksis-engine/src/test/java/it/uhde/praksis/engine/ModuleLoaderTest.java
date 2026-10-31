@@ -86,6 +86,7 @@ class ModuleLoaderTest {
       module = "it.example.testmod"
       jdk_modules = ["java.sql"]
       sources = ["test.ticker"]
+      network = ["test.echo"]
 
       [[capability]]
       name = "test.echo"
@@ -158,6 +159,7 @@ class ModuleLoaderTest {
       assertThat(loaded.catalog().capability("test.echo")).isPresent();
       assertThat(loaded.catalog().eventType("test.tick")).isPresent();
       assertThat(loaded.descriptors().get(0).sources()).containsExactly("test.ticker");
+      assertThat(loaded.descriptors().get(0).network()).containsExactly("test.echo");
 
       loaded.startSources(events::add);
       assertThat(events).extracting(Event::id).containsExactly("t1");
@@ -187,10 +189,19 @@ class ModuleLoaderTest {
   @Test
   void checksDeclarationsAgainstTheServices() throws Exception {
     setUp();
-    install("testmod", MODULE_TOML.replace("name = \"test.echo\"", "name = \"test.other\""));
+    install(
+        "testmod",
+        MODULE_TOML
+            .replace("name = \"test.echo\"", "name = \"test.other\"")
+            .replace("network = [\"test.echo\"]", ""));
     ModuleLoader.lock(modules, lockfile);
     assertThatThrownBy(() -> ModuleLoader.load(modules, lockfile, Map.of()))
         .hasMessageContaining("declares capability 'test.other' but does not provide it");
+
+    install(
+        "testmod", MODULE_TOML.replace("network = [\"test.echo\"]", "network = [\"test.nope\"]"));
+    assertThatThrownBy(() -> ModuleLoader.lock(modules, lockfile))
+        .hasMessageContaining("'network' names 'test.nope'");
 
     install("testmod", MODULE_TOML.replace("sources = [\"test.ticker\"]", "sources = []"));
     ModuleLoader.lock(modules, lockfile);

@@ -46,6 +46,57 @@ public final class LoadedModules implements AutoCloseable {
     return new LoadedModules(all, merged, sources);
   }
 
+  /**
+   * These modules as they are when the program runs offline: the capabilities that reach other
+   * machines (the {@code network} list of the module) refuse with a message that says why, its
+   * event sources do not start, and every other part is told ({@link Capability#useOffline}). Rules
+   * and views that name those capabilities still check, so a ruleset works the same on both sides
+   * of the switch. The original is not used again.
+   */
+  public LoadedModules offline() {
+    java.util.Set<String> network = new java.util.HashSet<>();
+    descriptors.forEach(d -> network.addAll(d.network()));
+    Map<String, Capability> out = new java.util.HashMap<>();
+    capabilities.forEach(
+        (name, c) -> {
+          if (network.contains(name)) {
+            out.put(name, new Offline(c));
+          } else {
+            c.useOffline();
+            out.put(name, c);
+          }
+        });
+    List<EventSource> kept = new ArrayList<>();
+    for (EventSource s : sources) {
+      if (!network.contains(s.name())) {
+        s.useOffline();
+        kept.add(s);
+      }
+    }
+    return new LoadedModules(descriptors, out, kept);
+  }
+
+  /** A capability of a module that needs the network, while the program is offline. */
+  private record Offline(Capability inner) implements Capability {
+    @Override
+    public String name() {
+      return inner.name();
+    }
+
+    @Override
+    public Map<String, Object> invoke(
+        it.uhde.praksis.capability.CapabilityContext context, Map<String, Object> args)
+        throws CapabilityException {
+      throw new CapabilityException(
+          "offline = true: " + inner.name() + " needs the network and is not available", false);
+    }
+
+    @Override
+    public void close() {
+      inner.close();
+    }
+  }
+
   public List<ModuleDescriptor> descriptors() {
     return descriptors;
   }

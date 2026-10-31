@@ -69,6 +69,7 @@ final class ModuleDescriptorReader {
             "module",
             "jdk_modules",
             "sources",
+            "network",
             "capability",
             "event"));
     if (!t.raw("format_version").map(v -> v.equals(1) || v.equals(1L)).orElse(false)) {
@@ -116,6 +117,14 @@ final class ModuleDescriptorReader {
       e.onlyKeys(Set.of("type", "fields"));
       events.add(new EventTypeDescriptor(e.string("type", true).orElse(""), fields(e, "fields")));
     }
+    for (String n : t.strings("network")) {
+      boolean known =
+          t.strings("sources").contains(n)
+              || capabilities.stream().anyMatch(c -> c.name().equals(n));
+      if (!known) {
+        t.problem("'network' names '" + n + "', which is neither a capability nor a source");
+      }
+    }
     if (!problems.isEmpty()) {
       throw new ModuleLoadException(
           "invalid "
@@ -125,7 +134,13 @@ final class ModuleDescriptorReader {
     }
     return new Result(
         new ModuleDescriptor(
-            name, version, t.strings("jdk_modules"), capabilities, events, t.strings("sources")),
+            name,
+            version,
+            t.strings("jdk_modules"),
+            capabilities,
+            events,
+            t.strings("sources"),
+            t.strings("network")),
         module,
         apiVersion);
   }

@@ -13,6 +13,9 @@ import java.util.Objects;
  * @param capabilities the capabilities the module provides
  * @param eventTypes the event types the module produces
  * @param sources the names of the event sources the module provides
+ * @param network the names of the capabilities and event sources that reach other machines (a mail
+ *     server, say): when the program is offline those capabilities refuse and those sources do not
+ *     start; the rest of the module works
  */
 public record ModuleDescriptor(
     String name,
@@ -20,7 +23,8 @@ public record ModuleDescriptor(
     List<String> jdkModules,
     List<CapabilityDescriptor> capabilities,
     List<EventTypeDescriptor> eventTypes,
-    List<String> sources) {
+    List<String> sources,
+    List<String> network) {
   public ModuleDescriptor {
     Objects.requireNonNull(name, "name");
     Objects.requireNonNull(version, "version");
@@ -28,6 +32,18 @@ public record ModuleDescriptor(
     capabilities = List.copyOf(capabilities);
     eventTypes = List.copyOf(eventTypes);
     sources = List.copyOf(sources);
+    network = List.copyOf(network);
+  }
+
+  /** A descriptor of a module that stays on this machine. */
+  public ModuleDescriptor(
+      String name,
+      String version,
+      List<String> jdkModules,
+      List<CapabilityDescriptor> capabilities,
+      List<EventTypeDescriptor> eventTypes,
+      List<String> sources) {
+    this(name, version, jdkModules, capabilities, eventTypes, sources, List.of());
   }
 
   /** A descriptor without event sources. */

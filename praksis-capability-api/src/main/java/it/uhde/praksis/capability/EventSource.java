@@ -31,6 +31,15 @@ public interface EventSource {
    */
   default void useDataDirectory(java.nio.file.Path directory) {}
 
+  /**
+   * Tells the implementation, once, after {@link #configure}, that the program runs offline: text
+   * and data of a person must not leave this machine. A module that reaches other machines declares
+   * {@code network = true} in its {@code module.toml} and is then not called at all; a module that
+   * decides per call (a model server that may be on this machine or not) uses this to refuse what
+   * would leave it. The default does nothing.
+   */
+  default void useOffline() {}
+
   /** The name of this source, unique across modules. Matches an entry in the module descriptor. */
   String name();
 
