@@ -34,6 +34,7 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Response.Dictated.class, name = "dictated"),
   @JsonSubTypes.Type(value = Response.StagedList.class, name = "staged-list"),
   @JsonSubTypes.Type(value = Response.UntestedRules.class, name = "untested-rules"),
+  @JsonSubTypes.Type(value = Response.NoteList.class, name = "note-list"),
   @JsonSubTypes.Type(value = Response.StagedDetail.class, name = "staged-detail"),
   @JsonSubTypes.Type(value = Response.Done.class, name = "done"),
   @JsonSubTypes.Type(value = Response.Stopped.class, name = "stopped"),
@@ -520,6 +521,16 @@ public sealed interface Response {
 
     /** A parameter of a view. */
     public record Param(String name, String type, Object value) {}
+  }
+
+  /**
+   * The notes of the maintenance agent, newest first.
+   *
+   * @param items the notes
+   */
+  record NoteList(List<Note> items) implements Response {
+    /** A note: a title and a text that a person reads. */
+    public record Note(String id, String at, String title, String text) {}
   }
 
   /**

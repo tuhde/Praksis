@@ -41,6 +41,7 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.Dictate.class, name = "dictate"),
   @JsonSubTypes.Type(value = Request.Staged.class, name = "staged"),
   @JsonSubTypes.Type(value = Request.Untested.class, name = "untested"),
+  @JsonSubTypes.Type(value = Request.Notes.class, name = "notes"),
   @JsonSubTypes.Type(value = Request.StagedShow.class, name = "staged-show"),
   @JsonSubTypes.Type(value = Request.StagedDrop.class, name = "staged-drop"),
   @JsonSubTypes.Type(value = Request.Stop.class, name = "stop")
@@ -291,6 +292,14 @@ public sealed interface Request {
       args = args == null ? java.util.Map.of() : args;
     }
   }
+
+  /**
+   * Asks for the notes that the maintenance agent left (explanations, answers), newest first.
+   * Answered with {@link Response.NoteList}.
+   *
+   * @param limit how many at most (1 to 100)
+   */
+  record Notes(int limit) implements Request {}
 
   /**
    * Asks for the rules that have no test and are in a layer that takes proposals. Answered with

@@ -116,7 +116,6 @@ public final class Daemon implements AutoCloseable {
       modules = Builtins.add(modules, agent);
       ExpressionCompiler compiler = compiler(config);
       Layers layers = new Layers(config, new GitCli(config.gitCache()));
-      agent.bind(config, layers, modules);
       LayerStack.Effective effective = layers.effective();
       if (!effective.skipped().isEmpty()) {
         LOG.log(
@@ -128,6 +127,7 @@ public final class Daemon implements AutoCloseable {
       ruleset = effective.ruleset();
       GrantPolicy access = accessPolicy(config, modules.catalog(), effective);
       store = Store.open(config.database());
+      agent.bind(config, layers, modules, store, () -> effective);
       store.onChange(topics::bump);
       auditPolicy(config, store);
       auditRules(effective, layers, compiler, modules.catalog(), store, Admin.trust(config));
@@ -340,6 +340,7 @@ public final class Daemon implements AutoCloseable {
         case Request.ProposalShow p -> screens.proposalDetail(p.name());
         case Request.Staged s -> screens.staged();
         case Request.Untested u -> screens.untested();
+        case Request.Notes n -> screens.notes(n.limit());
         case Request.StagedShow s -> screens.stagedDetail(s.id());
         case Request.StagedDrop s -> screens.stagedDrop(s.id());
         case Request.ProposalApprove a -> {

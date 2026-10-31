@@ -61,6 +61,7 @@ class WireTest {
     for (Request r :
         List.of(
             new Request.Untested(),
+            new Request.Notes(5),
             new Request.Staged(),
             new Request.StagedShow("0001-abc"),
             new Request.StagedDrop("0001-abc"),
@@ -77,6 +78,9 @@ class WireTest {
             new Response.UntestedRules(
                 List.of(new Response.UntestedRules.Rule("r1", "mine", "local-write"))),
             new Response.StagedList(List.of(staged)),
+            new Response.NoteList(
+                List.of(
+                    new Response.NoteList.Note("n1", "2026-10-31T10:00:00Z", "Answer", "text"))),
             new Response.StagedDetail(
                 staged, Map.of("tests/r1.toml", "format_version = 1\n"), verification),
             new Response.Dictated("lunch on friday", true))) {

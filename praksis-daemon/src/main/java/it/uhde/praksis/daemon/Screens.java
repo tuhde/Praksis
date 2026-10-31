@@ -422,6 +422,18 @@ final class Screens {
         s.id(), s.layer(), s.rule(), s.reason(), s.created(), s.files());
   }
 
+  /** The notes that the agent left, newest first. */
+  Response notes(int limit) throws DaemonException {
+    try {
+      return new Response.NoteList(
+          agentStore().notes(Math.max(1, Math.min(limit, 100))).stream()
+              .map(n -> new Response.NoteList.Note(n.id(), n.at(), n.title(), n.text()))
+              .toList());
+    } catch (IOException e) {
+      throw new DaemonException("cannot read the notes: " + e.getMessage(), e);
+    }
+  }
+
   /** The changes that the maintenance agent has staged. */
   Response staged() throws DaemonException {
     try {

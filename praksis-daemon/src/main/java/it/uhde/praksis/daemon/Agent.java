@@ -53,13 +53,20 @@ final class Agent {
   private volatile Layers layers;
   private volatile LoadedModules modules;
   private volatile AgentStore store;
+  private volatile History history;
 
   /** Gives the capabilities what they need; called when the daemon has put itself together. */
-  void bind(DaemonConfig config, Layers layers, LoadedModules modules) {
+  void bind(
+      DaemonConfig config,
+      Layers layers,
+      LoadedModules modules,
+      it.uhde.praksis.store.Store log,
+      java.util.function.Supplier<LayerStack.Effective> effective) {
     this.config = config;
     this.layers = layers;
     this.modules = modules;
     this.store = new AgentStore(config.dataDirectory().resolve(Builtins.MODULE));
+    this.history = new History(log, effective);
   }
 
   Map<String, Capability> capabilities() {
@@ -70,6 +77,9 @@ final class Agent {
     cap(m, "praksis.agent.proposals", this::proposals);
     cap(m, "praksis.notes.save", this::saveNote);
     cap(m, "praksis.notes.list", this::notes);
+    cap(m, "praksis.history.find", (c, a) -> historyOf().find(a));
+    cap(m, "praksis.history.trace", (c, a) -> historyOf().trace(a));
+    cap(m, "praksis.history.summary", (c, a) -> historyOf().summary(a));
     return m;
   }
 
@@ -93,7 +103,7 @@ final class Agent {
               return body.run(context, args);
             } catch (CapabilityException e) {
               throw e;
-            } catch (DaemonException | RulesetException e) {
+            } catch (DaemonException | RulesetException | it.uhde.praksis.store.StoreException e) {
               throw new CapabilityException(e.getMessage(), false, e);
             } catch (IOException e) {
               throw new CapabilityException("cannot read or write: " + e.getMessage(), true, e);
@@ -102,6 +112,11 @@ final class Agent {
             }
           }
         });
+  }
+
+  private History historyOf() throws CapabilityException {
+    ready();
+    return history;
   }
 
   private void ready() throws CapabilityException {

@@ -88,6 +88,42 @@ final class Builtins {
                     in("text", ValueType.STRING, true, false)),
                 List.of(out("id", ValueType.STRING))),
             new CapabilityDescriptor(
+                "praksis.history.find",
+                EffectClass.READ_ONLY,
+                true,
+                List.of(
+                    in("text", ValueType.STRING, false, false),
+                    in("type", ValueType.STRING, false, false),
+                    in("since_hours", ValueType.INT, false, false),
+                    in("limit", ValueType.INT, false, false)),
+                List.of(
+                    out("items", ValueType.LIST),
+                    out("searched", ValueType.INT),
+                    out("report", ValueType.STRING))),
+            new CapabilityDescriptor(
+                "praksis.history.trace",
+                EffectClass.READ_ONLY,
+                true,
+                List.of(in("event", ValueType.STRING, true, false)),
+                List.of(
+                    out("event", ValueType.MAP),
+                    out("steps", ValueType.LIST),
+                    out("calls", ValueType.LIST),
+                    out("rules", ValueType.LIST),
+                    out("report", ValueType.STRING))),
+            new CapabilityDescriptor(
+                "praksis.history.summary",
+                EffectClass.READ_ONLY,
+                true,
+                List.of(in("since_hours", ValueType.INT, false, false)),
+                List.of(
+                    out("since", ValueType.STRING),
+                    out("events", ValueType.MAP),
+                    out("rules", ValueType.LIST),
+                    out("calls", ValueType.MAP),
+                    out("refused", ValueType.LIST),
+                    out("report", ValueType.STRING))),
+            new CapabilityDescriptor(
                 "praksis.notes.list",
                 EffectClass.READ_ONLY,
                 true,
