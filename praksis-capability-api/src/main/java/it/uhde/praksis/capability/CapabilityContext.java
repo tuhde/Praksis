@@ -17,6 +17,14 @@ public interface CapabilityContext {
    */
   String idempotencyKey();
 
+  /**
+   * The id of the rule that makes the call, or empty for a call that no rule makes. A capability
+   * may keep it to say who changed something.
+   */
+  default Optional<String> ruleId() {
+    return Optional.empty();
+  }
+
   /** The event being handled, or empty for a call that has no event (e.g. a command). */
   Optional<Event> event();
 }

@@ -92,6 +92,23 @@ class PolicyTest {
   }
 
   @Test
+  void aListArgumentIsCoveredOnlyIfEveryElementIs() {
+    Grant grant =
+        new Grant(
+            "g",
+            "mine",
+            "entity.reveal",
+            Map.of("fields", new ArgMatcher.OneOf(List.of("email", "phone"))),
+            java.util.Optional.empty());
+    assertThat(grant.covers("mine", "entity.reveal", Map.of("fields", List.of("email")))).isTrue();
+    assertThat(grant.covers("mine", "entity.reveal", Map.of("fields", List.of("email", "phone"))))
+        .isTrue();
+    assertThat(grant.covers("mine", "entity.reveal", Map.of("fields", List.of("email", "iban"))))
+        .isFalse();
+    assertThat(grant.covers("mine", "entity.reveal", Map.of("type", "contact"))).isFalse();
+  }
+
+  @Test
   void matchersCompareNumbersAndStringsExactly() {
     assertThat(new ArgMatcher.Equals(5L).matches(5)).isTrue();
     assertThat(new ArgMatcher.Equals(5L).matches("5")).isFalse();

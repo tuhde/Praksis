@@ -61,6 +61,15 @@ public interface Capability {
   String name();
 
   /**
+   * The arguments as they may be written to the audit log and to the record of a rule in trial: a
+   * capability whose arguments can hold secrets returns a copy with those values replaced. The
+   * default returns the arguments as they are.
+   */
+  default Map<String, Object> redact(Map<String, Object> args) {
+    return args;
+  }
+
+  /**
    * Performs the capability.
    *
    * @param context the circumstances of this call

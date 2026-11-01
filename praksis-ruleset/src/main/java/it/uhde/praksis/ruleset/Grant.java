@@ -28,14 +28,25 @@ public record Grant(
     Objects.requireNonNull(note, "note");
   }
 
-  /** Whether a call of this capability with these arguments is covered by the grant. */
+  /**
+   * Whether a call of this capability with these arguments is covered by the grant. An argument
+   * that is a list is covered if every element of it is.
+   */
   public boolean covers(String forLayer, String forCapability, Map<String, Object> callArgs) {
     if (!layer.equals(forLayer) || !capability.equals(forCapability)) {
       return false;
     }
     for (var matcher : args.entrySet()) {
       Object value = callArgs.get(matcher.getKey());
-      if (value == null || !matcher.getValue().matches(value)) {
+      if (value == null) {
+        return false;
+      }
+      if (value instanceof java.util.List<?> list) {
+        // a list is covered if every element is
+        if (!list.stream().allMatch(item -> item != null && matcher.getValue().matches(item))) {
+          return false;
+        }
+      } else if (!matcher.getValue().matches(value)) {
         return false;
       }
     }

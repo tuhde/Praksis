@@ -45,12 +45,22 @@ public final class EntityService {
    * @param dryRun check everything, change nothing, emit nothing
    * @param cause the event whose handling makes this call, or empty (a command)
    * @param idempotencyKey the same for every retry of the same action, or null
+   * @param by who makes the change, kept as {@code created_by} and {@code updated_by}: {@code
+   *     rule:<id>} or {@link #USER}
    */
-  public record Call(boolean dryRun, Optional<Event> cause, String idempotencyKey) {
+  public record Call(boolean dryRun, Optional<Event> cause, String idempotencyKey, String by) {
+    /** A call by a person, outside any rule. */
+    public Call(boolean dryRun, Optional<Event> cause, String idempotencyKey) {
+      this(dryRun, cause, idempotencyKey, USER);
+    }
+
     public static Call of(boolean dryRun) {
-      return new Call(dryRun, Optional.empty(), null);
+      return new Call(dryRun, Optional.empty(), null, USER);
     }
   }
+
+  /** Who made a change that no rule made. */
+  public static final String USER = "user";
 
   private static final String TOPIC = "entities";
 
@@ -224,14 +234,54 @@ public final class EntityService {
           if (existing.isPresent() && key != null && !key.isEmpty()) {
             return existing.get();
           }
-          write(c, type, id, now, now, fields, true);
+          write(c, type, id, now, now, call.by(), call.by(), fields, true);
           if (!call.dryRun()) {
             Event e = event(call, "created", type, id, inTypeOrder(type, fields.keySet()), "");
             store.append(e);
             events.add(e);
           }
-          return entity(type, id, now, now, fields);
+          return entity(type, id, now, now, call.by(), call.by(), fields);
         });
+  }
+
+  /** The entity without the values of its sensitive fields, which a rule must reveal. */
+  public Map<String, Object> withoutSensitive(String typeId, Map<String, Object> entity)
+      throws EntityException {
+    EntityType type = type(typeId);
+    Map<String, Object> out = new LinkedHashMap<>(entity);
+    type.fields().stream().filter(EntityType.Field::sensitive).forEach(f -> out.remove(f.name()));
+    return out;
+  }
+
+  /**
+   * The values of some sensitive fields of an entity, or empty if there is no such entity. A field
+   * that is not sensitive is refused (it is in what {@link #read} returns), and so is a list
+   * without fields.
+   */
+  public Optional<Map<String, Object>> reveal(String typeId, String id, List<String> names)
+      throws EntityException {
+    EntityType type = type(typeId);
+    if (names.isEmpty()) {
+      throw new EntityException("fields: name at least one sensitive field");
+    }
+    for (String name : names) {
+      EntityType.Field f = type.field(name).orElse(null);
+      if (f == null || !f.sensitive()) {
+        throw new EntityException(
+            "field '" + name + "' of type '" + typeId + "' is not a sensitive field");
+      }
+    }
+    return read(
+        c ->
+            get(c, type, id)
+                .map(
+                    e -> {
+                      Map<String, Object> out = new LinkedHashMap<>();
+                      names.stream()
+                          .filter(e::containsKey)
+                          .forEach(name -> out.put(name, e.get(name)));
+                      return out;
+                    }));
   }
 
   /** The entity, or empty. */
@@ -272,7 +322,7 @@ public final class EntityService {
           List<Map<String, Object>> items = new ArrayList<>();
           try (PreparedStatement s =
               c.prepareStatement(
-                  "SELECT id, created, updated, json FROM entity WHERE type = ? AND ("
+                  "SELECT id, created, updated, created_by, updated_by, json FROM entity WHERE type = ? AND ("
                       + where
                       + ") ORDER BY "
                       + order
@@ -341,7 +391,8 @@ public final class EntityService {
             return old;
           }
           Instant created = (Instant) old.get().get("created");
-          write(c, type, id, created, now, fields, false);
+          String createdBy = (String) old.get().get("created_by");
+          write(c, type, id, created, now, createdBy, call.by(), fields, false);
           if (!call.dryRun()) {
             Event e =
                 event(
@@ -354,7 +405,7 @@ public final class EntityService {
             store.append(e);
             events.add(e);
           }
-          return Optional.of(entity(type, id, created, now, fields));
+          return Optional.of(entity(type, id, created, now, createdBy, call.by(), fields));
         });
   }
 
@@ -439,11 +490,19 @@ public final class EntityService {
   }
 
   private static Map<String, Object> entity(
-      EntityType type, String id, Instant created, Instant updated, Map<String, Object> fields) {
+      EntityType type,
+      String id,
+      Instant created,
+      Instant updated,
+      String createdBy,
+      String updatedBy,
+      Map<String, Object> fields) {
     Map<String, Object> m = new LinkedHashMap<>();
     m.put("id", id);
     m.put("created", created);
     m.put("updated", updated);
+    m.put("created_by", createdBy);
+    m.put("updated_by", updatedBy);
     for (EntityType.Field f : type.fields()) {
       if (fields.get(f.name()) != null) {
         m.put(f.name(), fields.get(f.name()));
@@ -458,7 +517,7 @@ public final class EntityService {
       throws SQLException, EntityException {
     try (PreparedStatement s =
         c.prepareStatement(
-            "SELECT id, created, updated, json FROM entity WHERE type = ? AND id = ?")) {
+            "SELECT id, created, updated, created_by, updated_by, json FROM entity WHERE type = ? AND id = ?")) {
       s.setString(1, type.id());
       s.setString(2, id);
       try (ResultSet r = s.executeQuery()) {
@@ -472,7 +531,7 @@ public final class EntityService {
     Map<String, Object> stored;
     try {
       @SuppressWarnings("unchecked")
-      Map<String, Object> read = JSON.readValue(r.getString(4), Map.class);
+      Map<String, Object> read = JSON.readValue(r.getString(6), Map.class);
       stored = read;
     } catch (JsonProcessingException e) {
       throw new EntityException("stored entity " + r.getString(1) + " is damaged", e);
@@ -485,7 +544,13 @@ public final class EntityService {
       }
     }
     return entity(
-        type, r.getString(1), Instant.parse(r.getString(2)), Instant.parse(r.getString(3)), fields);
+        type,
+        r.getString(1),
+        Instant.parse(r.getString(2)),
+        Instant.parse(r.getString(3)),
+        r.getString(4),
+        r.getString(5),
+        fields);
   }
 
   private static void write(
@@ -494,6 +559,8 @@ public final class EntityService {
       String id,
       Instant created,
       Instant updated,
+      String createdBy,
+      String updatedBy,
       Map<String, Object> fields,
       boolean insert)
       throws SQLException, EntityException {
@@ -513,14 +580,18 @@ public final class EntityService {
     unique(c, type, id, stored, true);
     String sql =
         insert
-            ? "INSERT INTO entity (created, updated, json, type, id) VALUES (?, ?, ?, ?, ?)"
-            : "UPDATE entity SET created = ?, updated = ?, json = ? WHERE type = ? AND id = ?";
+            ? "INSERT INTO entity (created, updated, created_by, updated_by, json, type, id) VALUES"
+                + " (?, ?, ?, ?, ?, ?, ?)"
+            : "UPDATE entity SET created = ?, updated = ?, created_by = ?, updated_by = ?, json = ?"
+                + " WHERE type = ? AND id = ?";
     try (PreparedStatement s = c.prepareStatement(sql)) {
       s.setString(1, EntityValues.time(created));
       s.setString(2, EntityValues.time(updated));
-      s.setString(3, json);
-      s.setString(4, type.id());
-      s.setString(5, id);
+      s.setString(3, createdBy);
+      s.setString(4, updatedBy);
+      s.setString(5, json);
+      s.setString(6, type.id());
+      s.setString(7, id);
       s.executeUpdate();
     }
   }
@@ -550,7 +621,11 @@ public final class EntityService {
         s.setString(4, id);
         if (s.executeUpdate() == 0 && check) {
           throw new EntityException(
-              "conflict: another '" + type.id() + "' already has " + f.name() + " = " + v);
+              "conflict: another '"
+                  + type.id()
+                  + "' already has "
+                  + f.name()
+                  + (f.sensitive() ? "" : " = " + v));
         }
       }
     }
@@ -558,7 +633,7 @@ public final class EntityService {
 
   private static String expr(String field) {
     return switch (field) {
-      case "id", "created", "updated" -> field;
+      case "id", "created", "updated", "created_by", "updated_by" -> field;
       default -> "json_extract(json, '$." + field + "')";
     };
   }

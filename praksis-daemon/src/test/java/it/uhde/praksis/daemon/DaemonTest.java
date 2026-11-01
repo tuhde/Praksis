@@ -229,6 +229,124 @@ class DaemonTest {
   }
 
   @Test
+  void entityGrantsAreCheckedPerTypeAndSecretsAreNotAudited() throws Exception {
+    write(
+        "ruleset/entities/note.toml",
+        """
+        format_version = 1
+        id = "note"
+        title = "Note"
+        [[field]]
+        name = "subject"
+        type = "string"
+        """);
+    write(
+        "ruleset/entities/vault.toml",
+        """
+        format_version = 1
+        id = "vault"
+        title = "Vault"
+        [[field]]
+        name = "label"
+        type = "string"
+        [[field]]
+        name = "secret"
+        type = "string"
+        sensitive = true
+        """);
+    write(
+        "ruleset/rules/vault.from-mail.toml",
+        """
+        id = "vault.from-mail"
+        effect = "local-write"
+        needs = ["entity.create"]
+        [trigger]
+        kind = "event"
+        type = "mail.received"
+        [[action]]
+        id = "make"
+        capability = "entity.create"
+        args = { type = "vault", values = { label = "mail", secret = "hunter2" } }
+        """);
+    write(
+        "ruleset/rules/note.from-mail.toml",
+        """
+        id = "note.from-mail"
+        effect = "local-write"
+        needs = ["entity.create"]
+        [trigger]
+        kind = "event"
+        type = "mail.received"
+        [[action]]
+        id = "make"
+        capability = "entity.create"
+        args = { type = "note", values = { subject = "from mail" } }
+        """);
+    write(
+        "policy.toml",
+        """
+        format_version = 1
+
+        [[grant]]
+        id = "archive"
+        layer = "ruleset"
+        capability = "mail.move"
+        [grant.args]
+        folder = { equals = "Archive" }
+
+        [[grant]]
+        id = "vault-only"
+        layer = "ruleset"
+        capability = "entity.create"
+        [grant.args]
+        type = { equals = "vault" }
+        """);
+    Files.writeString(mail.resolve("new/1700000000.M1P2.host"), "Subject: hi\n\nbody\n");
+    start();
+    await(
+        () -> {
+          try {
+            return ask(new Request.Audit(50)) instanceof Response.AuditLines a
+                && a.lines().stream()
+                    .anyMatch(l -> "vault.from-mail".equals(l.ruleId()) && l.allowed())
+                && a.lines().stream()
+                    .anyMatch(l -> "note.from-mail".equals(l.ruleId()) && !l.allowed());
+          } catch (IOException e) {
+            return false;
+          }
+        });
+    Response.AuditLines audit = (Response.AuditLines) ask(new Request.Audit(50));
+    var vault =
+        audit.lines().stream()
+            .filter(l -> "vault.from-mail".equals(l.ruleId()) && "CALL".equals(l.kind()))
+            .findFirst()
+            .get();
+    assertThat(vault.detail()).contains("\"label\"").contains("mail").doesNotContain("hunter2");
+    var note =
+        audit.lines().stream()
+            .filter(l -> "note.from-mail".equals(l.ruleId()) && "CALL".equals(l.kind()))
+            .findFirst()
+            .get();
+    assertThat(note.error()).contains("no grant for entity.create (type=note)");
+    // the refused rule asks for a permission for that type only
+    assertThat(ask(new Request.Approvals()))
+        .isInstanceOfSatisfying(
+            Response.ApprovalList.class,
+            a -> {
+              assertThat(a.disabled())
+                  .containsKey("note.from-mail")
+                  .doesNotContainKey("vault.from-mail");
+              assertThat(a.approvals())
+                  .anySatisfy(
+                      r -> {
+                        assertThat(r.ruleId()).isEqualTo("note.from-mail");
+                        assertThat(r.capability()).isEqualTo("entity.create");
+                        assertThat(r.args()).containsEntry("type", "note");
+                      });
+            });
+  }
+
+  @Test
   void theDocumentationIsServed() throws Exception {
     start();
     {

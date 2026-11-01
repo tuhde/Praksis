@@ -494,4 +494,98 @@ class EntityServiceTest {
     service.create("contact", Map.of("name", "A"), "key-1", false);
     assertThat(queued).hasSize(1);
   }
+
+  @Test
+  void everyEntityKnowsWhoMadeAndLastChangedIt() throws Exception {
+    Map<String, Object> a =
+        service.create(
+            "contact",
+            Map.of("name", "A"),
+            new EntityService.Call(false, Optional.empty(), null, "rule:mail.10-spam"));
+    String id = (String) a.get("id");
+    assertThat(a)
+        .containsEntry("created_by", "rule:mail.10-spam")
+        .containsEntry("updated_by", "rule:mail.10-spam");
+    Map<String, Object> b =
+        service
+            .update(
+                "contact",
+                id,
+                Map.of("name", "B"),
+                new EntityService.Call(false, Optional.empty(), null, "user"))
+            .orElseThrow();
+    assertThat(b)
+        .containsEntry("created_by", "rule:mail.10-spam")
+        .containsEntry("updated_by", "user");
+    // a change that changes nothing is nobody's
+    Map<String, Object> same =
+        service
+            .update(
+                "contact",
+                id,
+                Map.of("name", "B"),
+                new EntityService.Call(false, Optional.empty(), null, "rule:x"))
+            .orElseThrow();
+    assertThat(same).containsEntry("updated_by", "user");
+    assertThat(service.read("contact", id).orElseThrow()).containsEntry("updated_by", "user");
+    assertThat(
+            names(
+                where(Map.of("op", "equals", "field", "created_by", "value", "rule:mail.10-spam"))))
+        .containsExactly("B");
+    assertThatThrownBy(
+            () -> service.create("contact", Map.of("name", "A", "created_by", "x"), null, false))
+        .hasMessageContaining("set by Praksis");
+  }
+
+  private static final String PERSON =
+      """
+      format_version = 1
+      id = "person"
+      title = "Person"
+      [[field]]
+      name = "name"
+      type = "string"
+      required = true
+      [[field]]
+      name = "iban"
+      type = "string"
+      unique = true
+      sensitive = true
+      """;
+
+  private EntityService people() {
+    EntityType person = EntityTypes.parse(PERSON, "person", new ArrayList<>()).orElseThrow();
+    return new EntityService(
+        store, new EntityCatalog(Map.of("person", person)), new Ticking(), queued::add);
+  }
+
+  @Test
+  void sensitiveFieldsAreKeptOutOfFiltersSortsAndConflictMessages() throws Exception {
+    EntityService people = people();
+    Map<String, Object> a =
+        people.create("person", Map.of("name", "A", "iban", "DE01"), null, false);
+    String id = (String) a.get("id");
+    assertThat(people.withoutSensitive("person", a)).containsKey("name").doesNotContainKey("iban");
+    assertThat(people.reveal("person", id, List.of("iban")).orElseThrow())
+        .containsOnly(Map.entry("iban", "DE01"));
+    assertThat(people.reveal("person", "nope", List.of("iban"))).isEmpty();
+    assertThatThrownBy(() -> people.reveal("person", id, List.of("name")))
+        .hasMessageContaining("not a sensitive field");
+    assertThatThrownBy(() -> people.reveal("person", id, List.of("nope")))
+        .hasMessageContaining("not a sensitive field");
+    assertThatThrownBy(() -> people.reveal("person", id, List.of()))
+        .hasMessageContaining("at least one");
+
+    EntityType person = people.catalog().get("person").orElseThrow();
+    assertThatThrownBy(
+            () -> Filter.parse(person, Map.of("op", "equals", "field", "iban", "value", "DE01")))
+        .hasMessageContaining("sensitive and cannot be used in a filter");
+    assertThatThrownBy(
+            () -> people.query("person", new Query(Optional.empty(), "iban", false, 10, 0)))
+        .hasMessageContaining("cannot sort by 'iban'");
+    assertThatThrownBy(
+            () -> people.create("person", Map.of("name", "B", "iban", "DE01"), null, false))
+        .hasMessageContaining("conflict")
+        .satisfies(e -> assertThat(e.getMessage()).doesNotContain("DE01"));
+  }
 }

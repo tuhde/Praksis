@@ -447,7 +447,7 @@ public final class Engine implements EventSink, AutoCloseable {
         AccessPolicy.Decision decision = options.accessPolicy().check(ruleId, descriptor, args);
         Map<String, Object> seen = new LinkedHashMap<>();
         seen.put("capability", call.capability());
-        seen.put("args", printable(args));
+        seen.put("args", printable(redacted(call.capability(), args)));
         seen.put("allowed", decision.allowed());
         seen.put("reason", decision.reason());
         calls.add(seen);
@@ -625,6 +625,7 @@ public final class Engine implements EventSink, AutoCloseable {
         allowOnce
             ? AccessPolicy.Decision.allow()
             : options.accessPolicy().check(ruleId, descriptor, args);
+    Map<String, Object> shown = redacted(call.capability(), args);
     if (!decision.allowed()) {
       options
           .auditLog()
@@ -632,20 +633,20 @@ public final class Engine implements EventSink, AutoCloseable {
               options.clock().instant(),
               ruleId,
               call.capability(),
-              args,
+              shown,
               false,
               Optional.of(decision.reason()));
       throw new Denied(descriptor, args, decision.reason());
     }
     CapabilityContext context =
-        new Context(options.dryRun(), event.id() + "/" + ruleId + "/" + call.id(), event);
+        new Context(options.dryRun(), event.id() + "/" + ruleId + "/" + call.id(), event, ruleId);
     try {
       Map<String, Object> out =
           ModuleCalls.invoke(capabilities.get(call.capability()), context, args);
       options
           .auditLog()
           .record(
-              options.clock().instant(), ruleId, call.capability(), args, true, Optional.empty());
+              options.clock().instant(), ruleId, call.capability(), shown, true, Optional.empty());
       return out == null ? Map.of() : out;
     } catch (Exception e) {
       options
@@ -654,11 +655,17 @@ public final class Engine implements EventSink, AutoCloseable {
               options.clock().instant(),
               ruleId,
               call.capability(),
-              args,
+              shown,
               true,
               Optional.of(message(e)));
       throw new IllegalStateException("call of " + call.capability() + " failed: " + message(e), e);
     }
+  }
+
+  /** The arguments as the audit log and the trial record may hold them. */
+  private Map<String, Object> redacted(String capability, Map<String, Object> args) {
+    Capability c = capabilities.get(capability);
+    return c == null ? args : c.redact(args);
   }
 
   /** A capability call that the access policy refused. */
@@ -696,8 +703,13 @@ public final class Engine implements EventSink, AutoCloseable {
     return e.getMessage() == null ? e.toString() : e.getMessage();
   }
 
-  private record Context(boolean dryRun, String idempotencyKey, Event handled)
+  private record Context(boolean dryRun, String idempotencyKey, Event handled, String rule)
       implements CapabilityContext {
+    @Override
+    public Optional<String> ruleId() {
+      return Optional.of(rule);
+    }
+
     @Override
     public Optional<Event> event() {
       return Optional.of(handled);

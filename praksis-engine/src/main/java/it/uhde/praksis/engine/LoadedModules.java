@@ -92,6 +92,11 @@ public final class LoadedModules implements AutoCloseable {
     }
 
     @Override
+    public Map<String, Object> redact(Map<String, Object> args) {
+      return inner.redact(args);
+    }
+
+    @Override
     public void close() {
       inner.close();
     }

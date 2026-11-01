@@ -354,6 +354,38 @@ class StoreTest {
   }
 
   @Test
+  void aDatabaseOfTheFifthVersionGainsTheProvenanceColumns() throws Exception {
+    Path file = dir.resolve("praksis.db");
+    try (Store store = Store.open(file)) {
+      store.append(event("e1", Optional.empty(), Map.of()));
+    }
+    try (var c = java.sql.DriverManager.getConnection("jdbc:sqlite:" + file);
+        var s = c.createStatement()) {
+      s.execute("DROP TABLE entity");
+      s.execute(
+          "CREATE TABLE entity (type TEXT NOT NULL, id TEXT NOT NULL, created TEXT NOT NULL,"
+              + " updated TEXT NOT NULL, json TEXT NOT NULL, PRIMARY KEY (type, id)) WITHOUT"
+              + " ROWID");
+      s.execute(
+          "INSERT INTO entity (type, id, created, updated, json) VALUES ('t', 'a', 'x', 'x', '{}')");
+      s.execute("PRAGMA user_version = 5");
+    }
+    try (Store store = Store.open(file)) {
+      String by =
+          store.transaction(
+              null,
+              c -> {
+                try (var s = c.createStatement();
+                    var r = s.executeQuery("SELECT created_by || '/' || updated_by FROM entity")) {
+                  r.next();
+                  return r.getString(1);
+                }
+              });
+      assertThat(by).isEqualTo("user/user");
+    }
+  }
+
+  @Test
   void aTransactionIsCommittedOrRolledBackAndTellsItsTopic() throws Exception {
     List<String> topics = new java.util.concurrent.CopyOnWriteArrayList<>();
     try (Store store = Store.open(dir.resolve("praksis.db"))) {
@@ -361,7 +393,8 @@ class StoreTest {
       Store.Work<Integer> insert =
           c -> {
             try (var s = c.createStatement()) {
-              s.execute("INSERT INTO entity VALUES ('t', 'a', 'x', 'x', '{}')");
+              s.execute(
+                  "INSERT INTO entity (type, id, created, updated, json) VALUES ('t', 'a', 'x', 'x', '{}')");
             }
             return 1;
           };
@@ -383,7 +416,8 @@ class StoreTest {
                       "entities",
                       c -> {
                         try (var s = c.createStatement()) {
-                          s.execute("INSERT INTO entity VALUES ('t', 'b', 'x', 'x', '{}')");
+                          s.execute(
+                              "INSERT INTO entity (type, id, created, updated, json) VALUES ('t', 'b', 'x', 'x', '{}')");
                         }
                         throw new IllegalStateException("stop");
                       }))

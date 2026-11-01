@@ -26,7 +26,7 @@ import java.util.Optional;
  * <p>All methods are safe to call from several threads.
  */
 public final class Store implements AutoCloseable {
-  private static final int SCHEMA_VERSION = 5;
+  private static final int SCHEMA_VERSION = 6;
 
   private final Connection connection;
   private volatile java.util.function.Consumer<String> changes = topic -> {};
@@ -202,6 +202,13 @@ public final class Store implements AutoCloseable {
               PRIMARY KEY (type, field, value)
             ) WITHOUT ROWID""");
         s.execute("PRAGMA user_version = 5");
+      }
+    }
+    if (version < 6) {
+      try (Statement s = connection.createStatement()) {
+        s.execute("ALTER TABLE entity ADD COLUMN created_by TEXT NOT NULL DEFAULT 'user'");
+        s.execute("ALTER TABLE entity ADD COLUMN updated_by TEXT NOT NULL DEFAULT 'user'");
+        s.execute("PRAGMA user_version = 6");
       }
     }
   }

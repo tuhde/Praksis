@@ -29,7 +29,8 @@ import java.util.regex.Pattern;
  * unique = true
  * </pre>
  *
- * Every entity also has the fields {@code id}, {@code created} and {@code updated}, which Praksis
+ * Every entity also has the fields {@code id}, {@code created}, {@code updated}, {@code created_by}
+ * and {@code updated_by} (who made the change: {@code rule:<id>} or {@code user}), which Praksis
  * sets and which a type cannot declare. A higher layer may replace a type of a lower one by naming
  * its hash in {@code based_on}.
  *
@@ -52,7 +53,8 @@ public record EntityType(
   public static final int SUPPORTED_FORMAT = 1;
 
   /** Fields that Praksis sets on every entity. */
-  public static final Set<String> RESERVED = Set.of("id", "created", "updated");
+  public static final Set<String> RESERVED =
+      Set.of("id", "created", "updated", "created_by", "updated_by");
 
   static final Pattern ID = Pattern.compile("[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)*");
   static final Pattern FIELD = Pattern.compile("[a-z][a-z0-9_]*");
@@ -71,7 +73,8 @@ public record EntityType(
    * @param type the type of its values
    * @param required whether a value must be given on create
    * @param unique whether no two entities of the type may have the same value
-   * @param sensitive whether grants can limit the field and views show it only on request
+   * @param sensitive whether the field is left out of what rules read (a rule needs {@code
+   *     entity.reveal} and a grant for it), of filters and sorting, and of the audit log
    * @param description what it is for, or empty
    */
   public record Field(

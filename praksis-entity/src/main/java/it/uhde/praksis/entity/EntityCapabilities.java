@@ -81,6 +81,17 @@ public final class EntityCapabilities {
                     out("found", ValueType.BOOL),
                     new FieldDescriptor("entity", ValueType.MAP, false, false))),
             new CapabilityDescriptor(
+                "entity.reveal",
+                EffectClass.READ_ONLY,
+                true,
+                List.of(
+                    in("type", ValueType.STRING, true, true),
+                    in("id", ValueType.STRING, true, false),
+                    in("fields", ValueType.LIST, true, true)),
+                List.of(
+                    out("found", ValueType.BOOL),
+                    new FieldDescriptor("values", ValueType.MAP, false, false))),
+            new CapabilityDescriptor(
                 "entity.query",
                 EffectClass.READ_ONLY,
                 true,
@@ -135,11 +146,12 @@ public final class EntityCapabilities {
   /** The five capabilities by name. */
   public Map<String, Capability> capabilities() {
     Map<String, Capability> m = new LinkedHashMap<>();
-    cap(m, "entity.create", this::create);
-    cap(m, "entity.read", this::read);
-    cap(m, "entity.query", this::query);
-    cap(m, "entity.update", this::update);
-    cap(m, "entity.delete", this::delete);
+    cap(m, "entity.create", this::create, this::redactValues);
+    cap(m, "entity.read", this::read, a -> a);
+    cap(m, "entity.reveal", this::reveal, a -> a);
+    cap(m, "entity.query", this::query, a -> a);
+    cap(m, "entity.update", this::update, this::redactValues);
+    cap(m, "entity.delete", this::delete, a -> a);
     return m;
   }
 
@@ -148,13 +160,22 @@ public final class EntityCapabilities {
         throws EntityException;
   }
 
-  private static void cap(Map<String, Capability> into, String name, Body body) {
+  private static void cap(
+      Map<String, Capability> into,
+      String name,
+      Body body,
+      java.util.function.UnaryOperator<Map<String, Object>> redactor) {
     into.put(
         name,
         new Capability() {
           @Override
           public String name() {
             return name;
+          }
+
+          @Override
+          public Map<String, Object> redact(Map<String, Object> args) {
+            return redactor.apply(args);
           }
 
           @Override
@@ -179,19 +200,63 @@ public final class EntityCapabilities {
   }
 
   private static EntityService.Call call(CapabilityContext c) {
-    return new EntityService.Call(c.dryRun(), c.event(), c.idempotencyKey());
+    return new EntityService.Call(
+        c.dryRun(),
+        c.event(),
+        c.idempotencyKey(),
+        c.ruleId().map(r -> "rule:" + r).orElse(EntityService.USER));
   }
 
   private Map<String, Object> create(CapabilityContext c, Map<String, Object> args)
       throws EntityException {
-    Map<String, Object> e = service().create(text(args, "type"), map(args, "values"), call(c));
-    return Map.of("id", e.get("id"), "entity", e);
+    String type = text(args, "type");
+    Map<String, Object> e = service().create(type, map(args, "values"), call(c));
+    return Map.of("id", e.get("id"), "entity", service().withoutSensitive(type, e));
   }
 
   private Map<String, Object> read(CapabilityContext c, Map<String, Object> args)
       throws EntityException {
-    return found(service().read(text(args, "type"), text(args, "id")));
+    String type = text(args, "type");
+    return found(type, service().read(type, text(args, "id")));
   }
+
+  @SuppressWarnings("unchecked")
+  private Map<String, Object> reveal(CapabilityContext c, Map<String, Object> args)
+      throws EntityException {
+    Optional<Map<String, Object>> values =
+        service().reveal(text(args, "type"), text(args, "id"), (List<String>) args.get("fields"));
+    return values.isPresent()
+        ? Map.of("found", true, "values", values.get())
+        : Map.of("found", false);
+  }
+
+  /** The values of sensitive fields are not written to the audit log or the trial record. */
+  private Map<String, Object> redactValues(Map<String, Object> args) {
+    EntityService service = services.get();
+    if (service == null
+        || !(args.get("type") instanceof String type)
+        || !(args.get("values") instanceof Map<?, ?> values)) {
+      return args;
+    }
+    EntityType t = service.catalog().get(type).orElse(null);
+    if (t == null) {
+      return args;
+    }
+    Map<String, Object> shown = new java.util.LinkedHashMap<>();
+    values.forEach(
+        (k, v) ->
+            shown.put(
+                String.valueOf(k),
+                t.field(String.valueOf(k)).filter(EntityType.Field::sensitive).isPresent()
+                    ? HIDDEN
+                    : v));
+    Map<String, Object> out = new java.util.LinkedHashMap<>(args);
+    out.put("values", shown);
+    return out;
+  }
+
+  /** Stands for a sensitive value in the audit log. */
+  public static final String HIDDEN = "(sensitive, not logged)";
 
   private Map<String, Object> query(CapabilityContext c, Map<String, Object> args)
       throws EntityException {
@@ -215,14 +280,17 @@ public final class EntityCapabilities {
                 : ((Number) args.get("limit")).intValue(),
             args.get("offset") == null ? 0 : ((Number) args.get("offset")).intValue());
     EntityService.Page page = service().query(type, q);
-    return Map.of(
-        "items", page.items(), "count", (long) page.items().size(), "total", page.total());
+    List<Map<String, Object>> items = new java.util.ArrayList<>();
+    for (Map<String, Object> item : page.items()) {
+      items.add(service().withoutSensitive(type, item));
+    }
+    return Map.of("items", items, "count", (long) items.size(), "total", page.total());
   }
 
   private Map<String, Object> update(CapabilityContext c, Map<String, Object> args)
       throws EntityException {
-    return found(
-        service().update(text(args, "type"), text(args, "id"), map(args, "values"), call(c)));
+    String type = text(args, "type");
+    return found(type, service().update(type, text(args, "id"), map(args, "values"), call(c)));
   }
 
   private Map<String, Object> delete(CapabilityContext c, Map<String, Object> args)
@@ -230,9 +298,10 @@ public final class EntityCapabilities {
     return Map.of("deleted", service().delete(text(args, "type"), text(args, "id"), call(c)));
   }
 
-  private static Map<String, Object> found(Optional<Map<String, Object>> entity) {
+  private Map<String, Object> found(String type, Optional<Map<String, Object>> entity)
+      throws EntityException {
     return entity.isPresent()
-        ? Map.of("found", true, "entity", entity.get())
+        ? Map.of("found", true, "entity", service().withoutSensitive(type, entity.get()))
         : Map.of("found", false);
   }
 }

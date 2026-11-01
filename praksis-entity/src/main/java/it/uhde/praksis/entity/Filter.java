@@ -20,9 +20,10 @@ import java.util.Set;
  * { op = "and", of = [ ... ] }    { op = "or", of = [ ... ] }    { op = "not", of = { ... } }
  * </pre>
  *
- * Fields are the declared ones of string, int, double, bool and timestamp type, and {@code id},
- * {@code created} and {@code updated}. An entity without a value for a field does not match a
- * condition on it (except under {@code not}).
+ * Fields are the declared ones of string, int, double, bool and timestamp type that are not
+ * sensitive, and {@code id}, {@code created}, {@code updated}, {@code created_by} and {@code
+ * updated_by}. An entity without a value for a field does not match a condition on it (except under
+ * {@code not}).
  */
 public sealed interface Filter {
   /** {@code field = value}. */
@@ -54,9 +55,13 @@ public sealed interface Filter {
   /** The type of a field a filter or sort may use, or empty if it cannot. */
   static Optional<ValueType> typeOf(EntityType type, String field) {
     return switch (field) {
-      case "id" -> Optional.of(ValueType.STRING);
+      case "id", "created_by", "updated_by" -> Optional.of(ValueType.STRING);
       case "created", "updated" -> Optional.of(ValueType.TIMESTAMP);
-      default -> type.field(field).map(EntityType.Field::type).filter(COMPARABLE::contains);
+      default ->
+          type.field(field)
+              .filter(f -> !f.sensitive())
+              .map(EntityType.Field::type)
+              .filter(COMPARABLE::contains);
     };
   }
 
@@ -106,6 +111,10 @@ public sealed interface Filter {
       default -> {}
     }
     String field = field(m);
+    if (type.field(field).filter(EntityType.Field::sensitive).isPresent()) {
+      throw new EntityException(
+          "filter " + name + ": '" + field + "' is sensitive and cannot be used in a filter");
+    }
     ValueType t =
         typeOf(type, field)
             .orElseThrow(
