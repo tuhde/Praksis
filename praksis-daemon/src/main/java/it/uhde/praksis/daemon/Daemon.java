@@ -13,7 +13,6 @@ import it.uhde.praksis.engine.LoadedModules;
 import it.uhde.praksis.engine.ModuleLoadException;
 import it.uhde.praksis.engine.ModuleLoader;
 import it.uhde.praksis.engine.StoreAuditLog;
-import it.uhde.praksis.entity.EntityCapabilities;
 import it.uhde.praksis.entity.EntityCatalog;
 import it.uhde.praksis.entity.EntityService;
 import it.uhde.praksis.expression.ExpressionCompiler;
@@ -97,19 +96,28 @@ public final class Daemon implements AutoCloseable {
     return daemon;
   }
 
+  /** The layers with the directories their entity types are read from. */
+  static List<EntityCatalog.Source> entitySources(Layers layers) throws DaemonException {
+    return entitySources(layers.sources(layers.readLock()));
+  }
+
+  static List<EntityCatalog.Source> entitySources(List<LayerStack.Source> sources) {
+    return sources.stream().map(s -> new EntityCatalog.Source(s.name(), s.directory())).toList();
+  }
+
   /**
    * Opens the entity service with the types of the {@code entities/} directories of all layers,
-   * bottom to top. A file with a problem is left out and reported, like a rule that is skipped; the
-   * calls that use its type then fail with "unknown entity type".
+   * bottom to top. A file with a problem, or a layer that replaces a type wrongly, stops the start,
+   * like a rule that is not valid.
    */
   private void openEntities(Layers layers, Store store) throws DaemonException {
     try {
-      List<java.nio.file.Path> directories =
-          layers.sources(layers.readLock()).stream().map(LayerStack.Source::directory).toList();
-      EntityCatalog.Loaded loaded = EntityCatalog.load(directories);
-      loaded
-          .problems()
-          .forEach(p -> LOG.log(System.Logger.Level.WARNING, "entity type left out: " + p));
+      EntityCatalog.Loaded loaded = EntityCatalog.load(entitySources(layers));
+      if (!loaded.problems().isEmpty()) {
+        throw new DaemonException(
+            "the entity types are not valid:\n  "
+                + String.join("\n  ", loaded.problems().stream().map(Object::toString).toList()));
+      }
       entityService.set(
           new EntityService(
               store,
@@ -148,9 +156,7 @@ public final class Daemon implements AutoCloseable {
               config.moduleSettings(),
               config.enabledModules());
       Agent agent = new Agent();
-      modules = Builtins.add(modules, agent);
-      EntityCapabilities entityCapabilities = new EntityCapabilities(entityService::get);
-      modules = modules.with(EntityCapabilities.descriptor(), entityCapabilities.capabilities());
+      modules = Builtins.add(modules, agent, entityService::get);
       if (config.offline()) {
         modules = modules.offline();
         LOG.log(

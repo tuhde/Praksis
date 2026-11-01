@@ -165,6 +165,22 @@ final class Builtins {
    * The modules with the built-in one; its capabilities work once {@link Agent#bind} was called.
    */
   static LoadedModules add(LoadedModules modules, Agent agent) {
-    return modules.with(descriptor(), agent.capabilities());
+    return add(modules, agent, () -> null);
+  }
+
+  /**
+   * As above, with the module {@code entity}, whose capabilities ask {@code entities} for the
+   * service at each call (it is not open when the modules are made, and not at all when the modules
+   * are only used to check a ruleset).
+   */
+  static LoadedModules add(
+      LoadedModules modules,
+      Agent agent,
+      java.util.function.Supplier<it.uhde.praksis.entity.EntityService> entities) {
+    return modules
+        .with(descriptor(), agent.capabilities())
+        .with(
+            it.uhde.praksis.entity.EntityCapabilities.descriptor(),
+            new it.uhde.praksis.entity.EntityCapabilities(entities).capabilities());
   }
 }

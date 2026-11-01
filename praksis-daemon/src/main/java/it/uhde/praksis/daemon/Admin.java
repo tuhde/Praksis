@@ -422,6 +422,7 @@ final class Admin {
       } catch (RulesetException ex) {
         ex.problems().forEach(p -> findings.add(policyFinding(p)));
       }
+      findings.addAll(entityFindings(candidate.sources(), e));
       findings.addAll(testFindings(config, candidate.sources(), e, modules));
       if (options.replay()) {
         replayed = replay(config, current, e, options.count(), modules, err);
@@ -603,6 +604,36 @@ final class Admin {
     }
     report.problems().forEach(p -> out.println("  ERROR " + p));
     return report.ok() ? 0 : 1;
+  }
+
+  /** The entity types of the candidate, and what its rules write about them. */
+  private static List<Verifier.Finding> entityFindings(
+      List<LayerStack.Source> sources, LayerStack.Effective effective) {
+    List<Verifier.Finding> findings = new ArrayList<>();
+    try {
+      it.uhde.praksis.entity.EntityCatalog.Loaded loaded =
+          it.uhde.praksis.entity.EntityCatalog.load(Daemon.entitySources(sources));
+      loaded
+          .problems()
+          .forEach(
+              p ->
+                  findings.add(
+                      new Verifier.Finding(
+                          Verifier.Severity.ERROR,
+                          it.uhde.praksis.entity.EntityChecks.CHECK,
+                          p.location(),
+                          p.message())));
+      findings.addAll(
+          it.uhde.praksis.entity.EntityChecks.check(effective.ruleset().rules(), loaded.catalog()));
+    } catch (java.io.IOException ex) {
+      findings.add(
+          new Verifier.Finding(
+              Verifier.Severity.ERROR,
+              it.uhde.praksis.entity.EntityChecks.CHECK,
+              "entities",
+              "cannot read the entity types: " + ex.getMessage()));
+    }
+    return findings;
   }
 
   private static Verifier.Finding policyFinding(Problem p) {
