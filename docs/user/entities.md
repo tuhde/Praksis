@@ -132,6 +132,16 @@ not sensitive and `id`, `created`, `updated`, `created_by` and `updated_by`. An 
 value for a field does not match a condition on it. A list shows at most 1000 entities (100 by
 default); `--offset` skips some.
 
+## In Praksis Desktop
+
+The **Entities** tab of the desktop program does the same with a window. Choose a type: the table
+shows its entities (100 to a page; a filter by one field and a sort by one field), and the form
+next to it is made from the type: a text box for a string, a check box for a bool, JSON for a list
+or a map, and a masked box for a sensitive field, whose value is shown only when you press Show (the
+audit log notes that you looked). **New**, **Save** and **Delete** do what the commands do. A save
+sends only what you changed. The tab needs no grant, as the commands do not, and it updates when a
+rule changes an entity.
+
 ## In rules
 
 The module `entity` is part of the daemon: [entity.create, entity.read, entity.reveal, entity.query,
