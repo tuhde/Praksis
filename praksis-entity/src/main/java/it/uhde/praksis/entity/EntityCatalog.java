@@ -118,6 +118,21 @@ public final class EntityCatalog {
         }
       }
     }
+    // every reference points at a type that exists
+    for (EntityType type : all.values()) {
+      for (EntityType.Field f : type.fields()) {
+        if (f.ref().isPresent() && !all.containsKey(f.ref().get())) {
+          problems.add(
+              new Problem(
+                  "layer '" + owners.get(type.id()) + "': entities/" + type.id() + ".toml",
+                  "field '"
+                      + f.name()
+                      + "' refers to the type '"
+                      + f.ref().get()
+                      + "', which does not exist"));
+        }
+      }
+    }
     // the sets, layered like the types
     Map<String, EntitySet> allSets = new LinkedHashMap<>();
     Map<String, String> setDefinedBy = new LinkedHashMap<>();
@@ -305,6 +320,18 @@ public final class EntityCatalog {
       if (before.sensitive() && !after.sensitive()) {
         out.add("field '" + before.name() + "' is no longer sensitive");
       }
+      if (after.ref().isPresent() && !after.ref().equals(before.ref())) {
+        out.add(
+            before.ref().isEmpty()
+                ? "field '" + before.name() + "' becomes a reference to " + after.ref().get()
+                : "field '"
+                    + before.name()
+                    + "' refers to "
+                    + after.ref().get()
+                    + " and not to "
+                    + before.ref().get()
+                    + " any more");
+      }
     }
     for (EntityType.Field added : replacement.fields()) {
       if (old.field(added.name()).isEmpty() && added.required()) {
@@ -320,6 +347,27 @@ public final class EntityCatalog {
 
   public Map<String, EntityType> types() {
     return types;
+  }
+
+  /**
+   * A field of a type that refers to another type.
+   *
+   * @param type the type that has the field
+   * @param field the field
+   */
+  public record Reference(EntityType type, EntityType.Field field) {}
+
+  /** The fields of all types that refer to this type, in the order of type ids and fields. */
+  public List<Reference> referencesTo(String typeId) {
+    List<Reference> out = new ArrayList<>();
+    types.values().stream()
+        .sorted(java.util.Comparator.comparing(EntityType::id))
+        .forEach(
+            t ->
+                t.fields().stream()
+                    .filter(f -> f.ref().filter(typeId::equals).isPresent())
+                    .forEach(f -> out.add(new Reference(t, f))));
+    return out;
   }
 
   /** The layer that defined the type last, if the catalog was made from layers. */

@@ -92,7 +92,9 @@ final class Entities {
                                         f.required(),
                                         f.unique(),
                                         f.sensitive(),
-                                        f.description().orElse(null)))
+                                        f.description().orElse(null),
+                                        f.ref().orElse(null),
+                                        f.ref().isPresent() ? f.onDelete().id() : null))
                             .toList(),
                         List.copyOf(catalog.setsOf(t.id()))))
             .toList());

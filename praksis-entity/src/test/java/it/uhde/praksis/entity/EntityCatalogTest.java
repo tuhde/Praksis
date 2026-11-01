@@ -342,4 +342,71 @@ class EntityCatalogTest {
       assertThat(problems).anyMatch(p -> p.message().contains(bad.message()));
     }
   }
+
+  @Test
+  void aReferenceMustPointAtATypeThatExists() throws IOException {
+    String book =
+        "format_version = 1\nid = \"book\"\ntitle = \"Book\"\n[[field]]\nname = \"author\"\n"
+            + "type = \"string\"\nref = \"author\"\n";
+    EntityCatalog.Loaded broken = load(layer("r1", "book", book));
+    assertThat(broken.problems())
+        .anyMatch(
+            p ->
+                p.location().equals("layer 'L0': entities/book.toml")
+                    && p.message()
+                        .contains(
+                            "field 'author' refers to the type 'author', which does not exist"));
+    EntityCatalog.Loaded ok = load(layer("r2", "book", book, "author", type("author")));
+    assertThat(ok.problems()).isEmpty();
+    assertThat(ok.catalog().referencesTo("author")).hasSize(1);
+    assertThat(ok.catalog().referencesTo("author").get(0).type().id()).isEqualTo("book");
+    assertThat(ok.catalog().referencesTo("author").get(0).field().name()).isEqualTo("author");
+    assertThat(ok.catalog().referencesTo("book")).isEmpty();
+  }
+
+  @Test
+  void aReplacementMayNotTurnAFieldIntoAReferenceOrMoveIt() throws IOException {
+    String author =
+        "format_version = 1\nid = \"author\"\ntitle = \"A\"\n[[field]]\nname = \"name\"\ntype = \"string\"\n";
+    String base =
+        "format_version = 1\nid = \"book\"\ntitle = \"Book\"\n[[field]]\nname = \"owner\"\ntype = \"string\"\n";
+    String ref =
+        "format_version = 1\nid = \"book\"\ntitle = \"Book\"\n[[field]]\nname = \"owner\"\ntype = \"string\"\nref = \"author\"\n";
+    String hashBase = EntityTypes.parse(base, "book", new ArrayList<>()).orElseThrow().hash();
+    String hashRef = EntityTypes.parse(ref, "book", new ArrayList<>()).orElseThrow().hash();
+    EntityCatalog.Loaded becomes =
+        load(
+            layer("r3", "book", base, "author", author, "tag", author.replace("author", "tag")),
+            layer(
+                "r4",
+                "book",
+                ref.replace(
+                    "format_version = 1", "format_version = 1\nbased_on = \"" + hashBase + "\"")));
+    assertThat(becomes.problems())
+        .anyMatch(p -> p.message().contains("field 'owner' becomes a reference to author"));
+    EntityCatalog.Loaded moves =
+        load(
+            layer("r5", "book", ref, "author", author, "tag", author.replace("author", "tag")),
+            layer(
+                "r6",
+                "book",
+                ref.replace("\"author\"\n", "\"tag\"\n")
+                    .replace("ref = \"author\"", "ref = \"tag\"")
+                    .replace(
+                        "format_version = 1",
+                        "format_version = 1\nbased_on = \"" + hashRef + "\"")));
+    assertThat(moves.problems())
+        .anyMatch(
+            p -> p.message().contains("field 'owner' refers to tag and not to author any more"));
+    // taking the reference away is fine
+    EntityCatalog.Loaded drops =
+        load(
+            layer("r7", "book", ref, "author", author),
+            layer(
+                "r8",
+                "book",
+                base.replace(
+                    "format_version = 1", "format_version = 1\nbased_on = \"" + hashRef + "\"")));
+    assertThat(drops.problems()).isEmpty();
+  }
 }

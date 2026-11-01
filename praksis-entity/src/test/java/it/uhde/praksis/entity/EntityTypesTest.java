@@ -133,4 +133,50 @@ class EntityTypesTest {
     assertThat(loaded.types()).isEmpty();
     assertThat(loaded.problems()).isEmpty();
   }
+
+  @Test
+  void aFieldMayReferToAnotherTypeAndSayWhatHappensWhenThatIsDeleted() {
+    String head = "format_version = 1\nid = \"book\"\ntitle = \"Book\"\n";
+    List<Problem> problems = new ArrayList<>();
+    EntityType t =
+        EntityTypes.parse(
+                head
+                    + "[[field]]\nname = \"author\"\ntype = \"string\"\nref = \"author\"\n"
+                    + "[[field]]\nname = \"owner\"\ntype = \"string\"\nref = \"person\"\non_delete = \"cascade\"\nrequired = true\n"
+                    + "[[field]]\nname = \"tags\"\ntype = \"list\"\nref = \"tag\"\non_delete = \"set_null\"\n"
+                    + "[[field]]\nname = \"plain\"\ntype = \"string\"\n",
+                "book",
+                problems)
+            .orElseThrow();
+    assertThat(problems).isEmpty();
+    assertThat(t.field("author").orElseThrow().ref()).contains("author");
+    assertThat(t.field("author").orElseThrow().onDelete()).isEqualTo(EntityType.OnDelete.RESTRICT);
+    assertThat(t.field("owner").orElseThrow().onDelete()).isEqualTo(EntityType.OnDelete.CASCADE);
+    assertThat(t.field("tags").orElseThrow().onDelete()).isEqualTo(EntityType.OnDelete.SET_NULL);
+    assertThat(t.field("plain").orElseThrow().ref()).isEmpty();
+  }
+
+  @Test
+  void aReferenceIsCheckedForWhereItWorks() {
+    String head = "format_version = 1\nid = \"book\"\ntitle = \"Book\"\n[[field]]\nname = \"f\"\n";
+    record Bad(String field, String message) {}
+    for (Bad bad :
+        List.of(
+            new Bad("type = \"int\"\nref = \"x\"\n", "cannot refer to a type, its type is int"),
+            new Bad("type = \"string\"\nref = \"A b\"\n", "'ref' must be the id of an entity type"),
+            new Bad("type = \"string\"\non_delete = \"cascade\"\n", "'on_delete' needs 'ref'"),
+            new Bad(
+                "type = \"string\"\nref = \"x\"\non_delete = \"drop\"\n",
+                "must be restrict, cascade or set_null"),
+            new Bad(
+                "type = \"list\"\nref = \"x\"\non_delete = \"cascade\"\n",
+                "a list of references cannot cascade"),
+            new Bad(
+                "type = \"string\"\nref = \"x\"\non_delete = \"set_null\"\nrequired = true\n",
+                "a required reference cannot be set_null"))) {
+      List<Problem> problems = new ArrayList<>();
+      assertThat(EntityTypes.parse(head + bad.field(), "book", problems)).isEmpty();
+      assertThat(problems).as(bad.message()).anyMatch(p -> p.message().contains(bad.message()));
+    }
+  }
 }

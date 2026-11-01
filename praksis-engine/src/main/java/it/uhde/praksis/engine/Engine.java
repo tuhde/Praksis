@@ -639,7 +639,22 @@ public final class Engine implements EventSink, AutoCloseable {
       throw new Denied(descriptor, args, decision.reason());
     }
     CapabilityContext context =
-        new Context(options.dryRun(), event.id() + "/" + ruleId + "/" + call.id(), event, ruleId);
+        new Context(
+            options.dryRun(),
+            event.id() + "/" + ruleId + "/" + call.id(),
+            event,
+            ruleId,
+            (capability, otherArgs) -> {
+              Optional<CapabilityDescriptor> other = catalog.capability(capability);
+              if (other.isEmpty()) {
+                return Optional.of("there is no capability " + capability);
+              }
+              AccessPolicy.Decision d =
+                  allowOnce
+                      ? AccessPolicy.Decision.allow()
+                      : options.accessPolicy().check(ruleId, other.get(), otherArgs);
+              return d.allowed() ? Optional.empty() : Optional.of(d.reason());
+            });
     try {
       Map<String, Object> out =
           ModuleCalls.invoke(capabilities.get(call.capability()), context, args);
@@ -703,8 +718,18 @@ public final class Engine implements EventSink, AutoCloseable {
     return e.getMessage() == null ? e.toString() : e.getMessage();
   }
 
-  private record Context(boolean dryRun, String idempotencyKey, Event handled, String rule)
+  private record Context(
+      boolean dryRun,
+      String idempotencyKey,
+      Event handled,
+      String rule,
+      java.util.function.BiFunction<String, Map<String, Object>, Optional<String>> refusals)
       implements CapabilityContext {
+    @Override
+    public Optional<String> refusal(String capability, Map<String, Object> args) {
+      return refusals.apply(capability, args);
+    }
+
     @Override
     public Optional<String> ruleId() {
       return Optional.of(rule);

@@ -206,7 +206,8 @@ public final class EntityCapabilities {
         c.dryRun(),
         c.event(),
         c.idempotencyKey(),
-        c.ruleId().map(r -> "rule:" + r).orElse(EntityService.USER));
+        c.ruleId().map(r -> "rule:" + r).orElse(EntityService.USER),
+        c::refusal);
   }
 
   private Map<String, Object> create(CapabilityContext c, Map<String, Object> args)

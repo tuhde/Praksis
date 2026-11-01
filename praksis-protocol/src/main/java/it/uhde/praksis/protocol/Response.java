@@ -1127,6 +1127,9 @@ public sealed interface Response {
      * @param unique whether no two entities share a value
      * @param sensitive whether rules and lists do not see its value
      * @param description what it is for, or null
+     * @param ref the type that the field refers to, or null
+     * @param onDelete {@code restrict}, {@code cascade} or {@code set_null}: what happens when the
+     *     entity that the field refers to is deleted; null if the field refers to nothing
      */
     public record EntityField(
         String name,
@@ -1134,7 +1137,9 @@ public sealed interface Response {
         boolean required,
         boolean unique,
         boolean sensitive,
-        String description) {}
+        String description,
+        String ref,
+        String onDelete) {}
   }
 
   /**

@@ -86,7 +86,8 @@ class WireTest {
                         "sha256:x",
                         List.of(
                             new Response.EntityTypeList.EntityField(
-                                "subject", "string", true, false, false, null)),
+                                "subject", "string", true, false, false, null, "author",
+                                "cascade")),
                         List.of("people")))),
             new Response.EntitySetList(
                 List.of(

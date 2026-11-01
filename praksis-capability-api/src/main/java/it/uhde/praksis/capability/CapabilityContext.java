@@ -25,6 +25,19 @@ public interface CapabilityContext {
     return Optional.empty();
   }
 
+  /**
+   * Whether the rule that makes this call may also make another call of a capability, with these
+   * arguments, as the grants stand. A capability whose call has effects on other things than its
+   * arguments name (deleting an entity deletes the entities that depend on it) asks before it does
+   * them, so that what a rule may do does not grow with what a definition says. The default allows
+   * everything, for a call that no rule makes.
+   *
+   * @return empty if allowed, else why not
+   */
+  default Optional<String> refusal(String capability, java.util.Map<String, Object> args) {
+    return Optional.empty();
+  }
+
   /** The event being handled, or empty for a call that has no event (e.g. a command). */
   Optional<Event> event();
 }

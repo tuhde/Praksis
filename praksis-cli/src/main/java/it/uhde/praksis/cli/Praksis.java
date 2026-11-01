@@ -681,12 +681,15 @@ public final class Praksis {
           for (Response.EntityTypeList.EntityField f : t.fields()) {
             out()
                 .printf(
-                    "    %s (%s)%s%s%s%n",
+                    "    %s (%s)%s%s%s%s%n",
                     f.name(),
                     f.type(),
                     f.required() ? ", required" : "",
                     f.unique() ? ", unique" : "",
-                    f.sensitive() ? ", sensitive" : "");
+                    f.sensitive() ? ", sensitive" : "",
+                    f.ref() == null
+                        ? ""
+                        : ", refers to " + f.ref() + " (on delete: " + f.onDelete() + ")");
           }
         }
         return 0;

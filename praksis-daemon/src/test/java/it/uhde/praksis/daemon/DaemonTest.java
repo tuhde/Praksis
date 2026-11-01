@@ -135,6 +135,14 @@ class DaemonTest {
     }
   }
 
+  private boolean exists(String type, String id) {
+    try {
+      return ((Response.EntityItem) ask(new Request.EntityRead(type, id, null))).found();
+    } catch (IOException e) {
+      return false;
+    }
+  }
+
   private Response ask(Request request) throws IOException {
     try (Client client = Client.connect(home.resolve("praksis.sock"))) {
       return client.send(request);
@@ -636,6 +644,137 @@ class DaemonTest {
     assertThatThrownBy(this::start)
         .hasMessageContaining("[entities.bind_set]: there is no entity set 'ghosts'")
         .hasMessageContaining("sets: [docs]");
+  }
+
+  @Test
+  void aRuleThatDeletesAnEntityMayOnlyCascadeToWhatItsGrantsCover() throws Exception {
+    write(
+        "ruleset/entities/book.toml",
+        "format_version = 1\nid = \"book\"\ntitle = \"Book\"\n[[field]]\nname = \"title\"\ntype = \"string\"\n");
+    write(
+        "ruleset/entities/note.toml",
+        "format_version = 1\nid = \"note\"\ntitle = \"Note\"\n[[field]]\nname = \"text\"\ntype = \"string\"\n"
+            + "[[field]]\nname = \"book\"\ntype = \"string\"\nref = \"book\"\non_delete = \"cascade\"\nrequired = true\n");
+    write(
+        "ruleset/entities/job.toml",
+        "format_version = 1\nid = \"job\"\ntitle = \"Job\"\n[[field]]\nname = \"text\"\ntype = \"string\"\n");
+    write(
+        "ruleset/rules/del.book.toml",
+        """
+        id = "del.book"
+        effect = "destructive"
+        needs = ["entity.query", "entity.delete"]
+        [trigger]
+        kind = "event"
+        type = "entity.created"
+        filter = "event.data.type == 'job'"
+        [[action]]
+        id = "find"
+        capability = "entity.query"
+        args = { type = "book", limit = 1 }
+        [[action]]
+        id = "del"
+        capability = "entity.delete"
+        args = { type = "book", id = { cel = "results.find.items[0].id" } }
+        """);
+    String archive =
+        """
+        format_version = 1
+
+        [[grant]]
+        id = "archive"
+        layer = "ruleset"
+        capability = "mail.move"
+        [grant.args]
+        folder = { equals = "Archive" }
+
+        """;
+    write(
+        "policy.toml",
+        archive
+            + """
+            [[grant]]
+            id = "del"
+            layer = "ruleset"
+            capability = "entity.delete"
+            [grant.args]
+            type = { equals = "book" }
+
+            [[grant]]
+            id = "find"
+            layer = "ruleset"
+            capability = "entity.query"
+            [grant.args]
+            type = { equals = "book" }
+            """);
+    start();
+    String book =
+        (String)
+            ((Response.EntityItem) ask(new Request.EntityCreate("book", Map.of("title", "T"))))
+                .entity()
+                .get("id");
+    String note =
+        (String)
+            ((Response.EntityItem)
+                    ask(new Request.EntityCreate("note", Map.of("text", "n", "book", book))))
+                .entity()
+                .get("id");
+    // a person's own delete is refused while it is restricted nowhere, and cascades
+    ask(new Request.EntityCreate("job", Map.of("text", "clean up")));
+    await(
+        () ->
+            logHas(
+                x ->
+                    "del.book".equals(x.ruleId())
+                        && x.message() != null
+                        && x.message().contains("would also delete note " + note)));
+    assertThat(((Response.EntityItem) ask(new Request.EntityRead("book", book, null))).found())
+        .isTrue();
+    assertThat(((Response.EntityItem) ask(new Request.EntityRead("note", note, null))).found())
+        .isTrue();
+
+    // with a grant for the notes too the same delete goes through
+    write(
+        "policy.toml",
+        archive
+            + """
+            [[grant]]
+            id = "del"
+            layer = "ruleset"
+            capability = "entity.delete"
+            [grant.args]
+            type = { one_of = ["book", "note"] }
+
+            [[grant]]
+            id = "find"
+            layer = "ruleset"
+            capability = "entity.query"
+            [grant.args]
+            type = { equals = "book" }
+            """);
+    assertThat(ask(new Request.Reload())).isInstanceOf(Response.Done.class);
+    ask(new Request.EntityCreate("job", Map.of("text", "clean up again")));
+    await(() -> !exists("book", book));
+    assertThat(((Response.EntityItem) ask(new Request.EntityRead("note", note, null))).found())
+        .isFalse();
+
+    // a person at the socket needs no grant for the cascade
+    String b2 =
+        (String)
+            ((Response.EntityItem) ask(new Request.EntityCreate("book", Map.of("title", "U"))))
+                .entity()
+                .get("id");
+    ask(new Request.EntityCreate("note", Map.of("text", "m", "book", b2)));
+    assertThat(ask(new Request.EntityDelete("book", b2))).isInstanceOf(Response.Done.class);
+    assertThat(
+            ((Response.EntityPage)
+                    ask(new Request.EntityQuery("note", null, null, false, null, null)))
+                .total())
+        .isZero();
+    // and a missing target is said
+    assertThat(ask(new Request.EntityCreate("note", Map.of("text", "x", "book", "nobody"))))
+        .isEqualTo(
+            new Response.Error("field 'book' refers to book 'nobody', which does not exist"));
   }
 
   @Test

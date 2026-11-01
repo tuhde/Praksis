@@ -5,9 +5,11 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import it.uhde.praksis.capability.EntityStorage;
 import it.uhde.praksis.capability.Event;
+import it.uhde.praksis.capability.Filter;
 import it.uhde.praksis.capability.Query;
 import it.uhde.praksis.capability.StorageException;
 import it.uhde.praksis.capability.StoredEntity;
+import it.uhde.praksis.capability.ValueType;
 import it.uhde.praksis.store.Store;
 import it.uhde.praksis.store.StoreException;
 import java.nio.charset.StandardCharsets;
@@ -50,8 +52,21 @@ public final class EntityService {
    * @param idempotencyKey the same for every retry of the same action, or null
    * @param by who makes the change, kept as {@code created_by} and {@code updated_by}: {@code
    *     rule:<id>} or {@link #USER}
+   * @param refusal asked before a delete does something else than the call names (it deletes or
+   *     changes the entities that refer to the one deleted): whether the caller may also do that;
+   *     empty means yes, else why not
    */
-  public record Call(boolean dryRun, Optional<Event> cause, String idempotencyKey, String by) {
+  public record Call(
+      boolean dryRun,
+      Optional<Event> cause,
+      String idempotencyKey,
+      String by,
+      java.util.function.BiFunction<String, Map<String, Object>, Optional<String>> refusal) {
+    /** A call that may do everything it asks for. */
+    public Call(boolean dryRun, Optional<Event> cause, String idempotencyKey, String by) {
+      this(dryRun, cause, idempotencyKey, by, (capability, args) -> Optional.empty());
+    }
+
     /** A call by a person, outside any rule. */
     public Call(boolean dryRun, Optional<Event> cause, String idempotencyKey) {
       this(dryRun, cause, idempotencyKey, USER);
@@ -70,6 +85,9 @@ public final class EntityService {
   private final Clock clock;
   private final Consumer<Event> queued;
   private final EntityStorages storages;
+
+  /** Writes are done one at a time, so that a reference cannot be broken by a write in between. */
+  private final Object writes = new Object();
 
   /**
    * Creates the service. Every change stores an event ({@code entity.created}, {@code
@@ -246,13 +264,14 @@ public final class EntityService {
                 .toString();
     Instant now = Instant.parse(EntityValues.time(clock.instant()));
     EntityStorage storage = storages.of(typeId);
-    synchronized (storage) {
+    synchronized (writes) {
       try {
         Optional<StoredEntity> existing = storage.get(typeId, id);
         if (existing.isPresent() && key != null && !key.isEmpty()) {
           return toMap(type, existing.get());
         }
         uniqueFree(storage, type, id, fields);
+        referencesExist(type, fields, Map.of());
         StoredEntity made = new StoredEntity(id, now, now, call.by(), call.by(), fields);
         if (!call.dryRun()) {
           Event e = event(call, "created", type, id, inTypeOrder(type, fields.keySet()), "");
@@ -380,7 +399,7 @@ public final class EntityService {
     Map<String, Object> changes = checked(type, values, false);
     Instant now = Instant.parse(EntityValues.time(clock.instant()));
     EntityStorage storage = storages.of(typeId);
-    synchronized (storage) {
+    synchronized (writes) {
       try {
         Optional<StoredEntity> old = storage.get(typeId, id);
         if (old.isEmpty()) {
@@ -407,6 +426,7 @@ public final class EntityService {
           return Optional.of(toMap(type, old.get()));
         }
         uniqueFree(storage, type, id, fields);
+        referencesExist(type, fields, old.get().fields());
         StoredEntity updated =
             new StoredEntity(
                 id, old.get().created(), now, old.get().createdBy(), call.by(), fields);
@@ -442,23 +462,240 @@ public final class EntityService {
     return delete(typeId, id, Call.of(dryRun));
   }
 
-  /** Deletes an entity and emits {@code entity.deleted}; false if there was none. */
+  /**
+   * Deletes an entity and emits {@code entity.deleted}; false if there was none. What refers to the
+   * entity decides what else happens, as the fields that refer to its type say ({@code on_delete}):
+   * a {@code restrict} reference refuses the delete, a {@code cascade} reference deletes the entity
+   * that has it (and what refers to that), a {@code set_null} reference is cleared. The caller must
+   * be allowed to do all of it, or nothing is done.
+   */
   public boolean delete(String typeId, String id, Call call) throws EntityException {
     EntityType type = type(typeId);
     checkDepth(call);
-    EntityStorage storage = storages.of(typeId);
-    synchronized (storage) {
+    synchronized (writes) {
       try {
-        if (storage.get(typeId, id).isEmpty()) {
+        if (storages.of(typeId).get(typeId, id).isEmpty()) {
           return false;
         }
-        if (!call.dryRun()) {
-          Event e = event(call, "deleted", type, id, null, ":" + clock.instant().toEpochMilli());
-          commit(storage, e, () -> storage.delete(typeId, id));
+        Plan plan = plan(typeId, id, call);
+        if (call.dryRun()) {
+          return true;
+        }
+        Instant now = Instant.parse(EntityValues.time(clock.instant()));
+        for (Plan.Change c : plan.changes()) {
+          EntityStorage st = storages.of(c.type());
+          EntityType t = type(c.type());
+          StoredEntity before = st.get(c.type(), c.id()).orElseThrow();
+          Map<String, Object> fields = new LinkedHashMap<>(before.fields());
+          fields.putAll(c.set());
+          c.clear().forEach(fields::remove);
+          StoredEntity changed =
+              new StoredEntity(
+                  c.id(), before.created(), now, before.createdBy(), call.by(), fields);
+          List<String> names = new ArrayList<>(c.set().keySet());
+          names.addAll(c.clear());
+          Event e =
+              event(call, "updated", t, c.id(), inTypeOrder(t, names), ":" + now.toEpochMilli());
+          commit(st, e, () -> st.replace(c.type(), changed));
+        }
+        for (int i = plan.deletes().size() - 1; i >= 0; i--) {
+          Plan.Ref r = plan.deletes().get(i);
+          EntityStorage st = storages.of(r.type());
+          Event e =
+              event(
+                  call,
+                  "deleted",
+                  type(r.type()),
+                  r.id(),
+                  null,
+                  ":" + clock.instant().toEpochMilli());
+          commit(st, e, () -> st.delete(r.type(), r.id()));
         }
         return true;
       } catch (StorageException e) {
         throw failed(e);
+      }
+    }
+  }
+
+  /** What deleting an entity does besides: the entities deleted too and the references cleared. */
+  private record Plan(List<Ref> deletes, List<Change> changes) {
+    record Ref(String type, String id) {}
+
+    /** An entity that is changed: fields set to a new value, fields removed. */
+    record Change(String type, String id, Map<String, Object> set, List<String> clear) {}
+  }
+
+  private Plan plan(String typeId, String id, Call call) throws EntityException, StorageException {
+    // the entities that go with it: the closure of the cascade references
+    java.util.LinkedHashSet<Plan.Ref> deletes = new java.util.LinkedHashSet<>();
+    deletes.add(new Plan.Ref(typeId, id));
+    java.util.ArrayDeque<Plan.Ref> queue = new java.util.ArrayDeque<>(deletes);
+    while (!queue.isEmpty()) {
+      Plan.Ref r = queue.poll();
+      for (EntityCatalog.Reference ref : catalog.referencesTo(r.type())) {
+        if (ref.field().onDelete() != EntityType.OnDelete.CASCADE) {
+          continue;
+        }
+        for (String rid : referrers(ref, r.id())) {
+          Plan.Ref next = new Plan.Ref(ref.type().id(), rid);
+          if (deletes.add(next)) {
+            queue.add(next);
+          }
+        }
+      }
+    }
+    // what else refers to any of them
+    Map<Plan.Ref, Map<String, Object>> set = new LinkedHashMap<>();
+    Map<Plan.Ref, List<String>> clear = new LinkedHashMap<>();
+    for (Plan.Ref r : deletes) {
+      for (EntityCatalog.Reference ref : catalog.referencesTo(r.type())) {
+        for (String rid : referrers(ref, r.id())) {
+          Plan.Ref other = new Plan.Ref(ref.type().id(), rid);
+          if (deletes.contains(other)) {
+            continue;
+          }
+          if (ref.field().onDelete() != EntityType.OnDelete.SET_NULL) {
+            throw new EntityException(
+                "cannot delete "
+                    + r.type()
+                    + " "
+                    + r.id()
+                    + ": "
+                    + other.type()
+                    + " "
+                    + other.id()
+                    + " refers to it in the field '"
+                    + ref.field().name()
+                    + "'");
+          }
+          StoredEntity holder =
+              storages.of(other.type()).get(other.type(), other.id()).orElseThrow();
+          String name = ref.field().name();
+          if (ref.field().type() == ValueType.LIST) {
+            @SuppressWarnings("unchecked")
+            List<Object> now =
+                new ArrayList<>(
+                    (List<Object>)
+                        set.getOrDefault(other, Map.of())
+                            .getOrDefault(name, holder.fields().get(name)));
+            now.remove(r.id());
+            set.computeIfAbsent(other, k -> new LinkedHashMap<>()).put(name, now);
+          } else {
+            clear.computeIfAbsent(other, k -> new ArrayList<>()).add(name);
+          }
+        }
+      }
+    }
+    // the caller may do all of it
+    for (Plan.Ref r : deletes) {
+      if (r.type().equals(typeId) && r.id().equals(id)) {
+        continue;
+      }
+      Optional<String> why =
+          call.refusal().apply("entity.delete", Map.of("type", r.type(), "id", r.id()));
+      if (why.isPresent()) {
+        throw new EntityException(
+            "deleting "
+                + typeId
+                + " "
+                + id
+                + " would also delete "
+                + r.type()
+                + " "
+                + r.id()
+                + ", which this call may not do: "
+                + why.get());
+      }
+    }
+    List<Plan.Change> changes = new ArrayList<>();
+    java.util.Set<Plan.Ref> changed = new java.util.LinkedHashSet<>(set.keySet());
+    changed.addAll(clear.keySet());
+    for (Plan.Ref r : changed) {
+      Map<String, Object> values = set.getOrDefault(r, Map.of());
+      List<String> cleared = clear.getOrDefault(r, List.of());
+      Map<String, Object> asked = new LinkedHashMap<>(values);
+      cleared.forEach(n -> asked.put(n, null));
+      Optional<String> why =
+          call.refusal()
+              .apply("entity.update", Map.of("type", r.type(), "id", r.id(), "values", asked));
+      if (why.isPresent()) {
+        throw new EntityException(
+            "deleting "
+                + typeId
+                + " "
+                + id
+                + " would also change "
+                + r.type()
+                + " "
+                + r.id()
+                + ", which this call may not do: "
+                + why.get());
+      }
+      changes.add(new Plan.Change(r.type(), r.id(), values, cleared));
+    }
+    return new Plan(new ArrayList<>(deletes), changes);
+  }
+
+  /** The ids of the entities whose field refers to the entity. */
+  private List<String> referrers(EntityCatalog.Reference ref, String targetId)
+      throws StorageException {
+    String type = ref.type().id();
+    String field = ref.field().name();
+    boolean list = ref.field().type() == ValueType.LIST;
+    EntityStorage st = storages.of(type);
+    Optional<Filter> filter =
+        list ? Optional.empty() : Optional.of(new Filter.Equals(field, targetId));
+    List<String> out = new ArrayList<>();
+    int offset = 0;
+    while (true) {
+      EntityStorage.Page page =
+          st.query(type, new Query(filter, "id", false, Query.MAX_LIMIT, offset));
+      for (StoredEntity e : page.items()) {
+        if (!list || (e.fields().get(field) instanceof List<?> l && l.contains(targetId))) {
+          out.add(e.id());
+        }
+      }
+      offset += page.items().size();
+      if (page.items().isEmpty() || offset >= page.total()) {
+        return out;
+      }
+    }
+  }
+
+  /** The target of every reference that is new in these fields must exist. */
+  private void referencesExist(EntityType type, Map<String, Object> fields, Map<String, Object> old)
+      throws EntityException, StorageException {
+    for (EntityType.Field f : type.fields()) {
+      if (f.ref().isEmpty() || fields.get(f.name()) == null) {
+        continue;
+      }
+      Object value = fields.get(f.name());
+      List<Object> ids = value instanceof List<?> l ? new ArrayList<>(l) : List.of(value);
+      Object before = old.get(f.name());
+      List<?> known =
+          before instanceof List<?> l ? l : before == null ? List.of() : List.of(before);
+      for (Object each : ids) {
+        if (!(each instanceof String ref) || ref.isEmpty()) {
+          throw new EntityException(
+              "field '"
+                  + f.name()
+                  + "' must "
+                  + (value instanceof List ? "be a list of ids" : "be an id"));
+        }
+        if (known.contains(ref)) {
+          continue;
+        }
+        if (storages.of(f.ref().get()).get(f.ref().get(), ref).isEmpty()) {
+          throw new EntityException(
+              "field '"
+                  + f.name()
+                  + "' refers to "
+                  + f.ref().get()
+                  + " '"
+                  + ref
+                  + "', which does not exist");
+        }
       }
     }
   }
