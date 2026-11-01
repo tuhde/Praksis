@@ -2,6 +2,7 @@
 package it.uhde.praksis.store;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import it.uhde.praksis.capability.Event;
 import java.nio.file.Path;
@@ -204,6 +205,8 @@ class StoreTest {
       s.execute("DROP TABLE promoted");
       s.execute("DROP TABLE shadow_rule");
       s.execute("DROP TABLE shadow_run");
+      s.execute("DROP TABLE entity");
+      s.execute("DROP TABLE entity_unique");
       s.execute("PRAGMA user_version = 1");
     }
     try (Store store = Store.open(file)) {
@@ -312,11 +315,84 @@ class StoreTest {
       s.execute("DROP TABLE promoted");
       s.execute("DROP TABLE shadow_rule");
       s.execute("DROP TABLE shadow_run");
+      s.execute("DROP TABLE entity");
+      s.execute("DROP TABLE entity_unique");
       s.execute("PRAGMA user_version = 3");
     }
     try (Store store = Store.open(file)) {
       assertThat(store.pending()).hasSize(1);
       assertThat(store.promoted()).isEmpty();
+    }
+  }
+
+  @Test
+  void aDatabaseOfTheFourthVersionGainsTheEntityTables() throws Exception {
+    Path file = dir.resolve("praksis.db");
+    try (Store store = Store.open(file)) {
+      store.append(event("e1", Optional.empty(), Map.of()));
+    }
+    try (var c = java.sql.DriverManager.getConnection("jdbc:sqlite:" + file);
+        var s = c.createStatement()) {
+      s.execute("DROP TABLE entity");
+      s.execute("DROP TABLE entity_unique");
+      s.execute("PRAGMA user_version = 4");
+    }
+    try (Store store = Store.open(file)) {
+      assertThat(store.pending()).hasSize(1);
+      int rows =
+          store.transaction(
+              null,
+              c -> {
+                try (var s = c.createStatement();
+                    var r = s.executeQuery("SELECT count(*) FROM entity")) {
+                  r.next();
+                  return r.getInt(1);
+                }
+              });
+      assertThat(rows).isZero();
+    }
+  }
+
+  @Test
+  void aTransactionIsCommittedOrRolledBackAndTellsItsTopic() throws Exception {
+    List<String> topics = new java.util.concurrent.CopyOnWriteArrayList<>();
+    try (Store store = Store.open(dir.resolve("praksis.db"))) {
+      store.onChange(topics::add);
+      Store.Work<Integer> insert =
+          c -> {
+            try (var s = c.createStatement()) {
+              s.execute("INSERT INTO entity VALUES ('t', 'a', 'x', 'x', '{}')");
+            }
+            return 1;
+          };
+      Store.Work<Integer> count =
+          c -> {
+            try (var s = c.createStatement();
+                var r = s.executeQuery("SELECT count(*) FROM entity")) {
+              r.next();
+              return r.getInt(1);
+            }
+          };
+      store.transaction("entities", insert);
+      assertThat(topics).containsExactly("entities");
+      assertThat(store.transaction(null, count)).isEqualTo(1);
+
+      assertThatThrownBy(
+              () ->
+                  store.transaction(
+                      "entities",
+                      c -> {
+                        try (var s = c.createStatement()) {
+                          s.execute("INSERT INTO entity VALUES ('t', 'b', 'x', 'x', '{}')");
+                        }
+                        throw new IllegalStateException("stop");
+                      }))
+          .hasMessage("stop");
+      assertThat(store.transaction(null, count)).isEqualTo(1);
+      assertThat(topics).hasSize(1);
+      // the same key twice is a database error, and the store stays usable
+      assertThatThrownBy(() -> store.transaction(null, insert)).isInstanceOf(StoreException.class);
+      assertThat(store.transaction(null, count)).isEqualTo(1);
     }
   }
 

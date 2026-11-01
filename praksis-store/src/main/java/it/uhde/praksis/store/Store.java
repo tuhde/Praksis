@@ -26,7 +26,7 @@ import java.util.Optional;
  * <p>All methods are safe to call from several threads.
  */
 public final class Store implements AutoCloseable {
-  private static final int SCHEMA_VERSION = 4;
+  private static final int SCHEMA_VERSION = 5;
 
   private final Connection connection;
   private volatile java.util.function.Consumer<String> changes = topic -> {};
@@ -179,6 +179,64 @@ public final class Store implements AutoCloseable {
         s.execute("CREATE INDEX shadow_run_rule ON shadow_run (rule_id, hash, seq)");
         s.execute("PRAGMA user_version = 4");
       }
+    }
+    if (version < 5) {
+      try (Statement s = connection.createStatement()) {
+        s.execute(
+            """
+            CREATE TABLE entity (
+              type TEXT NOT NULL,
+              id TEXT NOT NULL,
+              created TEXT NOT NULL,
+              updated TEXT NOT NULL,
+              json TEXT NOT NULL,
+              PRIMARY KEY (type, id)
+            ) WITHOUT ROWID""");
+        s.execute(
+            """
+            CREATE TABLE entity_unique (
+              type TEXT NOT NULL,
+              field TEXT NOT NULL,
+              value TEXT NOT NULL,
+              id TEXT NOT NULL,
+              PRIMARY KEY (type, field, value)
+            ) WITHOUT ROWID""");
+        s.execute("PRAGMA user_version = 5");
+      }
+    }
+  }
+
+  /** Work done on the database inside {@link #transaction}. */
+  @FunctionalInterface
+  public interface Work<T> {
+    T run(Connection connection) throws SQLException, StoreException;
+  }
+
+  /**
+   * Runs {@code work} on the connection as one transaction, with the store locked: it is committed
+   * if the work returns and rolled back if it throws. This is for the entity tables ({@code entity}
+   * and {@code entity_unique}), which {@code praksis-entity} reads and writes; the work must not
+   * call the store. {@code topic} is reported to the change listener after a commit, or not at all
+   * if it is null.
+   */
+  public synchronized <T> T transaction(String topic, Work<T> work) throws StoreException {
+    try {
+      connection.setAutoCommit(false);
+      try {
+        T result = work.run(connection);
+        connection.commit();
+        if (topic != null) {
+          changes.accept(topic);
+        }
+        return result;
+      } catch (SQLException | StoreException | RuntimeException e) {
+        connection.rollback();
+        throw e;
+      } finally {
+        connection.setAutoCommit(true);
+      }
+    } catch (SQLException e) {
+      throw new StoreException("database error: " + e.getMessage(), e);
     }
   }
 

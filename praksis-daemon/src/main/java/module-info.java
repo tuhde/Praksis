@@ -3,6 +3,7 @@
 module it.uhde.praksis.daemon {
   requires it.uhde.praksis.docs;
   requires it.uhde.praksis.engine;
+  requires it.uhde.praksis.entity;
   requires it.uhde.praksis.git;
   requires it.uhde.praksis.protocol;
   requires it.uhde.praksis.expression;

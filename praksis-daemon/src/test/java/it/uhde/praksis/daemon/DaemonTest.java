@@ -178,7 +178,7 @@ class DaemonTest {
               s -> {
                 assertThat(s.ruleset()).isEqualTo("mail");
                 assertThat(s.rules()).isEqualTo(1);
-                assertThat(s.modules()).containsExactly("maildir", "praksis");
+                assertThat(s.modules()).containsExactly("maildir", "praksis", "entity");
                 assertThat(s.pid()).isEqualTo(ProcessHandle.current().pid());
               });
       await(() -> logHas(x -> "OK".equals(x.outcome())));

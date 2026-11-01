@@ -85,6 +85,7 @@ final class Layers {
     }
     if (names != null) {
       names.add(Builtins.MODULE); // the part of the daemon that offers the praksis.* capabilities
+      names.add(it.uhde.praksis.entity.EntityCapabilities.MODULE); // and the entity.* ones
     }
     this.modules = names;
   }

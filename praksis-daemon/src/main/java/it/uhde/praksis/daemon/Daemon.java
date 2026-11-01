@@ -13,6 +13,9 @@ import it.uhde.praksis.engine.LoadedModules;
 import it.uhde.praksis.engine.ModuleLoadException;
 import it.uhde.praksis.engine.ModuleLoader;
 import it.uhde.praksis.engine.StoreAuditLog;
+import it.uhde.praksis.entity.EntityCapabilities;
+import it.uhde.praksis.entity.EntityCatalog;
+import it.uhde.praksis.entity.EntityService;
 import it.uhde.praksis.expression.ExpressionCompiler;
 import it.uhde.praksis.expression.Expressions;
 import it.uhde.praksis.git.GitCli;
@@ -64,6 +67,8 @@ public final class Daemon implements AutoCloseable {
   private LoadedModules modules;
   private Ruleset ruleset;
   private Store store;
+  private final java.util.concurrent.atomic.AtomicReference<EntityService> entityService =
+      new java.util.concurrent.atomic.AtomicReference<>();
   private Engine engine;
   private Approvals approvals;
   private Shadows shadows;
@@ -92,6 +97,25 @@ public final class Daemon implements AutoCloseable {
     return daemon;
   }
 
+  /**
+   * Opens the entity service with the types of the {@code entities/} directories of all layers,
+   * bottom to top. A file with a problem is left out and reported, like a rule that is skipped; the
+   * calls that use its type then fail with "unknown entity type".
+   */
+  private void openEntities(Layers layers, Store store) throws DaemonException {
+    try {
+      List<java.nio.file.Path> directories =
+          layers.sources(layers.readLock()).stream().map(LayerStack.Source::directory).toList();
+      EntityCatalog.Loaded loaded = EntityCatalog.load(directories);
+      loaded
+          .problems()
+          .forEach(p -> LOG.log(System.Logger.Level.WARNING, "entity type left out: " + p));
+      entityService.set(new EntityService(store, loaded.catalog(), clock));
+    } catch (java.io.IOException e) {
+      throw new DaemonException("cannot read the entity types: " + e.getMessage(), e);
+    }
+  }
+
   private void open() throws DaemonException {
     int socketBytes =
         config.socket().toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
@@ -115,6 +139,8 @@ public final class Daemon implements AutoCloseable {
               config.enabledModules());
       Agent agent = new Agent();
       modules = Builtins.add(modules, agent);
+      EntityCapabilities entityCapabilities = new EntityCapabilities(entityService::get);
+      modules = modules.with(EntityCapabilities.descriptor(), entityCapabilities.capabilities());
       if (config.offline()) {
         modules = modules.offline();
         LOG.log(
@@ -133,6 +159,7 @@ public final class Daemon implements AutoCloseable {
       ruleset = effective.ruleset();
       GrantPolicy access = accessPolicy(config, modules.catalog(), effective);
       store = Store.open(config.database());
+      openEntities(layers, store);
       agent.bind(
           config, layers, modules, store, () -> effective, access, new StoreAuditLog(store), clock);
       store.onChange(topics::bump);

@@ -3,6 +3,8 @@
 module it.uhde.praksis.entity {
   requires transitive it.uhde.praksis.capability;
   requires transitive it.uhde.praksis.ruleset;
+  requires transitive it.uhde.praksis.store;
+  requires java.sql;
   requires com.fasterxml.jackson.databind;
   requires com.fasterxml.jackson.dataformat.toml;
 

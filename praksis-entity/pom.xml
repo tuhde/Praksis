@@ -27,6 +27,11 @@
       <version>${project.version}</version>
     </dependency>
     <dependency>
+      <groupId>it.uhde</groupId>
+      <artifactId>praksis-store</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
       <groupId>com.fasterxml.jackson.dataformat</groupId>
       <artifactId>jackson-dataformat-toml</artifactId>
     </dependency>
