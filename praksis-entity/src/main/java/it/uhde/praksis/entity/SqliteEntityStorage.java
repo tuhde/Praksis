@@ -357,7 +357,7 @@ public final class SqliteEntityStorage implements EntityStorage {
             + ")";
       }
       case Filter.Prefix p -> {
-        params.add((long) p.value().length());
+        params.add((long) p.value().codePointCount(0, p.value().length()));
         params.add(p.value());
         return "substr(" + expr(p.field()) + ", 1, ?) = ?";
       }

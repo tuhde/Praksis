@@ -98,4 +98,80 @@ class LoadedModulesOfflineTest {
     assertThat(told).containsExactlyInAnyOrder("h.read", "h.source");
     assertThat(offline.descriptors()).hasSize(2);
   }
+
+  /** An entity storage that notes whether it was told. */
+  private static final class Store implements it.uhde.praksis.capability.EntityStorage {
+    final List<String> told;
+
+    Store(List<String> told) {
+      this.told = told;
+    }
+
+    @Override
+    public String name() {
+      return "db";
+    }
+
+    @Override
+    public void useOffline() {
+      told.add("db");
+    }
+
+    @Override
+    public void open(List<it.uhde.praksis.capability.StorageType> types) {}
+
+    @Override
+    public java.util.Optional<it.uhde.praksis.capability.StoredEntity> get(String t, String id) {
+      return java.util.Optional.empty();
+    }
+
+    @Override
+    public void insert(String t, it.uhde.praksis.capability.StoredEntity e) {}
+
+    @Override
+    public void replace(String t, it.uhde.praksis.capability.StoredEntity e) {}
+
+    @Override
+    public boolean delete(String t, String id) {
+      return false;
+    }
+
+    @Override
+    public Page query(String t, it.uhde.praksis.capability.Query q) {
+      return new Page(List.of(), 0);
+    }
+  }
+
+  @Test
+  void anEntityStorageIsToldWhenItIsMadeOfflineUnlessItAlwaysNeedsTheNetwork() {
+    List<String> told = new ArrayList<>();
+    ModuleDescriptor local =
+        new ModuleDescriptor(
+            "local", "1", List.of(), List.of(), List.of(), List.of(), List.of(), List.of("db"));
+    ModuleDescriptor remote =
+        new ModuleDescriptor(
+            "remote",
+            "1",
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of("net"),
+            List.of("net"));
+    LoadedModules modules =
+        new LoadedModules(
+            List.of(local, remote),
+            Map.of(),
+            List.of(),
+            Map.of("db", () -> new Store(told), "net", () -> new Store(told)));
+    LoadedModules offline = modules.offline();
+    assertThat(told).isEmpty(); // told when an instance is made, not before
+    assertThat(offline.newBackend("db")).isPresent();
+    assertThat(told).containsExactly("db");
+    assertThatThrownBy(() -> offline.newBackend("net"))
+        .hasMessageContaining("offline = true")
+        .hasMessageContaining("'net'");
+    assertThat(modules.newBackend("db")).isPresent(); // online: nobody is told
+    assertThat(told).containsExactly("db");
+  }
 }

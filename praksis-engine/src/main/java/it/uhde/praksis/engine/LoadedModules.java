@@ -111,7 +111,11 @@ public final class LoadedModules implements AutoCloseable {
                       throw new IllegalStateException(
                           "offline = true: the storage '" + name + "' needs the network");
                     }
-                    : factory));
+                    : () -> {
+                      EntityStorage storage = factory.get();
+                      storage.useOffline();
+                      return storage;
+                    }));
     return new LoadedModules(descriptors, out, kept, backendsOffline);
   }
 

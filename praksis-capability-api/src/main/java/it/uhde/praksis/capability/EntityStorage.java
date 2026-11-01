@@ -35,6 +35,15 @@ public interface EntityStorage extends AutoCloseable {
   /** Hands over the way to get secrets, once, after {@link #configure}. */
   default void useCredentials(Credentials credentials) {}
 
+  /**
+   * Tells the storage, once, before {@link #configure}, that the program runs offline: data of a
+   * person must not leave this machine. A storage that cannot tell in advance (a JDBC database may
+   * be a file or a server) refuses what would leave it, in {@link #open}. A backend that always
+   * reaches other machines lists its name in {@code network} of its {@code module.toml} and is not
+   * used at all. The default does nothing.
+   */
+  default void useOffline() {}
+
   /** Hands over a directory the backend may keep files in, once, after {@link #configure}. */
   default void useDataDirectory(Path directory) {}
 

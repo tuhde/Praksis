@@ -225,6 +225,17 @@ public record Policy(
    * @param layers the names of the configured layers
    */
   public List<Problem> check(ModuleCatalog catalog, Set<String> layers) {
+    return check(catalog, layers, Set.of());
+  }
+
+  /**
+   * As {@link #check(ModuleCatalog, Set)}, where a credential binding may also name these other
+   * parts that ask for secrets (an entity storage is {@code entity-storage:<name>}).
+   *
+   * @param otherComponents names that are not capabilities or event sources but may ask
+   */
+  public List<Problem> check(
+      ModuleCatalog catalog, Set<String> layers, Set<String> otherComponents) {
     List<Problem> problems = new ArrayList<>();
     for (Grant g : grants) {
       String where = "policy.toml: grant '" + g.id() + "'";
@@ -254,7 +265,9 @@ public record Policy(
     for (CredentialBinding b : credentials) {
       String where = "policy.toml: credential '" + b.name() + "'";
       for (String component : b.components()) {
-        if (catalog.capability(component).isEmpty() && !catalog.hasSource(component)) {
+        if (catalog.capability(component).isEmpty()
+            && !catalog.hasSource(component)
+            && !otherComponents.contains(component)) {
           problems.add(
               new Problem(where, "no capability or event source named '" + component + "'"));
         }

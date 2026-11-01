@@ -390,7 +390,7 @@ final class Admin {
       try {
         Policy policy = Policy.load(config.policy());
         policy
-            .check(modules.catalog(), config.layerNames())
+            .check(modules.catalog(), config.layerNames(), config.storageComponents())
             .forEach(p -> findings.add(policyFinding(p)));
         Permissions.Needs needs = Permissions.of(e, modules.catalog());
         Permissions.Diff diff =

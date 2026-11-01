@@ -109,6 +109,25 @@ class PolicyTest {
   }
 
   @Test
+  void aCredentialMayNameAnEntityStorageThatIsConfigured() throws Exception {
+    Policy policy =
+        load(
+            """
+            format_version = 1
+            [credential."db"]
+            command = ["/bin/echo", "x"]
+            capabilities = ["entity-storage:shop", "entity-storage:other"]
+            """);
+    assertThat(policy.check(catalog(), Set.of(), Set.of("entity-storage:shop")))
+        .extracting(Problem::message)
+        .containsExactly("no capability or event source named 'entity-storage:other'");
+    assertThat(
+            policy.check(
+                catalog(), Set.of(), Set.of("entity-storage:shop", "entity-storage:other")))
+        .isEmpty();
+  }
+
+  @Test
   void matchersCompareNumbersAndStringsExactly() {
     assertThat(new ArgMatcher.Equals(5L).matches(5)).isTrue();
     assertThat(new ArgMatcher.Equals(5L).matches("5")).isFalse();

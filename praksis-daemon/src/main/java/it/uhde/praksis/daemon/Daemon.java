@@ -395,7 +395,8 @@ public final class Daemon implements AutoCloseable {
       throws DaemonException {
     try {
       Policy policy = Policy.load(config.policy());
-      List<Problem> problems = policy.check(catalog, config.layerNames());
+      List<Problem> problems =
+          policy.check(catalog, config.layerNames(), config.storageComponents());
       if (!problems.isEmpty()) {
         throw new RulesetException(problems);
       }

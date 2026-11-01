@@ -131,6 +131,16 @@ public record DaemonConfig(
     return home.resolve("policy.toml");
   }
 
+  /**
+   * The names under which the configured entity storages ask for secrets: {@code
+   * entity-storage:<name>}. A credential binding in {@code policy.toml} lists them.
+   */
+  public java.util.Set<String> storageComponents() {
+    return entities.storages().keySet().stream()
+        .map(n -> "entity-storage:" + n)
+        .collect(java.util.stream.Collectors.toSet());
+  }
+
   /** The names of the ruleset layers: the configured ones, else the single layer "ruleset". */
   public Set<String> layerNames() {
     return layers.isEmpty()

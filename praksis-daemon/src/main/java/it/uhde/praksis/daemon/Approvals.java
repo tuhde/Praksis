@@ -356,7 +356,8 @@ final class Approvals implements Denials {
   private void applyPolicy() throws Failure, StoreException {
     try {
       Policy policy = Policy.load(config.policy());
-      List<Problem> problems = policy.check(catalog, config.layerNames());
+      List<Problem> problems =
+          policy.check(catalog, config.layerNames(), config.storageComponents());
       if (!problems.isEmpty()) {
         throw new RulesetException(problems);
       }
