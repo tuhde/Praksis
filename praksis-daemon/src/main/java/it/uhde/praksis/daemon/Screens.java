@@ -10,7 +10,6 @@ import it.uhde.praksis.protocol.Request;
 import it.uhde.praksis.protocol.Response;
 import it.uhde.praksis.ruleset.LayerStack;
 import it.uhde.praksis.ruleset.Permissions;
-import it.uhde.praksis.ruleset.Policy;
 import it.uhde.praksis.ruleset.Problem;
 import it.uhde.praksis.ruleset.RulesetException;
 import it.uhde.praksis.ruleset.RulesetValidator;
@@ -262,12 +261,14 @@ final class Screens {
             ruleset ->
                 new ArrayList<>(
                     new RulesetValidator(compiler, modules.catalog()).validate(ruleset)),
-            effective -> {
+            (effective, sources) -> {
               try {
                 Permissions.Needs needs = Permissions.of(effective, modules.catalog());
                 return new Layers.Access(
                     needs,
-                    Permissions.uncovered(needs.requirements(), Policy.load(config.policy())));
+                    Permissions.uncovered(
+                        needs.requirements(),
+                        EntitySets.policy(config, EntitySets.members(sources))));
               } catch (RulesetException e) {
                 throw new DaemonException(
                     "cannot work out what the rules need: " + e.getMessage(), e);

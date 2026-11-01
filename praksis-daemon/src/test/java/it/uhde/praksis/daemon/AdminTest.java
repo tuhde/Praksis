@@ -255,7 +255,7 @@ class AdminTest {
                     "mail.move",
                     Map.of("folder", new ArgMatcher.OneOf(List.of((Object[]) folders))),
                     Optional.empty())));
-    return effective -> {
+    return (effective, sources) -> {
       Permissions.Needs needs = Permissions.of(effective, CATALOG);
       return new Layers.Access(needs, Permissions.uncovered(needs.requirements(), policy));
     };

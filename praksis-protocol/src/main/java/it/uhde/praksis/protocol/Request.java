@@ -50,6 +50,7 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.StagedShow.class, name = "staged-show"),
   @JsonSubTypes.Type(value = Request.StagedDrop.class, name = "staged-drop"),
   @JsonSubTypes.Type(value = Request.EntityTypes.class, name = "entity-types"),
+  @JsonSubTypes.Type(value = Request.EntitySets.class, name = "entity-sets"),
   @JsonSubTypes.Type(value = Request.EntityQuery.class, name = "entity-query"),
   @JsonSubTypes.Type(value = Request.EntityRead.class, name = "entity-read"),
   @JsonSubTypes.Type(value = Request.EntityCreate.class, name = "entity-create"),
@@ -423,6 +424,9 @@ public sealed interface Request {
    * {@link EntityRead#reveal} names them.
    */
   record EntityTypes() implements Request {}
+
+  /** Lists the entity sets. Answered with {@link Response.EntitySetList}. */
+  record EntitySets() implements Request {}
 
   /**
    * Lists the entities of a type. Answered with {@link Response.EntityPage}.

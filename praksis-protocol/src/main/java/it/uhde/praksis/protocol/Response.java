@@ -29,6 +29,7 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Response.ViewList.class, name = "views"),
   @JsonSubTypes.Type(value = Response.HelpTopics.class, name = "help-topics"),
   @JsonSubTypes.Type(value = Response.EntityTypeList.class, name = "entity-types"),
+  @JsonSubTypes.Type(value = Response.EntitySetList.class, name = "entity-sets"),
   @JsonSubTypes.Type(value = Response.EntityPage.class, name = "entity-page"),
   @JsonSubTypes.Type(value = Response.EntityItem.class, name = "entity-item"),
   @JsonSubTypes.Type(value = Response.HelpPage.class, name = "help-page"),
@@ -1106,6 +1107,7 @@ public sealed interface Response {
      * @param owner the layer that defined it last, or null
      * @param hash its hash, which a replacement names in {@code based_on}
      * @param fields the declared fields
+     * @param sets the entity sets that hold the type, also through other sets
      */
     public record EntityTypeInfo(
         String id,
@@ -1113,7 +1115,8 @@ public sealed interface Response {
         String description,
         String owner,
         String hash,
-        List<EntityField> fields) {}
+        List<EntityField> fields,
+        List<String> sets) {}
 
     /**
      * One field.
@@ -1152,4 +1155,33 @@ public sealed interface Response {
    */
   record EntityItem(boolean found, Map<String, Object> entity, Map<String, Object> revealed)
       implements Response {}
+
+  /**
+   * The entity sets.
+   *
+   * @param sets the sets
+   */
+  record EntitySetList(List<EntitySetInfo> sets) implements Response {
+    /**
+     * One set.
+     *
+     * @param id the id
+     * @param title what a person sees
+     * @param description what it is for, or null
+     * @param owner the layer that defined it last, or null
+     * @param hash its hash, which a replacement names in {@code based_on}
+     * @param types the types named in the set
+     * @param sets the sets named in the set
+     * @param members all the types in it, also those of the sets inside it
+     */
+    public record EntitySetInfo(
+        String id,
+        String title,
+        String description,
+        String owner,
+        String hash,
+        List<String> types,
+        List<String> sets,
+        List<String> members) {}
+  }
 }

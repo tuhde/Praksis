@@ -127,6 +127,112 @@ class PolicyTest {
         .isEmpty();
   }
 
+  private static ModuleCatalog entityCatalog() {
+    CapabilityDescriptor read =
+        new CapabilityDescriptor(
+            "entity.read",
+            EffectClass.READ_ONLY,
+            true,
+            List.of(
+                new FieldDescriptor("type", ValueType.STRING, true, true),
+                new FieldDescriptor("id", ValueType.STRING, true, false)),
+            List.of());
+    return new ModuleCatalog(
+        List.of(
+            new ModuleDescriptor("entity", "1", List.of(), List.of(read), List.of(), List.of())));
+  }
+
+  @Test
+  void aGrantMayNameASetOfTypesAndCoversWhatTheSetHoldsNow() throws Exception {
+    Policy policy =
+        load(
+            """
+            format_version = 1
+            [[grant]]
+            id = "people"
+            layer = "mine"
+            capability = "entity.read"
+            [grant.args]
+            type = { set = "people" }
+            """);
+    ArgMatcher m = policy.grants().get(0).args().get("type");
+    assertThat(m).isInstanceOf(ArgMatcher.InSet.class);
+    assertThat(m.describe()).isEqualTo("set = \"people\"");
+    // unresolved, it allows nothing
+    assertThat(policy.find("mine", "entity.read", Map.of("type", "contact"))).isEmpty();
+
+    Policy resolved = policy.withSets(Map.of("people", Set.of("contact", "author")));
+    assertThat(resolved.find("mine", "entity.read", Map.of("type", "contact"))).isPresent();
+    assertThat(resolved.find("mine", "entity.read", Map.of("type", "author"))).isPresent();
+    assertThat(resolved.find("mine", "entity.read", Map.of("type", "invoice"))).isEmpty();
+    assertThat(resolved.find("other", "entity.read", Map.of("type", "contact"))).isEmpty();
+    // the grant still says set = "people", and a set that grew is covered without a new grant
+    assertThat(resolved.grants().get(0).args().get("type").describe())
+        .isEqualTo("set = \"people\"");
+    assertThat(
+            policy
+                .withSets(Map.of("people", Set.of("invoice")))
+                .find("mine", "entity.read", Map.of("type", "invoice")))
+        .isPresent();
+    assertThat(policy.withSets(Map.of()).find("mine", "entity.read", Map.of("type", "contact")))
+        .isEmpty();
+  }
+
+  @Test
+  void aSetMatcherIsCheckedAgainstTheSetsAndWhereItWorks() throws Exception {
+    Policy policy =
+        load(
+            """
+            format_version = 1
+            [[grant]]
+            id = "ok"
+            layer = "mine"
+            capability = "entity.read"
+            [grant.args]
+            type = { set = "people" }
+            [[grant]]
+            id = "unknown"
+            layer = "mine"
+            capability = "entity.read"
+            [grant.args]
+            type = { set = "nope" }
+            """);
+    assertThat(policy.check(entityCatalog(), Set.of("mine"), Set.of(), Set.of("people")))
+        .extracting(Problem::message)
+        .containsExactly("no entity set named 'nope' (sets: [people])");
+    assertThat(policy.check(entityCatalog(), Set.of("mine"), Set.of(), null)).isEmpty();
+
+    Policy elsewhere =
+        load(
+            """
+            format_version = 1
+            [[grant]]
+            id = "wrong"
+            layer = "mine"
+            capability = "mail.move"
+            [grant.args]
+            folder = { set = "people" }
+            [[grant]]
+            id = "wrong-param"
+            layer = "mine"
+            capability = "entity.read"
+            [grant.args]
+            id = { set = "people" }
+            """);
+    assertThat(elsewhere.check(catalog(), Set.of("mine"), Set.of(), Set.of("people")))
+        .extracting(Problem::message)
+        .anyMatch(
+            m ->
+                m.contains(
+                    "'set' only works on the parameter 'type' of the entity capabilities: 'folder'"));
+    assertThatThrownBy(
+            () ->
+                load(
+                    "format_version = 1\n[[grant]]\nid = \"g\"\nlayer = \"l\"\ncapability = \"c\"\n"
+                        + "[grant.args]\ntype = { set = 5 }\n"))
+        .hasMessageContaining("'set' must be the name of a set");
+  }
+
   @Test
   void matchersCompareNumbersAndStringsExactly() {
     assertThat(new ArgMatcher.Equals(5L).matches(5)).isTrue();

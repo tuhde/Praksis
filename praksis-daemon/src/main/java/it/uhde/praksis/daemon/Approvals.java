@@ -59,9 +59,16 @@ final class Approvals implements Denials {
   private final ModuleCatalog catalog;
   private final Clock clock;
   private Engine engine;
+  private final Map<String, Set<String>> entitySets;
 
   Approvals(
-      DaemonConfig config, Store store, GrantPolicy access, ModuleCatalog catalog, Clock clock) {
+      DaemonConfig config,
+      Store store,
+      GrantPolicy access,
+      ModuleCatalog catalog,
+      Clock clock,
+      Map<String, Set<String>> entitySets) {
+    this.entitySets = entitySets;
     this.config = config;
     this.store = store;
     this.access = access;
@@ -355,9 +362,10 @@ final class Approvals implements Denials {
   /** Reads {@code policy.toml}, checks it, and uses it from now on. */
   private void applyPolicy() throws Failure, StoreException {
     try {
-      Policy policy = Policy.load(config.policy());
+      Policy policy = EntitySets.policy(config, entitySets);
       List<Problem> problems =
-          policy.check(catalog, config.layerNames(), config.storageComponents());
+          policy.check(
+              catalog, config.layerNames(), config.storageComponents(), entitySets.keySet());
       if (!problems.isEmpty()) {
         throw new RulesetException(problems);
       }

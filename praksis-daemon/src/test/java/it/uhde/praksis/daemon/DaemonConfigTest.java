@@ -244,8 +244,11 @@ class DaemonConfigTest {
         [entities.bind]
         contact = "contacts"
         book = "books"
+        [entities.bind_set]
+        people = "contacts"
         """);
     EntitiesConfig e = DaemonConfig.load(home).entities();
+    assertThat(e.bindSet()).containsEntry("people", "contacts");
     assertThat(e.storages()).containsOnlyKeys("contacts", "books");
     assertThat(e.storages().get("contacts").backend()).isEqualTo("json-file");
     assertThat(e.storages().get("contacts").settings())
@@ -268,11 +271,16 @@ class DaemonConfigTest {
         [entities.bind]
         note = "nowhere"
         memo = 3
+        [entities.bind_set]
+        people = "nowhere"
+        crowd = 4
         """);
     assertThatThrownBy(() -> DaemonConfig.load(home))
         .hasMessageContaining("unknown key 'what'")
         .hasMessageContaining("missing 'backend'")
         .hasMessageContaining("'note' is bound to 'nowhere', which is not in [entities.storage.*]")
-        .hasMessageContaining("'memo' must name a storage");
+        .hasMessageContaining("'memo' must name a storage")
+        .hasMessageContaining("the set 'people' is bound to 'nowhere'")
+        .hasMessageContaining("'crowd' must name a storage");
   }
 }

@@ -586,6 +586,7 @@ public final class Praksis {
               + " 'show --reveal'.",
       subcommands = {
         Praksis.EntitiesCommand.TypesCommand.class,
+        Praksis.EntitiesCommand.SetsCommand.class,
         Praksis.EntitiesCommand.ListCommand.class,
         Praksis.EntitiesCommand.ShowCommand.class,
         Praksis.EntitiesCommand.CreateCommand.class,
@@ -674,6 +675,9 @@ public final class Praksis {
           if (t.description() != null) {
             out().printf("    %s%n", t.description());
           }
+          if (!t.sets().isEmpty()) {
+            out().printf("    in the sets: %s%n", String.join(", ", t.sets()));
+          }
           for (Response.EntityTypeList.EntityField f : t.fields()) {
             out()
                 .printf(
@@ -684,6 +688,38 @@ public final class Praksis {
                     f.unique() ? ", unique" : "",
                     f.sensitive() ? ", sensitive" : "");
           }
+        }
+        return 0;
+      }
+    }
+
+    @Command(
+        name = "sets",
+        description =
+            "Lists the entity sets: named groups of entity types (and of other sets) that a grant"
+                + " or a storage can name once. A set gives no rights of its own.")
+    static final class SetsCommand extends Base {
+      @Override
+      public Integer call() {
+        Response response = send(new Request.EntitySets());
+        if (!(response instanceof Response.EntitySetList l)) {
+          return exitCodeFor(response);
+        }
+        if (l.sets().isEmpty()) {
+          out().println("No entity sets. A layer adds one as entity-sets/<id>.toml.");
+        }
+        for (Response.EntitySetList.EntitySetInfo s : l.sets()) {
+          out().printf("%s  %s  [layer %s]%n", s.id(), s.title(), s.owner());
+          if (s.description() != null) {
+            out().printf("    %s%n", s.description());
+          }
+          if (!s.types().isEmpty()) {
+            out().printf("    types: %s%n", String.join(", ", s.types()));
+          }
+          if (!s.sets().isEmpty()) {
+            out().printf("    sets: %s%n", String.join(", ", s.sets()));
+          }
+          out().printf("    holds: %s%n", String.join(", ", s.members()));
         }
         return 0;
       }

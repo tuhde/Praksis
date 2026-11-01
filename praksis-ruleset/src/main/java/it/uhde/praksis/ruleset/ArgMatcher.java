@@ -66,6 +66,36 @@ public sealed interface ArgMatcher {
     }
   }
 
+  /**
+   * Allows the members of a named set (for the entity types: the types of an entity set and of the
+   * sets inside it). A grant names the set and not its members, so what the grant covers follows
+   * the set; Praksis resolves the members when it reads the policy ({@link Policy#withSets}), and
+   * an unresolved matcher allows nothing.
+   *
+   * @param set the name of the set
+   * @param members the members now, empty until resolved
+   */
+  record InSet(String set, List<String> members) implements ArgMatcher {
+    public InSet {
+      Objects.requireNonNull(set, "set");
+      members = List.copyOf(members);
+    }
+
+    public InSet(String set) {
+      this(set, List.of());
+    }
+
+    @Override
+    public boolean matches(Object other) {
+      return members.stream().anyMatch(m -> same(m, other));
+    }
+
+    @Override
+    public String describe() {
+      return "set = " + show(set);
+    }
+  }
+
   private static boolean same(Object a, Object b) {
     if (a instanceof Number x && b instanceof Number y) {
       return x.longValue() == y.longValue() && x.doubleValue() == y.doubleValue();

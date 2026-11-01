@@ -22,6 +22,7 @@ import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
 
@@ -388,10 +389,28 @@ final class Admin {
                   .verify(e.ruleset())
                   .findings());
       try {
-        Policy policy = Policy.load(config.policy());
+        Map<String, Set<String>> candidateSets = EntitySets.members(candidate.sources());
+        Policy policy = EntitySets.policy(config, candidateSets);
         policy
-            .check(modules.catalog(), config.layerNames(), config.storageComponents())
+            .check(
+                modules.catalog(),
+                config.layerNames(),
+                config.storageComponents(),
+                candidateSets.keySet())
             .forEach(p -> findings.add(policyFinding(p)));
+        if (isCandidate) {
+          // a set that grows gives the grants that name it access nobody decided on
+          EntitySets.growth(
+                  policy, EntitySets.members(layers.sources(layers.readLock())), candidateSets)
+              .forEach(
+                  g ->
+                      findings.add(
+                          new Verifier.Finding(
+                              Verifier.Severity.ERROR,
+                              "access",
+                              "entity-sets",
+                              "new access: " + g)));
+        }
         Permissions.Needs needs = Permissions.of(e, modules.catalog());
         Permissions.Diff diff =
             isCandidate
@@ -644,7 +663,7 @@ final class Admin {
    * Works out the access a ruleset needs and which of it the grants in policy.toml do not cover.
    */
   static Layers.AccessCheck accessFor(DaemonConfig config) {
-    return effective -> {
+    return (effective, sources) -> {
       try (LoadedModules modules =
           Builtins.add(
               ModuleLoader.load(
@@ -655,7 +674,8 @@ final class Admin {
               new Agent())) {
         Permissions.Needs needs = Permissions.of(effective, modules.catalog());
         List<Permissions.Requirement> uncovered =
-            Permissions.uncovered(needs.requirements(), Policy.load(config.policy()));
+            Permissions.uncovered(
+                needs.requirements(), EntitySets.policy(config, EntitySets.members(sources)));
         return new Layers.Access(needs, uncovered);
       } catch (ModuleLoadException | RulesetException ex) {
         throw new DaemonException("cannot work out what the rules need: " + ex.getMessage(), ex);

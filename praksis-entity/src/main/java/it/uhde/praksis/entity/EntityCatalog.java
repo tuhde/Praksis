@@ -5,10 +5,13 @@ import it.uhde.praksis.ruleset.Problem;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * The entity types in use. They come from the {@code entities/} directories of the layers, lowest
@@ -20,14 +23,22 @@ import java.util.Optional;
 public final class EntityCatalog {
   private final Map<String, EntityType> types;
   private final Map<String, String> owners;
+  private final Map<String, EntitySet> sets;
+  private final Map<String, String> setOwners;
 
   public EntityCatalog(Map<String, EntityType> types) {
-    this(types, Map.of());
+    this(types, Map.of(), Map.of(), Map.of());
   }
 
-  private EntityCatalog(Map<String, EntityType> types, Map<String, String> owners) {
+  private EntityCatalog(
+      Map<String, EntityType> types,
+      Map<String, String> owners,
+      Map<String, EntitySet> sets,
+      Map<String, String> setOwners) {
     this.types = Map.copyOf(types);
     this.owners = Map.copyOf(owners);
+    this.sets = Map.copyOf(sets);
+    this.setOwners = Map.copyOf(setOwners);
   }
 
   /** A catalog without types. */
@@ -107,7 +118,160 @@ public final class EntityCatalog {
         }
       }
     }
-    return new Loaded(new EntityCatalog(all, owners), problems);
+    // the sets, layered like the types
+    Map<String, EntitySet> allSets = new LinkedHashMap<>();
+    Map<String, String> setDefinedBy = new LinkedHashMap<>();
+    Map<String, String> setOwners = new LinkedHashMap<>();
+    for (Source layer : layers) {
+      EntityTypes.LoadedSets loaded = EntityTypes.loadSets(layer.directory());
+      for (Problem p : loaded.problems()) {
+        problems.add(new Problem("layer '" + layer.name() + "': " + p.location(), p.message()));
+      }
+      for (EntitySet set : loaded.sets().values()) {
+        String where = "layer '" + layer.name() + "': entity-sets/" + set.id() + ".toml";
+        EntitySet below = allSets.get(set.id());
+        if (below == null && set.basedOn().isEmpty()) {
+          allSets.put(set.id(), set);
+          setDefinedBy.put(set.id(), layer.name());
+          setOwners.put(set.id(), layer.name());
+        } else if (below == null) {
+          problems.add(
+              new Problem(
+                  where, "'based_on' names a set, but there is no set '" + set.id() + "' below"));
+        } else if (set.basedOn().isEmpty()) {
+          problems.add(
+              new Problem(
+                  where,
+                  "set '"
+                      + set.id()
+                      + "' already exists (added by '"
+                      + setDefinedBy.get(set.id())
+                      + "'); to replace it name its hash in 'based_on': "
+                      + below.hash()));
+        } else if (!set.basedOn().get().equals(below.hash())) {
+          problems.add(
+              new Problem(
+                  where,
+                  "the set '"
+                      + set.id()
+                      + "' has changed since this replacement was written: it is now "
+                      + below.hash()
+                      + ", not "
+                      + set.basedOn().get()));
+        } else {
+          allSets.put(set.id(), set);
+          setOwners.put(set.id(), layer.name());
+        }
+      }
+    }
+    checkSets(allSets, setOwners, all, problems);
+    return new Loaded(new EntityCatalog(all, owners, allSets, setOwners), problems);
+  }
+
+  /** Every member of a set exists, sets do not contain themselves, and they are not too deep. */
+  private static void checkSets(
+      Map<String, EntitySet> sets,
+      Map<String, String> owners,
+      Map<String, EntityType> types,
+      List<Problem> problems) {
+    for (EntitySet set : sets.values()) {
+      String where = "layer '" + owners.get(set.id()) + "': entity-sets/" + set.id() + ".toml";
+      for (String type : set.types()) {
+        if (!types.containsKey(type)) {
+          problems.add(
+              new Problem(where, "'types' has '" + type + "', which is not an entity type"));
+        }
+      }
+      for (String inner : set.sets()) {
+        if (!sets.containsKey(inner)) {
+          problems.add(
+              new Problem(where, "'sets' has '" + inner + "', which is not an entity set"));
+        }
+      }
+      String cycle = cycle(sets, set.id(), List.of());
+      if (cycle != null) {
+        problems.add(new Problem(where, "the sets contain each other: " + cycle));
+      } else if (depth(sets, set.id()) > EntitySet.MAX_DEPTH) {
+        problems.add(
+            new Problem(where, "sets are nested more than " + EntitySet.MAX_DEPTH + " deep"));
+      }
+    }
+  }
+
+  private static String cycle(Map<String, EntitySet> sets, String id, List<String> path) {
+    if (path.contains(id)) {
+      List<String> loop = new ArrayList<>(path.subList(path.indexOf(id), path.size()));
+      loop.add(id);
+      return String.join(" > ", loop);
+    }
+    EntitySet set = sets.get(id);
+    if (set == null) {
+      return null;
+    }
+    List<String> next = new ArrayList<>(path);
+    next.add(id);
+    for (String inner : set.sets()) {
+      String c = cycle(sets, inner, next);
+      if (c != null) {
+        return c;
+      }
+    }
+    return null;
+  }
+
+  private static int depth(Map<String, EntitySet> sets, String id) {
+    EntitySet set = sets.get(id);
+    if (set == null) {
+      return 0;
+    }
+    int deepest = 0;
+    for (String inner : set.sets()) {
+      deepest = Math.max(deepest, depth(sets, inner));
+    }
+    return 1 + deepest;
+  }
+
+  /** The sets by id. */
+  public Map<String, EntitySet> sets() {
+    return sets;
+  }
+
+  /** The layer that defined the set last. */
+  public Optional<String> setOwner(String id) {
+    return Optional.ofNullable(setOwners.get(id));
+  }
+
+  /**
+   * The ids of all types in the set: its own and those of the sets inside it, to any depth. Empty
+   * for a set that does not exist.
+   */
+  public Set<String> members(String setId) {
+    Set<String> out = new TreeSet<>();
+    collect(setId, out, new HashSet<>());
+    return out;
+  }
+
+  private void collect(String setId, Set<String> out, Set<String> visited) {
+    EntitySet set = sets.get(setId);
+    if (set == null || !visited.add(setId)) {
+      return;
+    }
+    set.types().stream().filter(types::containsKey).forEach(out::add);
+    set.sets().forEach(inner -> collect(inner, out, visited));
+  }
+
+  /** The members of every set, by set id: what a policy needs to know about the sets. */
+  public Map<String, Set<String>> allMembers() {
+    Map<String, Set<String>> out = new java.util.TreeMap<>();
+    sets.keySet().forEach(id -> out.put(id, members(id)));
+    return out;
+  }
+
+  /** The ids of the sets that hold the type, directly or inside other sets. */
+  public Set<String> setsOf(String typeId) {
+    Set<String> out = new TreeSet<>();
+    sets.keySet().stream().filter(id -> members(id).contains(typeId)).forEach(out::add);
+    return out;
   }
 
   /**

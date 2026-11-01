@@ -344,6 +344,10 @@ Works with entities, the data that Praksis keeps for rules and screens, as a per
 
 Lists the entity types and their fields.
 
+#### praksis entities sets
+
+Lists the entity sets: named groups of entity types (and of other sets) that a grant or a storage can name once. A set gives no rights of its own.
+
 #### praksis entities list
 
 Lists the entities of a type.

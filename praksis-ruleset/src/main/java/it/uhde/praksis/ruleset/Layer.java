@@ -49,7 +49,16 @@ public record Layer(
     List<View> views) {
   private static final Pattern HASH = Pattern.compile("sha256:[0-9a-f]{64}");
   private static final Set<String> DIRECTORIES =
-      Set.of("rules", "replace", "patch", "disable", "views", "entities", "tests", "docs");
+      Set.of(
+          "rules",
+          "replace",
+          "patch",
+          "disable",
+          "views",
+          "entities",
+          "entity-sets",
+          "tests",
+          "docs");
 
   public Layer {
     adds = List.copyOf(adds);
@@ -94,7 +103,7 @@ public record Layer(
           problems.add(
               new Problem(
                   entryName + "/",
-                  "unknown directory; a layer has rules, replace, patch, disable, views and entities"));
+                  "unknown directory; a layer has rules, replace, patch, disable, views, entities and entity-sets"));
         }
       }
     } catch (IOException e) {

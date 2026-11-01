@@ -61,6 +61,7 @@ class WireTest {
     for (Request r :
         List.of(
             new Request.EntityTypes(),
+            new Request.EntitySets(),
             new Request.EntityQuery(
                 "note", Map.of("op", "equals", "field", "a", "value", "b"), "name", true, 5, 10),
             new Request.EntityQuery("note", null, null, false, null, null),
@@ -85,7 +86,19 @@ class WireTest {
                         "sha256:x",
                         List.of(
                             new Response.EntityTypeList.EntityField(
-                                "subject", "string", true, false, false, null))))),
+                                "subject", "string", true, false, false, null)),
+                        List.of("people")))),
+            new Response.EntitySetList(
+                List.of(
+                    new Response.EntitySetList.EntitySetInfo(
+                        "people",
+                        "People",
+                        null,
+                        "mine",
+                        "sha256:y",
+                        List.of("a"),
+                        List.of("b"),
+                        List.of("a", "c")))),
             new Response.EntityPage(List.of(Map.of("id", "1", "subject", "x")), 7),
             new Response.EntityItem(true, Map.of("id", "1"), Map.of("iban", "DE01")),
             new Response.EntityItem(false, null, null))) {

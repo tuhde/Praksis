@@ -57,6 +57,7 @@ final class Entities {
     try {
       return switch (request) {
         case Request.EntityTypes t -> types();
+        case Request.EntitySets t -> sets();
         case Request.EntityQuery q -> query(q);
         case Request.EntityRead r -> read(r);
         case Request.EntityCreate c -> create(c);
@@ -92,7 +93,27 @@ final class Entities {
                                         f.unique(),
                                         f.sensitive(),
                                         f.description().orElse(null)))
-                            .toList()))
+                            .toList(),
+                        List.copyOf(catalog.setsOf(t.id()))))
+            .toList());
+  }
+
+  private Response sets() throws EntityException {
+    var catalog = service().catalog();
+    return new Response.EntitySetList(
+        catalog.sets().values().stream()
+            .sorted(java.util.Comparator.comparing(it.uhde.praksis.entity.EntitySet::id))
+            .map(
+                s ->
+                    new Response.EntitySetList.EntitySetInfo(
+                        s.id(),
+                        s.title(),
+                        s.description().orElse(null),
+                        catalog.setOwner(s.id()).orElse(null),
+                        s.hash(),
+                        s.types(),
+                        s.sets(),
+                        List.copyOf(catalog.members(s.id()))))
             .toList());
   }
 

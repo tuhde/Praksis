@@ -7,6 +7,7 @@ import it.uhde.praksis.git.GitException;
 import it.uhde.praksis.git.GitSource;
 import it.uhde.praksis.ruleset.LayerStack;
 import it.uhde.praksis.ruleset.Permissions;
+import it.uhde.praksis.ruleset.Policy;
 import it.uhde.praksis.ruleset.Problem;
 import it.uhde.praksis.ruleset.Ruleset;
 import it.uhde.praksis.ruleset.RulesetException;
@@ -58,10 +59,11 @@ final class Layers {
   /** Works out the access of a ruleset against the grants in the home directory. */
   @FunctionalInterface
   interface AccessCheck {
-    Access of(LayerStack.Effective effective) throws DaemonException;
+    Access of(LayerStack.Effective effective, List<LayerStack.Source> sources)
+        throws DaemonException;
 
     /** A check that finds nothing needed, for callers that have no modules or policy at hand. */
-    AccessCheck NONE = e -> new Access(new Permissions.Needs(Map.of()), List.of());
+    AccessCheck NONE = (e, sources) -> new Access(new Permissions.Needs(Map.of()), List.of());
   }
 
   private final DaemonConfig config;
@@ -312,8 +314,9 @@ final class Layers {
     Map<String, Pin> next = nextPins(names, old);
 
     LayerStack.Effective after;
+    List<LayerStack.Source> nextSources = sources(next);
     try {
-      after = LayerStack.resolve(sources(next), config.params(), modules);
+      after = LayerStack.resolve(nextSources, config.params(), modules);
     } catch (RulesetException e) {
       return new Update(false, List.of(), e.problems());
     }
@@ -326,8 +329,9 @@ final class Layers {
     List<String> accessLines = new ArrayList<>();
     boolean refused = false;
     if (before != null) {
-      Access needed = access.of(after);
-      Permissions.Diff diff = Permissions.diff(access.of(before).needs(), needed.needs());
+      Access needed = access.of(after, nextSources);
+      Permissions.Diff diff =
+          Permissions.diff(access.of(before, sources(old)).needs(), needed.needs());
       List<Permissions.Requirement> ungranted = needed.uncovered();
       List<Permissions.Requirement> newlyUngranted =
           diff.added().stream().filter(ungranted::contains).toList();
@@ -342,14 +346,29 @@ final class Layers {
                             + (newlyUngranted.contains(r) ? "   NOT GRANTED" : "   granted")));
         diff.removed().forEach(r -> accessLines.add("  - " + r.describe()));
       }
-      refused = !newlyUngranted.isEmpty() && !acceptNewAccess;
+      List<String> growth = List.of();
+      try {
+        growth =
+            EntitySets.growth(
+                Policy.load(config.policy()),
+                EntitySets.members(sources(old)),
+                EntitySets.members(nextSources));
+      } catch (RulesetException e) {
+        // the policy is checked where it is used
+      }
+      if (!growth.isEmpty()) {
+        accessLines.add("Entity sets that grants name would grow:");
+        growth.forEach(g -> accessLines.add("  + " + g));
+      }
+      refused = (!newlyUngranted.isEmpty() || !growth.isEmpty()) && !acceptNewAccess;
       if (refused) {
         accessLines.add(
             "Not updated: "
-                + newlyUngranted.size()
-                + " new kind(s) of access are not covered by a grant. Add grants for them, or run"
-                + " the update again with --accept-new-access (the rules then run, but each call"
-                + " is denied until it is granted).");
+                + (newlyUngranted.size() + growth.size())
+                + " new kind(s) of access are not covered by a grant or would be covered without"
+                + " a decision. Add grants, or run the update again with --accept-new-access (the"
+                + " rules then run, but each call is denied until it is granted; a set that grew"
+                + " is covered at once).");
         accessLines.add("The pins are unchanged.");
         return new Update(false, accessLines, List.of(), true);
       }

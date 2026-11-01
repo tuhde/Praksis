@@ -48,6 +48,54 @@ public final class EntityTypes {
   }
 
   /**
+   * What was read from the sets of a directory.
+   *
+   * @param sets the valid sets by id, in file name order
+   * @param problems everything that is wrong; empty if all files are valid
+   */
+  public record LoadedSets(Map<String, EntitySet> sets, List<Problem> problems) {}
+
+  /** Reads one set from the text of {@code entity-sets/<fileId>.toml}. */
+  public static Optional<EntitySet> parseSet(String toml, String fileId, List<Problem> problems) {
+    String where = "entity-sets/" + fileId + ".toml";
+    Map<String, Object> raw;
+    try {
+      @SuppressWarnings("unchecked")
+      Map<String, Object> read = MAPPER.readValue(toml, Map.class);
+      raw = read;
+    } catch (JsonProcessingException e) {
+      problems.add(new Problem(where, "not valid TOML: " + e.getOriginalMessage()));
+      return Optional.empty();
+    }
+    return EntitySet.parse(new Table(raw, where, problems), problems, fileId, raw);
+  }
+
+  /** Reads every {@code entity-sets/*.toml} below a layer directory. */
+  public static LoadedSets loadSets(Path directory) throws IOException {
+    Path dir = directory.resolve("entity-sets");
+    Map<String, EntitySet> sets = new LinkedHashMap<>();
+    List<Problem> problems = new ArrayList<>();
+    if (!Files.isDirectory(dir)) {
+      return new LoadedSets(sets, problems);
+    }
+    List<Path> files;
+    try (Stream<Path> s = Files.list(dir)) {
+      files = s.filter(p -> !Files.isDirectory(p)).sorted().toList();
+    }
+    for (Path file : files) {
+      String name = file.getFileName().toString();
+      if (!name.endsWith(".toml")) {
+        problems.add(new Problem("entity-sets/" + name, "is not a .toml file"));
+        continue;
+      }
+      String id = name.substring(0, name.length() - ".toml".length());
+      parseSet(Files.readString(file, StandardCharsets.UTF_8), id, problems)
+          .ifPresent(t -> sets.put(t.id(), t));
+    }
+    return new LoadedSets(sets, problems);
+  }
+
+  /**
    * Reads every {@code entities/*.toml} below a module or layer directory. A directory without
    * {@code entities/} has no types.
    */

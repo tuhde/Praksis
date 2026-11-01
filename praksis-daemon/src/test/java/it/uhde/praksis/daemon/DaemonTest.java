@@ -502,6 +502,143 @@ class DaemonTest {
   }
 
   @Test
+  void aGrantOnAnEntitySetCoversTheTypesOfTheSetAndNoOthers() throws Exception {
+    for (String type : List.of("note", "memo", "secret")) {
+      write(
+          "ruleset/entities/" + type + ".toml",
+          "format_version = 1\nid = \""
+              + type
+              + "\"\ntitle = \""
+              + type
+              + "\"\n[[field]]\nname = \"text\"\ntype = \"string\"\n");
+    }
+    write(
+        "ruleset/entity-sets/docs.toml",
+        "format_version = 1\nid = \"docs\"\ntitle = \"Documents\"\ntypes = [\"note\"]\nsets = [\"more\"]\n");
+    write(
+        "ruleset/entity-sets/more.toml",
+        "format_version = 1\nid = \"more\"\ntitle = \"More\"\ntypes = [\"memo\"]\n");
+    for (String type : List.of("memo", "secret")) {
+      write(
+          "ruleset/rules/make." + type + ".toml",
+          "id = \"make."
+              + type
+              + "\"\neffect = \"local-write\"\nneeds = [\"entity.create\"]\n[trigger]\nkind = \"event\"\n"
+              + "type = \"mail.received\"\n[[action]]\nid = \"make\"\ncapability = \"entity.create\"\n"
+              + "args = { type = \""
+              + type
+              + "\", values = { text = \"x\" } }\n");
+    }
+    write(
+        "policy.toml",
+        """
+        format_version = 1
+
+        [[grant]]
+        id = "archive"
+        layer = "ruleset"
+        capability = "mail.move"
+        [grant.args]
+        folder = { equals = "Archive" }
+
+        [[grant]]
+        id = "docs"
+        layer = "ruleset"
+        capability = "entity.create"
+        [grant.args]
+        type = { set = "docs" }
+        """);
+    Files.writeString(mail.resolve("new/1700000000.M1P2.host"), "Subject: hi\n\nbody\n");
+    start();
+    await(
+        () -> {
+          try {
+            return ask(new Request.Audit(50)) instanceof Response.AuditLines a
+                && a.lines().stream().anyMatch(l -> "make.memo".equals(l.ruleId()) && l.allowed())
+                && a.lines().stream()
+                    .anyMatch(l -> "make.secret".equals(l.ruleId()) && !l.allowed());
+          } catch (IOException e) {
+            return false;
+          }
+        });
+    // memo is in the set through the set inside it; secret is in none
+    assertThat(
+            ((Response.EntityPage)
+                    ask(new Request.EntityQuery("memo", null, null, false, null, null)))
+                .total())
+        .isEqualTo(1);
+    assertThat(
+            ((Response.EntityPage)
+                    ask(new Request.EntityQuery("secret", null, null, false, null, null)))
+                .total())
+        .isZero();
+
+    assertThat(ask(new Request.EntitySets()))
+        .isInstanceOfSatisfying(
+            Response.EntitySetList.class,
+            l -> {
+              assertThat(l.sets()).extracting(x -> x.id()).containsExactly("docs", "more");
+              var docs = l.sets().get(0);
+              assertThat(docs.types()).containsExactly("note");
+              assertThat(docs.sets()).containsExactly("more");
+              assertThat(docs.members()).containsExactly("memo", "note");
+              assertThat(docs.owner()).isEqualTo("ruleset");
+            });
+    assertThat(ask(new Request.EntityTypes()))
+        .isInstanceOfSatisfying(
+            Response.EntityTypeList.class,
+            l -> {
+              var byId =
+                  l.types().stream()
+                      .collect(java.util.stream.Collectors.toMap(x -> x.id(), x -> x));
+              assertThat(byId.get("memo").sets()).containsExactly("docs", "more");
+              assertThat(byId.get("note").sets()).containsExactly("docs");
+              assertThat(byId.get("secret").sets()).isEmpty();
+            });
+    // the refused rule asks for exactly its type
+    assertThat(ask(new Request.Approvals()))
+        .isInstanceOfSatisfying(
+            Response.ApprovalList.class,
+            a ->
+                assertThat(a.approvals())
+                    .anySatisfy(
+                        r -> {
+                          assertThat(r.ruleId()).isEqualTo("make.secret");
+                          assertThat(r.args()).containsEntry("type", "secret");
+                        }));
+  }
+
+  @Test
+  void aTypeBoundThroughASetIsKeptWhereTheSetIsBound() throws Exception {
+    write(
+        "ruleset/entities/note.toml",
+        "format_version = 1\nid = \"note\"\ntitle = \"Note\"\n[[field]]\nname = \"text\"\ntype = \"string\"\n");
+    write(
+        "ruleset/entity-sets/docs.toml",
+        "format_version = 1\nid = \"docs\"\ntitle = \"Docs\"\ntypes = [\"note\"]\n");
+    write(
+        "praksis.toml",
+        Files.readString(home.resolve("praksis.toml"))
+            + """
+            [entities.storage.files]
+            backend = "json-file"
+            [entities.bind_set]
+            docs = "files"
+            """);
+    // the binding resolves, then the missing module is reported by the storage that it names
+    assertThatThrownBy(this::start)
+        .hasMessageContaining("[entities.storage.files]: no module provides the entity storage")
+        .hasMessageContaining("'json-file'");
+    write(
+        "praksis.toml",
+        Files.readString(home.resolve("praksis.toml"))
+            .replace("docs = \"files\"", "ghosts = \"files\""));
+    assertThatThrownBy(this::start)
+        .hasMessageContaining("[entities.bind_set]: there is no entity set 'ghosts'")
+        .hasMessageContaining("sets: [docs]");
+  }
+
+  @Test
   void theDocumentationIsServed() throws Exception {
     start();
     {

@@ -115,31 +115,21 @@ public final class Daemon implements AutoCloseable {
    * bottom to top. A file with a problem, or a layer that replaces a type wrongly, stops the start,
    * like a rule that is not valid.
    */
-  private void openEntities(Layers layers, Store store, GrantPolicy access) throws DaemonException {
-    try {
-      EntityCatalog.Loaded loaded = EntityCatalog.load(entitySources(layers));
-      if (!loaded.problems().isEmpty()) {
-        throw new DaemonException(
-            "the entity types are not valid:\n  "
-                + String.join("\n  ", loaded.problems().stream().map(Object::toString).toList()));
-      }
-      EntityCatalog catalog = loaded.catalog();
-      entityStorages = openStorages(catalog, store, access);
-      entityService.set(
-          new EntityService(
-              store,
-              catalog,
-              clock,
-              event -> {
-                Engine running = engine;
-                if (running != null) {
-                  running.queueStored(event);
-                } // else the event is pending in the store and recover() finds it
-              },
-              entityStorages));
-    } catch (java.io.IOException e) {
-      throw new DaemonException("cannot read the entity types: " + e.getMessage(), e);
-    }
+  private void openEntities(EntityCatalog catalog, Store store, GrantPolicy access)
+      throws DaemonException {
+    entityStorages = openStorages(catalog, store, access);
+    entityService.set(
+        new EntityService(
+            store,
+            catalog,
+            clock,
+            event -> {
+              Engine running = engine;
+              if (running != null) {
+                running.queueStored(event);
+              } // else the event is pending in the store and recover() finds it
+            },
+            entityStorages));
   }
 
   /**
@@ -150,21 +140,12 @@ public final class Daemon implements AutoCloseable {
   private EntityStorages openStorages(EntityCatalog catalog, Store store, GrantPolicy access)
       throws DaemonException {
     EntitiesConfig cfg = config.entities();
-    for (String type : cfg.bind().keySet()) {
-      if (catalog.get(type).isEmpty()) {
-        throw new DaemonException(
-            "[entities.bind]: there is no entity type '"
-                + type
-                + "' (types: "
-                + new java.util.TreeSet<>(catalog.types().keySet())
-                + ")");
-      }
-    }
+    Map<String, String> binding = StorageBinding.resolve(cfg, catalog);
     java.util.List<it.uhde.praksis.entity.EntityType> unbound = new java.util.ArrayList<>();
     Map<String, java.util.List<it.uhde.praksis.entity.EntityType>> byStorage =
         new java.util.HashMap<>();
     for (it.uhde.praksis.entity.EntityType t : catalog.types().values()) {
-      String name = cfg.bind().get(t.id());
+      String name = binding.get(t.id());
       if (name == null) {
         unbound.add(t);
       } else {
@@ -267,9 +248,10 @@ public final class Daemon implements AutoCloseable {
                     "; ", effective.skipped().stream().map(LayerStack.Skipped::describe).toList()));
       }
       ruleset = effective.ruleset();
-      GrantPolicy access = accessPolicy(config, modules.catalog(), effective);
+      EntityCatalog entityCatalog = EntitySets.catalog(layers.sources(layers.readLock()));
+      GrantPolicy access = accessPolicy(config, modules.catalog(), effective, entityCatalog);
       store = Store.open(config.database());
-      openEntities(layers, store, access);
+      openEntities(entityCatalog, store, access);
       entities = new Entities(entityService::get, store, clock);
       agent.bind(
           config, layers, modules, store, () -> effective, access, new StoreAuditLog(store), clock);
@@ -281,7 +263,9 @@ public final class Daemon implements AutoCloseable {
       Downloads.cleanup(config.downloadsDirectory(), clock.instant());
       Uploads.cleanup(config.uploadsDirectory(), clock.instant());
       modules.useUploadsDirectory(config.uploadsDirectory());
-      approvals = new Approvals(config, store, access, modules.catalog(), clock);
+      approvals =
+          new Approvals(
+              config, store, access, modules.catalog(), clock, entityCatalog.allMembers());
       Map<String, Capability> capabilities = modules.capabilities();
       shadows = new Shadows(config, store, clock, effective);
       Shadows.Plan plan = shadows.plan();
@@ -391,12 +375,16 @@ public final class Daemon implements AutoCloseable {
 
   /** The grants in {@code policy.toml}, checked against the modules and layers in use. */
   static GrantPolicy accessPolicy(
-      DaemonConfig config, ModuleCatalog catalog, LayerStack.Effective effective)
+      DaemonConfig config,
+      ModuleCatalog catalog,
+      LayerStack.Effective effective,
+      EntityCatalog entities)
       throws DaemonException {
     try {
-      Policy policy = Policy.load(config.policy());
+      Policy policy = EntitySets.policy(config, entities.allMembers());
       List<Problem> problems =
-          policy.check(catalog, config.layerNames(), config.storageComponents());
+          policy.check(
+              catalog, config.layerNames(), config.storageComponents(), entities.sets().keySet());
       if (!problems.isEmpty()) {
         throw new RulesetException(problems);
       }
@@ -521,6 +509,7 @@ public final class Daemon implements AutoCloseable {
             views.fetch(
                 f.view(), f.capability(), f.args(), f.filename(), config.downloadsDirectory());
         case Request.EntityTypes r -> entities.handle(r);
+        case Request.EntitySets r -> entities.handle(r);
         case Request.EntityQuery r -> entities.handle(r);
         case Request.EntityRead r -> entities.handle(r);
         case Request.EntityCreate r -> entities.handle(r);

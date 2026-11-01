@@ -174,9 +174,9 @@ public record Policy(
   }
 
   private static Optional<ArgMatcher> matcher(Table m) {
-    m.onlyKeys(Set.of("equals", "one_of", "prefix"));
+    m.onlyKeys(Set.of("equals", "one_of", "prefix", "set"));
     if (m.rawEntries().size() != 1) {
-      m.problem("must have exactly one of 'equals', 'one_of' or 'prefix'");
+      m.problem("must have exactly one of 'equals', 'one_of', 'prefix' or 'set'");
       return Optional.empty();
     }
     var entry = m.rawEntries().entrySet().iterator().next();
@@ -200,6 +200,12 @@ public record Policy(
         }
         m.problem("'prefix' must be a non-empty string");
       }
+      case "set" -> {
+        if (v instanceof String s && !s.isEmpty()) {
+          return Optional.of(new ArgMatcher.InSet(s));
+        }
+        m.problem("'set' must be the name of a set");
+      }
       default -> {
         // reported by onlyKeys
       }
@@ -209,6 +215,32 @@ public record Policy(
 
   private static boolean plain(Object v) {
     return v instanceof String || v instanceof Boolean || v instanceof Integer || v instanceof Long;
+  }
+
+  /**
+   * The policy with the members of the sets that its grants name ({@code type = { set = "x" }}):
+   * what a grant covers is what the set holds now. A set that is not in the map has no members.
+   *
+   * @param sets the members of each set, by set name
+   */
+  public Policy withSets(Map<String, Set<String>> sets) {
+    List<Grant> resolved = new ArrayList<>();
+    for (Grant g : grants) {
+      Map<String, ArgMatcher> args = new LinkedHashMap<>();
+      g.args()
+          .forEach(
+              (name, m) ->
+                  args.put(
+                      name,
+                      m instanceof ArgMatcher.InSet in
+                          ? new ArgMatcher.InSet(
+                              in.set(),
+                              new java.util.TreeSet<>(sets.getOrDefault(in.set(), Set.of()))
+                                  .stream().toList())
+                          : m));
+      resolved.add(new Grant(g.id(), g.layer(), g.capability(), args, g.note()));
+    }
+    return new Policy(resolved, credentials, trust, approval);
   }
 
   /** The first grant that covers a call of the rules of this layer, if there is one. */
@@ -236,6 +268,21 @@ public record Policy(
    */
   public List<Problem> check(
       ModuleCatalog catalog, Set<String> layers, Set<String> otherComponents) {
+    return check(catalog, layers, otherComponents, null);
+  }
+
+  /**
+   * As above; a grant may also name a set with {@code set = "x"} on the parameter {@code type} of
+   * an {@code entity.*} capability, and the set must be one of these.
+   *
+   * @param entitySets the names of the entity sets, or null if they are not known (then the names
+   *     of sets are not checked)
+   */
+  public List<Problem> check(
+      ModuleCatalog catalog,
+      Set<String> layers,
+      Set<String> otherComponents,
+      Set<String> entitySets) {
     List<Problem> problems = new ArrayList<>();
     for (Grant g : grants) {
       String where = "policy.toml: grant '" + g.id() + "'";
@@ -259,6 +306,24 @@ public record Policy(
         } else if (e.getValue() instanceof ArgMatcher.Prefix
             && param.get().type() != ValueType.STRING) {
           problems.add(new Problem(where, "'prefix' only works on strings: '" + e.getKey() + "'"));
+        } else if (e.getValue() instanceof ArgMatcher.InSet in) {
+          if (!g.capability().startsWith("entity.") || !e.getKey().equals("type")) {
+            problems.add(
+                new Problem(
+                    where,
+                    "'set' only works on the parameter 'type' of the entity capabilities: '"
+                        + e.getKey()
+                        + "'"));
+          } else if (entitySets != null && !entitySets.contains(in.set())) {
+            problems.add(
+                new Problem(
+                    where,
+                    "no entity set named '"
+                        + in.set()
+                        + "' (sets: "
+                        + new java.util.TreeSet<>(entitySets)
+                        + ")"));
+          }
         }
       }
     }
