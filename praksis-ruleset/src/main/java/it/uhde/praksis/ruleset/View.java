@@ -328,7 +328,7 @@ public record View(
     return hashOf(raw);
   }
 
-  static String hashOf(Map<String, Object> raw) {
+  public static String hashOf(Map<String, Object> raw) {
     Map<String, Object> content = new LinkedHashMap<>(raw);
     content.remove("based_on");
     try {
