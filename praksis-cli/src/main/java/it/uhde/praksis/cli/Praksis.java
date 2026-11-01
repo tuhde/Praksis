@@ -47,6 +47,7 @@ import picocli.CommandLine.Spec;
       Praksis.RunCommand.class,
       Praksis.ViewsCommand.class,
       Praksis.ViewCommand.class,
+      Praksis.EntitiesCommand.class,
       Help.class
     })
 public final class Praksis {
@@ -572,6 +573,291 @@ public final class Praksis {
         };
       } catch (NumberFormatException e) {
         throw new IllegalArgumentException("must be a " + type);
+      }
+    }
+  }
+
+  @Command(
+      name = "entities",
+      description =
+          "Works with entities, the data that Praksis keeps for rules and screens, as a person:"
+              + " no grant is needed, every change is written to the audit log and starts the same"
+              + " events as a rule's change. Values of sensitive fields are shown only with"
+              + " 'show --reveal'.",
+      subcommands = {
+        Praksis.EntitiesCommand.TypesCommand.class,
+        Praksis.EntitiesCommand.ListCommand.class,
+        Praksis.EntitiesCommand.ShowCommand.class,
+        Praksis.EntitiesCommand.CreateCommand.class,
+        Praksis.EntitiesCommand.UpdateCommand.class,
+        Praksis.EntitiesCommand.DeleteCommand.class
+      })
+  static final class EntitiesCommand {
+    private static final com.fasterxml.jackson.databind.ObjectMapper JSON =
+        new com.fasterxml.jackson.databind.ObjectMapper();
+
+    /** Reads {@code name=value} pairs and a JSON object into the values of a request. */
+    private static java.util.Map<String, Object> values(
+        String json, java.util.List<String> sets, java.util.List<String> unsets) {
+      java.util.Map<String, Object> values = new java.util.LinkedHashMap<>();
+      if (json != null) {
+        try {
+          @SuppressWarnings("unchecked")
+          java.util.Map<String, Object> read = JSON.readValue(json, java.util.Map.class);
+          values.putAll(read);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+          throw new IllegalArgumentException(
+              "--json is not a JSON object: " + e.getOriginalMessage());
+        }
+      }
+      for (String set : sets) {
+        int eq = set.indexOf('=');
+        if (eq <= 0) {
+          throw new IllegalArgumentException("--set wants name=value, not '" + set + "'");
+        }
+        values.put(set.substring(0, eq), set.substring(eq + 1));
+      }
+      for (String name : unsets) {
+        values.put(name, null);
+      }
+      return values;
+    }
+
+    private static String show(Object v) {
+      return v instanceof String s ? s : String.valueOf(v);
+    }
+
+    /** One entity as lines {@code name: value}. */
+    private static void print(java.io.PrintWriter out, java.util.Map<String, Object> entity) {
+      entity.forEach((k, v) -> out.printf("%s: %s%n", k, show(v)));
+    }
+
+    /** Sends a request that needs values; says what is wrong with the input and returns 2. */
+    private abstract static class ValuesBase extends Base {
+      @Option(
+          names = "--json",
+          paramLabel = "<object>",
+          description = "The fields as a JSON object, e.g. '{\"age\": 41, \"tags\": [\"a\"]}'.")
+      String json;
+
+      @Option(
+          names = "--set",
+          paramLabel = "<name=value>",
+          description =
+              "Sets a field. The text is read as the type of the field: a number, true or false,"
+                  + " a time like 2026-11-01T10:00:00Z, or Base64 for bytes. Can be repeated.")
+      java.util.List<String> sets = new java.util.ArrayList<>();
+
+      java.util.Map<String, Object> input(java.util.List<String> unsets) {
+        try {
+          return values(json, sets, unsets);
+        } catch (IllegalArgumentException e) {
+          err().println(e.getMessage());
+          return null;
+        }
+      }
+    }
+
+    @Command(name = "types", description = "Lists the entity types and their fields.")
+    static final class TypesCommand extends Base {
+      @Override
+      public Integer call() {
+        Response response = send(new Request.EntityTypes());
+        if (!(response instanceof Response.EntityTypeList l)) {
+          return exitCodeFor(response);
+        }
+        if (l.types().isEmpty()) {
+          out().println("No entity types. A layer adds one as entities/<id>.toml.");
+        }
+        for (Response.EntityTypeList.EntityTypeInfo t : l.types()) {
+          out().printf("%s  %s  [layer %s]%n", t.id(), t.title(), t.owner());
+          if (t.description() != null) {
+            out().printf("    %s%n", t.description());
+          }
+          for (Response.EntityTypeList.EntityField f : t.fields()) {
+            out()
+                .printf(
+                    "    %s (%s)%s%s%s%n",
+                    f.name(),
+                    f.type(),
+                    f.required() ? ", required" : "",
+                    f.unique() ? ", unique" : "",
+                    f.sensitive() ? ", sensitive" : "");
+          }
+        }
+        return 0;
+      }
+    }
+
+    @Command(name = "list", description = "Lists the entities of a type.")
+    static final class ListCommand extends Base {
+      @CommandLine.Parameters(index = "0", paramLabel = "<type>", description = "The entity type.")
+      String type;
+
+      @Option(
+          names = "--filter",
+          paramLabel = "<object>",
+          description =
+              "A condition as JSON, e.g. '{\"op\": \"prefix\", \"field\": \"name\", \"value\":"
+                  + " \"Mei\"}'. Operations: equals, one_of, prefix, range (gt, gte, lt, lte), and,"
+                  + " or, not.")
+      String filter;
+
+      @Option(names = "--sort", description = "The field to sort by (default: created).")
+      String sort;
+
+      @Option(names = "--reverse", description = "Sort from high to low.")
+      boolean reverse;
+
+      @Option(names = "--limit", description = "How many to show (default 100, at most 1000).")
+      Integer limit;
+
+      @Option(names = "--offset", description = "How many to skip.")
+      Integer offset;
+
+      @Override
+      @SuppressWarnings("unchecked")
+      public Integer call() {
+        java.util.Map<String, Object> condition = null;
+        if (filter != null) {
+          try {
+            condition = JSON.readValue(filter, java.util.Map.class);
+          } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            err().println("--filter is not a JSON object: " + e.getOriginalMessage());
+            return 2;
+          }
+        }
+        Response response =
+            send(new Request.EntityQuery(type, condition, sort, reverse, limit, offset));
+        if (!(response instanceof Response.EntityPage page)) {
+          return exitCodeFor(response);
+        }
+        for (java.util.Map<String, Object> e : page.items()) {
+          StringBuilder line = new StringBuilder(show(e.get("id")));
+          e.forEach(
+              (k, v) -> {
+                if (!java.util.Set.of("id", "created", "updated", "created_by", "updated_by")
+                    .contains(k)) {
+                  line.append("  ").append(k).append('=').append(show(v));
+                }
+              });
+          out().println(line);
+        }
+        out().printf("%d of %d%n", page.items().size(), page.total());
+        return 0;
+      }
+    }
+
+    @Command(
+        name = "show",
+        description =
+            "Shows one entity. Sensitive fields are left out unless named with --reveal, which is"
+                + " written to the audit log.")
+    static final class ShowCommand extends Base {
+      @CommandLine.Parameters(index = "0", paramLabel = "<type>", description = "The entity type.")
+      String type;
+
+      @CommandLine.Parameters(index = "1", paramLabel = "<id>", description = "The entity.")
+      String id;
+
+      @Option(
+          names = "--reveal",
+          split = ",",
+          paramLabel = "<field>",
+          description = "Sensitive fields whose values to show.")
+      java.util.List<String> reveal;
+
+      @Override
+      public Integer call() {
+        Response response = send(new Request.EntityRead(type, id, reveal));
+        if (!(response instanceof Response.EntityItem item)) {
+          return exitCodeFor(response);
+        }
+        if (!item.found()) {
+          err().println("There is no " + type + " " + id + ".");
+          return EXIT_FAILED;
+        }
+        print(out(), item.entity());
+        if (item.revealed() != null) {
+          item.revealed().forEach((k, v) -> out().printf("%s: %s  (revealed)%n", k, show(v)));
+        }
+        return 0;
+      }
+    }
+
+    @Command(name = "create", description = "Creates an entity and prints it.")
+    static final class CreateCommand extends ValuesBase {
+      @CommandLine.Parameters(index = "0", paramLabel = "<type>", description = "The entity type.")
+      String type;
+
+      @Override
+      public Integer call() {
+        java.util.Map<String, Object> values = input(java.util.List.of());
+        if (values == null) {
+          return 2;
+        }
+        Response response = send(new Request.EntityCreate(type, values));
+        if (!(response instanceof Response.EntityItem item)) {
+          return exitCodeFor(response);
+        }
+        print(out(), item.entity());
+        return 0;
+      }
+    }
+
+    @Command(
+        name = "update",
+        description =
+            "Changes fields of an entity and prints it. A change that changes no value writes"
+                + " nothing.")
+    static final class UpdateCommand extends ValuesBase {
+      @CommandLine.Parameters(index = "0", paramLabel = "<type>", description = "The entity type.")
+      String type;
+
+      @CommandLine.Parameters(index = "1", paramLabel = "<id>", description = "The entity.")
+      String id;
+
+      @Option(
+          names = "--unset",
+          paramLabel = "<field>",
+          description = "Removes a field (not a required one). Can be repeated.")
+      java.util.List<String> unsets = new java.util.ArrayList<>();
+
+      @Override
+      public Integer call() {
+        java.util.Map<String, Object> values = input(unsets);
+        if (values == null) {
+          return 2;
+        }
+        Response response = send(new Request.EntityUpdate(type, id, values));
+        if (!(response instanceof Response.EntityItem item)) {
+          return exitCodeFor(response);
+        }
+        if (!item.found()) {
+          err().println("There is no " + type + " " + id + ".");
+          return EXIT_FAILED;
+        }
+        print(out(), item.entity());
+        return 0;
+      }
+    }
+
+    @Command(name = "delete", description = "Deletes an entity.")
+    static final class DeleteCommand extends Base {
+      @CommandLine.Parameters(index = "0", paramLabel = "<type>", description = "The entity type.")
+      String type;
+
+      @CommandLine.Parameters(index = "1", paramLabel = "<id>", description = "The entity.")
+      String id;
+
+      @Override
+      public Integer call() {
+        Response response = send(new Request.EntityDelete(type, id));
+        if (response instanceof Response.Done d) {
+          out().println(d.message());
+          return 0;
+        }
+        return exitCodeFor(response);
       }
     }
   }

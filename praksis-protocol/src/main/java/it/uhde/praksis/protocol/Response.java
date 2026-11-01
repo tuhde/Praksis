@@ -28,6 +28,9 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Response.Outcome.class, name = "outcome"),
   @JsonSubTypes.Type(value = Response.ViewList.class, name = "views"),
   @JsonSubTypes.Type(value = Response.HelpTopics.class, name = "help-topics"),
+  @JsonSubTypes.Type(value = Response.EntityTypeList.class, name = "entity-types"),
+  @JsonSubTypes.Type(value = Response.EntityPage.class, name = "entity-page"),
+  @JsonSubTypes.Type(value = Response.EntityItem.class, name = "entity-item"),
   @JsonSubTypes.Type(value = Response.HelpPage.class, name = "help-page"),
   @JsonSubTypes.Type(value = Response.ResolvedView.class, name = "view"),
   @JsonSubTypes.Type(value = Response.Fetched.class, name = "fetched"),
@@ -1087,4 +1090,66 @@ public sealed interface Response {
    * @param message why, possibly several lines
    */
   record Error(String message) implements Response {}
+
+  /**
+   * The entity types.
+   *
+   * @param types the types
+   */
+  record EntityTypeList(List<EntityTypeInfo> types) implements Response {
+    /**
+     * One type.
+     *
+     * @param id the id
+     * @param title what a person sees
+     * @param description what it is for, or null
+     * @param owner the layer that defined it last, or null
+     * @param hash its hash, which a replacement names in {@code based_on}
+     * @param fields the declared fields
+     */
+    public record EntityTypeInfo(
+        String id,
+        String title,
+        String description,
+        String owner,
+        String hash,
+        List<EntityField> fields) {}
+
+    /**
+     * One field.
+     *
+     * @param name the name
+     * @param type the type of its values
+     * @param required whether it must be given
+     * @param unique whether no two entities share a value
+     * @param sensitive whether rules and lists do not see its value
+     * @param description what it is for, or null
+     */
+    public record EntityField(
+        String name,
+        String type,
+        boolean required,
+        boolean unique,
+        boolean sensitive,
+        String description) {}
+  }
+
+  /**
+   * Entities of one type, without the values of sensitive fields. Times are ISO-8601 text, bytes
+   * are Base64.
+   *
+   * @param items the entities in order
+   * @param total how many match in all, before limit and offset
+   */
+  record EntityPage(List<Map<String, Object>> items, long total) implements Response {}
+
+  /**
+   * One entity.
+   *
+   * @param found false if there is none
+   * @param entity the entity without the values of sensitive fields, or null
+   * @param revealed the sensitive values that were asked for, or null
+   */
+  record EntityItem(boolean found, Map<String, Object> entity, Map<String, Object> revealed)
+      implements Response {}
 }

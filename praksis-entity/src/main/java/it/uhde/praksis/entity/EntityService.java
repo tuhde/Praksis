@@ -244,6 +244,26 @@ public final class EntityService {
         });
   }
 
+  /**
+   * The values of a write as the audit log may keep them: the values of sensitive fields are
+   * replaced by a marker. An unknown type or a value that is not a map is returned as it is.
+   */
+  public Map<String, Object> redact(String typeId, Map<String, Object> values) {
+    EntityType type = catalog.get(typeId).orElse(null);
+    if (type == null) {
+      return values;
+    }
+    Map<String, Object> out = new LinkedHashMap<>();
+    values.forEach(
+        (k, v) ->
+            out.put(
+                k,
+                type.field(k).filter(EntityType.Field::sensitive).isPresent()
+                    ? EntityCapabilities.HIDDEN
+                    : v));
+    return out;
+  }
+
   /** The entity without the values of its sensitive fields, which a rule must reveal. */
   public Map<String, Object> withoutSensitive(String typeId, Map<String, Object> entity)
       throws EntityException {

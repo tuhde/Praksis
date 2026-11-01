@@ -336,6 +336,80 @@ Arguments:
 - `<view>`: The view id.
 - `<name=value>`: State.
 
+### praksis entities
+
+Works with entities, the data that Praksis keeps for rules and screens, as a person: no grant is needed, every change is written to the audit log and starts the same events as a rule`s change. Values of sensitive fields are shown only with `show --reveal'.
+
+#### praksis entities types
+
+Lists the entity types and their fields.
+
+#### praksis entities list
+
+Lists the entities of a type.
+
+Arguments:
+
+- `<type>`: The entity type.
+
+Options:
+
+- `--filter` `<object>`: A condition as JSON, e.g. `{"op": "prefix", "field": "name", "value": "Mei"}`. Operations: equals, one_of, prefix, range (gt, gte, lt, lte), and, or, not.
+- `--sort` `<sort>`: The field to sort by (default: created).
+- `--reverse`: Sort from high to low.
+- `--limit` `<limit>`: How many to show (default 100, at most 1000).
+- `--offset` `<offset>`: How many to skip.
+
+#### praksis entities show
+
+Shows one entity. Sensitive fields are left out unless named with --reveal, which is written to the audit log.
+
+Arguments:
+
+- `<type>`: The entity type.
+- `<id>`: The entity.
+
+Options:
+
+- `--reveal` `<field>`: Sensitive fields whose values to show.
+
+#### praksis entities create
+
+Creates an entity and prints it.
+
+Arguments:
+
+- `<type>`: The entity type.
+
+Options:
+
+- `--json` `<object>`: The fields as a JSON object, e.g. `{"age": 41, "tags": ["a"]}`.
+- `--set` `<name=value>`: Sets a field. The text is read as the type of the field: a number, true or false, a time like 2026-11-01T10:00:00Z, or Base64 for bytes. Can be repeated.
+
+#### praksis entities update
+
+Changes fields of an entity and prints it. A change that changes no value writes nothing.
+
+Arguments:
+
+- `<type>`: The entity type.
+- `<id>`: The entity.
+
+Options:
+
+- `--json` `<object>`: The fields as a JSON object, e.g. `{"age": 41, "tags": ["a"]}`.
+- `--set` `<name=value>`: Sets a field. The text is read as the type of the field: a number, true or false, a time like 2026-11-01T10:00:00Z, or Base64 for bytes. Can be repeated.
+- `--unset` `<field>`: Removes a field (not a required one). Can be repeated.
+
+#### praksis entities delete
+
+Deletes an entity.
+
+Arguments:
+
+- `<type>`: The entity type.
+- `<id>`: The entity.
+
 ### praksis help
 
 Shows the documentation. Without a topic it lists the topics; a topic is the path of a page without .md, for example user/concepts.

@@ -66,6 +66,7 @@ public final class Daemon implements AutoCloseable {
   private LoadedModules modules;
   private Ruleset ruleset;
   private Store store;
+  private Entities entities;
   private final java.util.concurrent.atomic.AtomicReference<EntityService> entityService =
       new java.util.concurrent.atomic.AtomicReference<>();
   private volatile Engine engine;
@@ -176,6 +177,7 @@ public final class Daemon implements AutoCloseable {
       GrantPolicy access = accessPolicy(config, modules.catalog(), effective);
       store = Store.open(config.database());
       openEntities(layers, store);
+      entities = new Entities(entityService::get, store, clock);
       agent.bind(
           config, layers, modules, store, () -> effective, access, new StoreAuditLog(store), clock);
       store.onChange(topics::bump);
@@ -424,6 +426,12 @@ public final class Daemon implements AutoCloseable {
         case Request.Fetch f ->
             views.fetch(
                 f.view(), f.capability(), f.args(), f.filename(), config.downloadsDirectory());
+        case Request.EntityTypes r -> entities.handle(r);
+        case Request.EntityQuery r -> entities.handle(r);
+        case Request.EntityRead r -> entities.handle(r);
+        case Request.EntityCreate r -> entities.handle(r);
+        case Request.EntityUpdate r -> entities.handle(r);
+        case Request.EntityDelete r -> entities.handle(r);
         case Request.Stop s -> new Response.Stopped();
       };
     } catch (Injection.Invalid | Approvals.Failure | Shadows.Failure | DaemonException e) {

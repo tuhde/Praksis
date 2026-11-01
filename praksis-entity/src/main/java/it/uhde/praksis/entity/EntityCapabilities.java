@@ -231,6 +231,7 @@ public final class EntityCapabilities {
   }
 
   /** The values of sensitive fields are not written to the audit log or the trial record. */
+  @SuppressWarnings("unchecked")
   private Map<String, Object> redactValues(Map<String, Object> args) {
     EntityService service = services.get();
     if (service == null
@@ -238,18 +239,7 @@ public final class EntityCapabilities {
         || !(args.get("values") instanceof Map<?, ?> values)) {
       return args;
     }
-    EntityType t = service.catalog().get(type).orElse(null);
-    if (t == null) {
-      return args;
-    }
-    Map<String, Object> shown = new java.util.LinkedHashMap<>();
-    values.forEach(
-        (k, v) ->
-            shown.put(
-                String.valueOf(k),
-                t.field(String.valueOf(k)).filter(EntityType.Field::sensitive).isPresent()
-                    ? HIDDEN
-                    : v));
+    Map<String, Object> shown = service.redact(type, (Map<String, Object>) values);
     Map<String, Object> out = new java.util.LinkedHashMap<>(args);
     out.put("values", shown);
     return out;

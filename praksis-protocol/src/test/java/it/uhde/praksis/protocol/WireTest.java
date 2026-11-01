@@ -57,6 +57,43 @@ class WireTest {
   }
 
   @Test
+  void theEntityMessagesSurviveTheRoundTrip() throws Exception {
+    for (Request r :
+        List.of(
+            new Request.EntityTypes(),
+            new Request.EntityQuery(
+                "note", Map.of("op", "equals", "field", "a", "value", "b"), "name", true, 5, 10),
+            new Request.EntityQuery("note", null, null, false, null, null),
+            new Request.EntityRead("note", "id1", List.of("iban")),
+            new Request.EntityRead("note", "id1", null),
+            new Request.EntityCreate("note", Map.of("subject", "x")),
+            new Request.EntityUpdate("note", "id1", Map.of("subject", "y")),
+            new Request.EntityDelete("note", "id1"))) {
+      assertThat(Wire.decodeRequest(Wire.encode(r))).isEqualTo(r);
+    }
+    assertThat(Wire.encode(new Request.EntityDelete("note", "i")))
+        .isEqualTo("{\"op\":\"entity-delete\",\"type\":\"note\",\"id\":\"i\"}");
+    for (Response r :
+        List.of(
+            new Response.EntityTypeList(
+                List.of(
+                    new Response.EntityTypeList.EntityTypeInfo(
+                        "note",
+                        "Note",
+                        null,
+                        "mine",
+                        "sha256:x",
+                        List.of(
+                            new Response.EntityTypeList.EntityField(
+                                "subject", "string", true, false, false, null))))),
+            new Response.EntityPage(List.of(Map.of("id", "1", "subject", "x")), 7),
+            new Response.EntityItem(true, Map.of("id", "1"), Map.of("iban", "DE01")),
+            new Response.EntityItem(false, null, null))) {
+      assertThat(Wire.decodeResponse(Wire.encode(r))).isEqualTo(r);
+    }
+  }
+
+  @Test
   void theMessagesOfTheAgentAndTheMicrophoneSurviveTheRoundTrip() throws Exception {
     for (Request r :
         List.of(

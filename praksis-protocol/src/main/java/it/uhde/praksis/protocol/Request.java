@@ -49,6 +49,12 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.Notes.class, name = "notes"),
   @JsonSubTypes.Type(value = Request.StagedShow.class, name = "staged-show"),
   @JsonSubTypes.Type(value = Request.StagedDrop.class, name = "staged-drop"),
+  @JsonSubTypes.Type(value = Request.EntityTypes.class, name = "entity-types"),
+  @JsonSubTypes.Type(value = Request.EntityQuery.class, name = "entity-query"),
+  @JsonSubTypes.Type(value = Request.EntityRead.class, name = "entity-read"),
+  @JsonSubTypes.Type(value = Request.EntityCreate.class, name = "entity-create"),
+  @JsonSubTypes.Type(value = Request.EntityUpdate.class, name = "entity-update"),
+  @JsonSubTypes.Type(value = Request.EntityDelete.class, name = "entity-delete"),
   @JsonSubTypes.Type(value = Request.Stop.class, name = "stop")
 })
 public sealed interface Request {
@@ -407,4 +413,69 @@ public sealed interface Request {
    * Asks the daemon to finish what it is doing and exit. Answered with {@link Response.Stopped}.
    */
   record Stop() implements Request {}
+
+  /**
+   * Lists the entity types in use. Answered with {@link Response.EntityTypeList}.
+   *
+   * <p>The entity requests are made by a person at the local socket, like the answers to approvals:
+   * they need no grant, are audited as calls by {@code user} and, if they change something, emit
+   * the same events as a rule does. The values of sensitive fields are never in an answer unless
+   * {@link EntityRead#reveal} names them.
+   */
+  record EntityTypes() implements Request {}
+
+  /**
+   * Lists the entities of a type. Answered with {@link Response.EntityPage}.
+   *
+   * @param type the type
+   * @param filter a condition ({@code op}, {@code field}, ...), or null for all
+   * @param sort the field to sort by, or null for {@code created}
+   * @param reverse sort from high to low
+   * @param limit how many, or null for 100
+   * @param offset how many to skip, or null for none
+   */
+  record EntityQuery(
+      String type,
+      Map<String, Object> filter,
+      String sort,
+      boolean reverse,
+      Integer limit,
+      Integer offset)
+      implements Request {}
+
+  /**
+   * Reads one entity. Answered with {@link Response.EntityItem}.
+   *
+   * @param type the type
+   * @param id the entity
+   * @param reveal names of sensitive fields whose values are wanted too (audited), or null
+   */
+  record EntityRead(String type, String id, java.util.List<String> reveal) implements Request {}
+
+  /**
+   * Creates an entity. Answered with {@link Response.EntityItem}.
+   *
+   * @param type the type
+   * @param values the fields; a text is converted to the type of the field (a number, true or
+   *     false, a time, Base64 for bytes), lists and maps must be JSON
+   */
+  record EntityCreate(String type, Map<String, Object> values) implements Request {}
+
+  /**
+   * Changes an entity: a field with a value is set, one with null is removed. Answered with {@link
+   * Response.EntityItem}.
+   *
+   * @param type the type
+   * @param id the entity
+   * @param values the fields to change
+   */
+  record EntityUpdate(String type, String id, Map<String, Object> values) implements Request {}
+
+  /**
+   * Deletes an entity. Answered with {@link Response.Done}.
+   *
+   * @param type the type
+   * @param id the entity
+   */
+  record EntityDelete(String type, String id) implements Request {}
 }

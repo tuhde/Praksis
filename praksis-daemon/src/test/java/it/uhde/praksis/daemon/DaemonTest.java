@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.function.BooleanSupplier;
 import java.util.jar.JarEntry;
@@ -344,6 +345,120 @@ class DaemonTest {
                         assertThat(r.args()).containsEntry("type", "note");
                       });
             });
+  }
+
+  @Test
+  void aPersonWorksWithEntitiesThroughTheApi() throws Exception {
+    write(
+        "ruleset/entities/person.toml",
+        """
+        format_version = 1
+        id = "person"
+        title = "Person"
+        [[field]]
+        name = "name"
+        type = "string"
+        required = true
+        [[field]]
+        name = "age"
+        type = "int"
+        [[field]]
+        name = "iban"
+        type = "string"
+        sensitive = true
+        """);
+    start();
+    assertThat(ask(new Request.EntityTypes()))
+        .isInstanceOfSatisfying(
+            Response.EntityTypeList.class,
+            l -> {
+              assertThat(l.types()).hasSize(1);
+              assertThat(l.types().get(0).id()).isEqualTo("person");
+              assertThat(l.types().get(0).owner()).isEqualTo("ruleset");
+              assertThat(l.types().get(0).fields())
+                  .extracting(f -> f.name())
+                  .containsExactly("name", "age", "iban");
+              assertThat(l.types().get(0).fields().get(2).sensitive()).isTrue();
+            });
+
+    // texts are read as the type of the field; the secret does not come back
+    Response.EntityItem made =
+        (Response.EntityItem)
+            ask(
+                new Request.EntityCreate(
+                    "person", Map.of("name", "Mei", "age", "41", "iban", "DE01")));
+    assertThat(made.entity())
+        .containsEntry("name", "Mei")
+        .containsEntry("age", 41)
+        .containsEntry("created_by", "user");
+    assertThat(made.entity()).doesNotContainKey("iban");
+    String id = (String) made.entity().get("id");
+
+    Response.EntityPage page =
+        (Response.EntityPage)
+            ask(
+                new Request.EntityQuery(
+                    "person",
+                    Map.of("op", "range", "field", "age", "gte", 18),
+                    null,
+                    false,
+                    null,
+                    null));
+    assertThat(page.total()).isEqualTo(1);
+    assertThat(page.items().get(0)).doesNotContainKey("iban");
+    assertThat(
+            ((Response.EntityPage)
+                    ask(
+                        new Request.EntityQuery(
+                            "person",
+                            Map.of("op", "range", "field", "age", "gt", 50),
+                            null,
+                            false,
+                            null,
+                            null)))
+                .total())
+        .isZero();
+
+    Response.EntityItem plain =
+        (Response.EntityItem) ask(new Request.EntityRead("person", id, null));
+    assertThat(plain.entity()).doesNotContainKey("iban");
+    assertThat(plain.revealed()).isNull();
+    Response.EntityItem secret =
+        (Response.EntityItem) ask(new Request.EntityRead("person", id, List.of("iban")));
+    assertThat(secret.revealed()).isEqualTo(Map.of("iban", "DE01"));
+
+    Response.EntityItem changed =
+        (Response.EntityItem) ask(new Request.EntityUpdate("person", id, Map.of("age", "42")));
+    assertThat(changed.entity()).containsEntry("age", 42);
+    assertThat(
+            ((Response.EntityItem)
+                    ask(new Request.EntityUpdate("person", "nope", Map.of("age", "1"))))
+                .found())
+        .isFalse();
+
+    assertThat(ask(new Request.EntityCreate("person", Map.of("age", "1"))))
+        .isEqualTo(new Response.Error("field 'name' is required"));
+    assertThat(ask(new Request.EntityCreate("person", Map.of("name", "A", "age", "old"))))
+        .isEqualTo(new Response.Error("field 'age' must be a whole number"));
+    assertThat(ask(new Request.EntityRead("person", id, List.of("name"))))
+        .isEqualTo(new Response.Error("field 'name' of type 'person' is not a sensitive field"));
+    assertThat(ask(new Request.EntityQuery("nope", null, null, false, null, null)))
+        .isEqualTo(new Response.Error("unknown entity type 'nope'"));
+
+    assertThat(ask(new Request.EntityDelete("person", id))).isInstanceOf(Response.Done.class);
+    assertThat(ask(new Request.EntityDelete("person", id))).isInstanceOf(Response.Error.class);
+
+    // the audit log says what the person did, and holds no secret; reading a secret is logged
+    Response.AuditLines audit = (Response.AuditLines) ask(new Request.Audit(50));
+    var calls =
+        audit.lines().stream().filter(l -> "CALL".equals(l.kind()) && l.ruleId() == null).toList();
+    assertThat(calls)
+        .extracting(l -> l.subject())
+        .contains("entity.create", "entity.update", "entity.delete", "entity.reveal");
+    assertThat(calls).noneMatch(l -> l.detail().contains("DE01"));
+    // the changes were events
+    assertThat(((Response.ChangeList) ask(new Request.Changes(0, 0))).topics())
+        .contains("entities");
   }
 
   @Test
