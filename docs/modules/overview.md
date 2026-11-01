@@ -5,5 +5,5 @@
 
 The pages for the modules of this repository are generated from their descriptors and list each
 capability with its parameters, results and effect class: [maildir](maildir.md) (the reference and
-test module) and [praksis](praksis.md) (built into the daemon). Modules from other repositories
+test module), [praksis](praksis.md) and [entity](entity.md) (both built into the daemon). Modules from other repositories
 document themselves there.

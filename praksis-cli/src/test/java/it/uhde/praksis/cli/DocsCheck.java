@@ -66,7 +66,7 @@ final class DocsCheck {
       }
     }
     if (modulesRoot != null && Files.isDirectory(modulesRoot)) {
-      List<String> names = new ArrayList<>(List.of("praksis"));
+      List<String> names = new ArrayList<>(List.of("praksis", "entity"));
       try (Stream<Path> dirs = Files.list(modulesRoot)) {
         for (Path toml : dirs.map(d -> d.resolve("module.toml")).sorted().toList()) {
           if (Files.isRegularFile(toml)) {

@@ -13,6 +13,9 @@ the program is offline:
 - rules, views and grants are checked as before, so a ruleset behaves the same on both sides of
   the switch.
 
+An entity storage that is a database on another machine is refused at the start; a database in a
+file or in memory is not (see [Where entities are kept](storage.md)).
+
 A module that cannot know in advance treats the setting as its own: the `ai` module refuses
 profiles with `data = "cloud"` and keeps the local ones.
 

@@ -58,6 +58,7 @@ class DocsCheckTest {
     assertThat(DocsCheck.problems(dir, dir.resolve("mods")))
         .containsExactlyInAnyOrder(
             "module praksis has no page modules/praksis.md in index.md",
+            "module entity has no page modules/entity.md in index.md",
             "module mail has no page modules/mail.md in index.md");
   }
 }

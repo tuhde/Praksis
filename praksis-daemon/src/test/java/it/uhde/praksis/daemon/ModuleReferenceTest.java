@@ -33,6 +33,11 @@ class ModuleReferenceTest {
   }
 
   @Test
+  void theEntityPageIsCurrent() throws IOException {
+    check("entity.md", ModuleDocs.page(it.uhde.praksis.entity.EntityCapabilities.descriptor()));
+  }
+
+  @Test
   void theMaildirPageIsCurrent() throws Exception {
     var descriptor =
         ModuleLoader.readDescriptor(

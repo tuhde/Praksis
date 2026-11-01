@@ -26,6 +26,9 @@ A layer is a directory with `ruleset.toml` and any of these directories, one fil
 | `replace/<id>.toml` | A complete new rule, with `based_on`. |
 | `patch/<id>.toml` | Change single fields of a rule: `[[change]]` with `path`, `expect` and `value` (or `remove = true`). |
 | `disable/<id>.toml` | Switch a rule off, with `based_on` and an optional `reason`. |
+| `views/<id>.toml` | A screen made of data and components. |
+| `entities/<id>.toml` | An entity type; a higher layer replaces one with `based_on`, if the stored entities still fit. See [Entities](entities.md). |
+| `entity-sets/<id>.toml` | A named group of types and of other sets; replaced with `based_on` like a type. |
 
 `based_on` is the hash (`sha256:...`) of the rule below, as `praksis effective` shows it. If the
 rule below has changed, the operation is an error and nothing is silently skipped. A patch checks
@@ -41,3 +44,7 @@ field is reported. Permissions are never part of a layer.
 `layers update` refuses a result that is invalid or that gives a rule access no grant covers, and
 shows the difference. `--dry-run` only shows what would change; `--accept-new-access` moves the
 pins anyway, and the calls stay denied until you grant them.
+
+An update can also give a grant access without anyone deciding it: if a grant names an entity set
+and the update puts another type into that set, the grant would cover the new type. That counts as
+new access and is refused the same way.

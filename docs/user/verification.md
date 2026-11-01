@@ -10,6 +10,13 @@ Checks the ruleset that would run, its tests and `policy.toml`: it is valid, eve
 passing test that makes it fire, rules ask only for what they call, and grants name layers and
 capabilities that exist. It exits with 1 on errors.
 
+It also checks the entity types, sets and bindings of the layers, and what rules write in the
+arguments of the `entity.*` capabilities: a type or field that does not exist, a value of the wrong
+type, a required field left out, a filter that is not valid, a reveal of a field that is not
+sensitive. A value that is an expression is checked when the rule runs. A candidate that puts a
+type into a set that a grant names is an error until you accept the new access. See
+[Entities](entities.md).
+
 - `--replay` also runs the stored events through the ruleset in use and through the candidate
   and lists the events they treat differently (`-n` sets how many).
 - `--update` checks what `layers update` would produce.

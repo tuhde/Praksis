@@ -19,6 +19,16 @@ can replace, disable or patch the rules below it, so a private layer can adapt a
 without editing it. Layers that come from git are pinned to a commit in a lockfile and move only
 when you say so. See [Layers](layers.md).
 
+**Entity.** A piece of typed data that Praksis keeps: a contact, a note. A type says which fields it
+has, which are required or unique, and which refer to other types. Entities are created, read,
+changed and deleted by rules and by you with the capabilities `entity.*`, under the same grants
+and audit log, and every change is an event. A **set** names some types, so that a grant or a
+storage can name them once. See [Entities](entities.md).
+
+**Storage.** Where the entities of a type are kept: the database of the daemon, or a JSON file, a
+CSV file or a database table that a module provides. You choose in `praksis.toml`. See
+[Where entities are kept](storage.md).
+
 **Effect class.** What a call can change: `read-only`, `local-write`, `destructive` or
 `external` (effects outside this machine). A rule declares the strongest class it uses.
 

@@ -13,6 +13,8 @@ The documentation is licensed under
 - [Rules](user/rules.md)
 - [Layers](user/layers.md)
 - [Permissions](user/permissions.md)
+- [Entities](user/entities.md)
+- [Where entities are kept](user/storage.md)
 - [Verification and trials](user/verification.md)
 - [The AI features](user/ai.md)
 - [Offline mode](user/offline.md)
@@ -26,7 +28,9 @@ The documentation is licensed under
 - [Modules](modules/overview.md)
 - [Module maildir](modules/maildir.md)
 - [Module praksis](modules/praksis.md)
+- [Module entity](modules/entity.md)
 
 ## Developing
 
 - [Writing the documentation](dev/documentation.md)
+- [Writing an entity storage](dev/storage-backends.md)

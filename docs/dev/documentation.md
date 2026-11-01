@@ -8,7 +8,8 @@
 - The wiki is output only. `tools/build-wiki.py OUTPUT_DIR` builds it from `docs/` (page names from
   the titles, links rewritten, `index.md` as Home and the sidebar), and the workflow
   `.github/workflows/wiki.yml` pushes the result. Two pages must not have the same title.
-- `docs/reference/cli.md` and `docs/modules/*.md` are generated. After a change to a command or a
+- `docs/reference/cli.md` and `docs/modules/*.md` are generated (the pages of the built-in modules
+  `praksis` and `entity` too). After a change to a command or a
   module, run the build with `-Dpraksis.docs.update=true` and commit the result.
 - Pages are shown by `praksis help` and in the Help tab of Praksis Desktop. The tab reads headings,
   paragraphs, bullet and numbered lists, tables, block quotes, indented or fenced code, and in the

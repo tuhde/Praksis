@@ -19,7 +19,31 @@ the rule's layer. The file is never part of a ruleset, an update cannot change i
 A matcher is `{ equals = ... }`, `{ one_of = [...] }` or `{ prefix = "..." }` (strings only). Only
 parameters that the module marks as limitable can have one; the module's page says which. An
 argument without a matcher is not restricted. Destructive and external effects need an explicit
-grant.
+grant. If an argument is a list, a grant covers it only if it covers every element.
+
+## Entities
+
+The type of an entity is a parameter that a grant can limit, so each layer is allowed the types it
+needs and no more:
+
+    [[grant]]
+    id = "notes"
+    layer = "mine"
+    capability = "entity.create"
+    [grant.args]
+    type = { one_of = ["note", "memo"] }
+
+A grant can also name an entity set (`type = { set = "docs" }`, only on the parameter `type` of the
+`entity.*` capabilities). It covers the types that the set holds now, also those of the sets inside
+it, and it follows the set when the set changes. A type that is added to the set is covered without
+anyone deciding it, which is why a layer update or a verification that adds a type to a set that a
+grant names counts as new access and is refused until you accept it.
+
+The values of fields marked `sensitive` are not returned by `entity.read` or `entity.query`; a rule
+needs the capability `entity.reveal` and a grant for it, which can name the fields
+(`fields = { one_of = ["email"] }`). A rule that deletes an entity is also held to the grants for
+everything that the delete takes along (the entities that cascade, the references that are
+cleared). See [Entities](entities.md).
 
     praksis grants            # what is in effect
     praksis grants revoke <id>
@@ -46,7 +70,9 @@ secret and to the capabilities that may use it:
     [credential."imap:work"]
     command = ["pass", "show", "mail/work"]
 
-Nothing secret is stored, and the secret never appears in a rule, a message or the logs.
+Nothing secret is stored, and the secret never appears in a rule, a message or the logs. The
+password of a database that holds entities is bound the same way, to the component
+`entity-storage:<name>` (see [Where entities are kept](storage.md)).
 
 ## The audit log
 
