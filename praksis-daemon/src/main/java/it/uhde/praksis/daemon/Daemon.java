@@ -69,7 +69,7 @@ public final class Daemon implements AutoCloseable {
   private Store store;
   private final java.util.concurrent.atomic.AtomicReference<EntityService> entityService =
       new java.util.concurrent.atomic.AtomicReference<>();
-  private Engine engine;
+  private volatile Engine engine;
   private Approvals approvals;
   private Shadows shadows;
   private Screens screens;
@@ -110,7 +110,17 @@ public final class Daemon implements AutoCloseable {
       loaded
           .problems()
           .forEach(p -> LOG.log(System.Logger.Level.WARNING, "entity type left out: " + p));
-      entityService.set(new EntityService(store, loaded.catalog(), clock));
+      entityService.set(
+          new EntityService(
+              store,
+              loaded.catalog(),
+              clock,
+              event -> {
+                Engine running = engine;
+                if (running != null) {
+                  running.queueStored(event);
+                } // else the event is pending in the store and recover() finds it
+              }));
     } catch (java.io.IOException e) {
       throw new DaemonException("cannot read the entity types: " + e.getMessage(), e);
     }

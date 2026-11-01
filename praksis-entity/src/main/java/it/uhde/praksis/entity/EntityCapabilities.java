@@ -6,6 +6,7 @@ import it.uhde.praksis.capability.CapabilityContext;
 import it.uhde.praksis.capability.CapabilityDescriptor;
 import it.uhde.praksis.capability.CapabilityException;
 import it.uhde.praksis.capability.EffectClass;
+import it.uhde.praksis.capability.EventTypeDescriptor;
 import it.uhde.praksis.capability.FieldDescriptor;
 import it.uhde.praksis.capability.ModuleDescriptor;
 import it.uhde.praksis.capability.ValueType;
@@ -113,7 +114,22 @@ public final class EntityCapabilities {
                     in("type", ValueType.STRING, true, true),
                     in("id", ValueType.STRING, true, false)),
                 List.of(out("deleted", ValueType.BOOL)))),
-        List.of());
+        List.of(
+            new EventTypeDescriptor(
+                "entity.created",
+                List.of(
+                    out("type", ValueType.STRING),
+                    out("id", ValueType.STRING),
+                    out("fields", ValueType.LIST))),
+            new EventTypeDescriptor(
+                "entity.updated",
+                List.of(
+                    out("type", ValueType.STRING),
+                    out("id", ValueType.STRING),
+                    out("fields", ValueType.LIST))),
+            new EventTypeDescriptor(
+                "entity.deleted",
+                List.of(out("type", ValueType.STRING), out("id", ValueType.STRING)))));
   }
 
   /** The five capabilities by name. */
@@ -162,10 +178,13 @@ public final class EntityCapabilities {
     return (Map<String, Object>) args.get(key);
   }
 
+  private static EntityService.Call call(CapabilityContext c) {
+    return new EntityService.Call(c.dryRun(), c.event(), c.idempotencyKey());
+  }
+
   private Map<String, Object> create(CapabilityContext c, Map<String, Object> args)
       throws EntityException {
-    Map<String, Object> e =
-        service().create(text(args, "type"), map(args, "values"), c.idempotencyKey(), c.dryRun());
+    Map<String, Object> e = service().create(text(args, "type"), map(args, "values"), call(c));
     return Map.of("id", e.get("id"), "entity", e);
   }
 
@@ -203,12 +222,12 @@ public final class EntityCapabilities {
   private Map<String, Object> update(CapabilityContext c, Map<String, Object> args)
       throws EntityException {
     return found(
-        service().update(text(args, "type"), text(args, "id"), map(args, "values"), c.dryRun()));
+        service().update(text(args, "type"), text(args, "id"), map(args, "values"), call(c)));
   }
 
   private Map<String, Object> delete(CapabilityContext c, Map<String, Object> args)
       throws EntityException {
-    return Map.of("deleted", service().delete(text(args, "type"), text(args, "id"), c.dryRun()));
+    return Map.of("deleted", service().delete(text(args, "type"), text(args, "id"), call(c)));
   }
 
   private static Map<String, Object> found(Optional<Map<String, Object>> entity) {

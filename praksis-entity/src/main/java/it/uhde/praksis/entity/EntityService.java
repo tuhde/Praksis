@@ -3,6 +3,7 @@ package it.uhde.praksis.entity;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import it.uhde.praksis.capability.Event;
 import it.uhde.praksis.store.Store;
 import it.uhde.praksis.store.StoreException;
 import java.nio.charset.StandardCharsets;
@@ -18,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 /**
  * Creates, reads, queries, updates and deletes entities in the SQLite database of the store. It
@@ -30,16 +32,48 @@ import java.util.UUID;
  */
 public final class EntityService {
   private static final ObjectMapper JSON = new ObjectMapper();
+  private static final ObjectMapper CANONICAL =
+      new ObjectMapper()
+          .enable(com.fasterxml.jackson.databind.SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS);
+
+  /** The longest chain of events that entity changes may cause; a write beyond it is refused. */
+  public static final int MAX_EVENT_DEPTH = 8;
+
+  /**
+   * The circumstances of a write.
+   *
+   * @param dryRun check everything, change nothing, emit nothing
+   * @param cause the event whose handling makes this call, or empty (a command)
+   * @param idempotencyKey the same for every retry of the same action, or null
+   */
+  public record Call(boolean dryRun, Optional<Event> cause, String idempotencyKey) {
+    public static Call of(boolean dryRun) {
+      return new Call(dryRun, Optional.empty(), null);
+    }
+  }
+
   private static final String TOPIC = "entities";
 
   private final Store store;
   private final EntityCatalog catalog;
   private final Clock clock;
+  private final Consumer<Event> queued;
 
-  public EntityService(Store store, EntityCatalog catalog, Clock clock) {
+  /**
+   * Creates the service. Every change stores an event ({@code entity.created}, {@code
+   * entity.updated} or {@code entity.deleted}) in the same transaction, and after the commit hands
+   * it to {@code queued}, which has the engine handle it.
+   */
+  public EntityService(Store store, EntityCatalog catalog, Clock clock, Consumer<Event> queued) {
     this.store = store;
     this.catalog = catalog;
     this.clock = clock;
+    this.queued = queued;
+  }
+
+  /** A service whose events are stored but not handed on. */
+  public EntityService(Store store, EntityCatalog catalog, Clock clock) {
+    this(store, catalog, clock, e -> {});
   }
 
   public EntityCatalog catalog() {
@@ -69,29 +103,37 @@ public final class EntityService {
   }
 
   private interface Work<T> {
-    T run(Connection connection) throws SQLException, EntityException;
+    T run(Connection connection) throws SQLException, EntityException, StoreException;
   }
 
   private <T> T read(Work<T> work) throws EntityException {
-    return run(false, null, work);
+    return run(false, null, List.of(), work);
   }
 
-  private <T> T run(boolean dryRun, String topic, Work<T> work) throws EntityException {
+  /**
+   * Runs {@code work} as a transaction. The events that it put in {@code events} were stored in the
+   * same transaction; after the commit (and not for a dry run) they are handed to the engine.
+   */
+  private <T> T run(boolean dryRun, String topic, List<Event> events, Work<T> work)
+      throws EntityException {
     try {
-      return store.transaction(
-          dryRun ? null : topic,
-          c -> {
-            T result;
-            try {
-              result = work.run(c);
-            } catch (EntityException e) {
-              throw new Failed(e);
-            }
-            if (dryRun) {
-              throw new DryRunDone(result);
-            }
-            return result;
-          });
+      T result =
+          store.transaction(
+              dryRun ? null : topic,
+              c -> {
+                T r;
+                try {
+                  r = work.run(c);
+                } catch (EntityException e) {
+                  throw new Failed(e);
+                }
+                if (dryRun) {
+                  throw new DryRunDone(r);
+                }
+                return r;
+              });
+      events.forEach(queued);
+      return result;
     } catch (DryRunDone done) {
       @SuppressWarnings("unchecked")
       T result = (T) done.result;
@@ -103,37 +145,91 @@ public final class EntityService {
     }
   }
 
+  private static void checkDepth(Call call) throws EntityException {
+    int depth = call.cause().map(e -> e.depth() + 1).orElse(0);
+    if (depth > MAX_EVENT_DEPTH) {
+      throw new EntityException(
+          "event depth limit "
+              + MAX_EVENT_DEPTH
+              + " reached: rules change entities and react to the change in a loop");
+    }
+  }
+
+  /**
+   * The names in the order the type declares its fields, so that an event is the same each time.
+   */
+  private static List<String> inTypeOrder(EntityType type, java.util.Collection<String> names) {
+    return type.fields().stream().map(EntityType.Field::name).filter(names::contains).toList();
+  }
+
+  /** The event for a change; it carries no values, so reading them needs a grant to read. */
+  private Event event(
+      Call call, String kind, EntityType type, String id, List<String> fields, String keyPart) {
+    Map<String, Object> data = new LinkedHashMap<>();
+    data.put("type", type.id());
+    data.put("id", id);
+    if (fields != null) {
+      data.put("fields", fields);
+    }
+    Instant now = clock.instant();
+    return new Event(
+        UUID.randomUUID().toString(),
+        "entity." + kind,
+        EntityCapabilities.MODULE,
+        now,
+        "entity:" + type.id() + ":" + id,
+        Optional.of("entity." + kind + ":" + type.id() + ":" + id + keyPart),
+        call.cause().map(Event::id),
+        call.cause().map(e -> e.depth() + 1).orElse(0),
+        data);
+  }
+
   private EntityType type(String id) throws EntityException {
     return catalog
         .get(id)
         .orElseThrow(() -> new EntityException("unknown entity type '" + id + "'"));
   }
 
-  /**
-   * Creates an entity. If {@code idempotencyKey} is given the id is made from the type and the key,
-   * so that a retry of the same action finds the entity it already made and returns it.
-   */
+  /** Creates an entity; see {@link #create(String, Map, Call)}. */
   public Map<String, Object> create(
       String typeId, Map<String, Object> values, String idempotencyKey, boolean dryRun)
       throws EntityException {
+    return create(typeId, values, new Call(dryRun, Optional.empty(), idempotencyKey));
+  }
+
+  /**
+   * Creates an entity and the event {@code entity.created}. If the call has an idempotency key the
+   * id is made from the type and the key, so that a retry of the same action finds the entity it
+   * already made, returns it and emits nothing again.
+   */
+  public Map<String, Object> create(String typeId, Map<String, Object> values, Call call)
+      throws EntityException {
     EntityType type = type(typeId);
+    checkDepth(call);
     Map<String, Object> fields = checked(type, values, true);
+    String key = call.idempotencyKey();
     String id =
-        idempotencyKey == null || idempotencyKey.isEmpty()
+        key == null || key.isEmpty()
             ? UUID.randomUUID().toString()
-            : UUID.nameUUIDFromBytes(
-                    (typeId + "\0" + idempotencyKey).getBytes(StandardCharsets.UTF_8))
+            : UUID.nameUUIDFromBytes((typeId + "\0" + key).getBytes(StandardCharsets.UTF_8))
                 .toString();
     Instant now = Instant.parse(EntityValues.time(clock.instant()));
+    List<Event> events = new ArrayList<>();
     return run(
-        dryRun,
+        call.dryRun(),
         TOPIC,
+        events,
         c -> {
           Optional<Map<String, Object>> existing = get(c, type, id);
-          if (existing.isPresent() && idempotencyKey != null && !idempotencyKey.isEmpty()) {
+          if (existing.isPresent() && key != null && !key.isEmpty()) {
             return existing.get();
           }
           write(c, type, id, now, now, fields, true);
+          if (!call.dryRun()) {
+            Event e = event(call, "created", type, id, inTypeOrder(type, fields.keySet()), "");
+            store.append(e);
+            events.add(e);
+          }
           return entity(type, id, now, now, fields);
         });
   }
@@ -195,19 +291,29 @@ public final class EntityService {
         });
   }
 
+  /** Changes an entity; see {@link #update(String, String, Map, Call)}. */
+  public Optional<Map<String, Object>> update(
+      String typeId, String id, Map<String, Object> values, boolean dryRun) throws EntityException {
+    return update(typeId, id, values, Call.of(dryRun));
+  }
+
   /**
    * Changes fields of an entity: a field in {@code values} gets the new value, or is removed if the
    * value is null (not allowed for a required field). Returns the entity, or empty if there is
-   * none.
+   * none. If no value differs from what is stored nothing is written and no event is emitted, so a
+   * rule that sets a value on every {@code entity.updated} does not trigger itself.
    */
   public Optional<Map<String, Object>> update(
-      String typeId, String id, Map<String, Object> values, boolean dryRun) throws EntityException {
+      String typeId, String id, Map<String, Object> values, Call call) throws EntityException {
     EntityType type = type(typeId);
+    checkDepth(call);
     Map<String, Object> changes = checked(type, values, false);
     Instant now = Instant.parse(EntityValues.time(clock.instant()));
+    List<Event> events = new ArrayList<>();
     return run(
-        dryRun,
+        call.dryRun(),
         TOPIC,
+        events,
         c -> {
           Optional<Map<String, Object>> old = get(c, type, id);
           if (old.isEmpty()) {
@@ -215,28 +321,71 @@ public final class EntityService {
           }
           Map<String, Object> fields = new LinkedHashMap<>(old.get());
           fields.keySet().removeAll(EntityType.RESERVED);
+          List<String> changed = new ArrayList<>();
           for (var e : changes.entrySet()) {
+            EntityType.Field f = type.field(e.getKey()).orElseThrow();
+            Object before = fields.get(f.name());
             if (e.getValue() == null) {
-              if (type.field(e.getKey()).orElseThrow().required()) {
+              if (f.required()) {
                 throw new EntityException("field '" + e.getKey() + "' is required");
               }
-              fields.remove(e.getKey());
+              fields.remove(f.name());
             } else {
-              fields.put(e.getKey(), e.getValue());
+              fields.put(f.name(), e.getValue());
             }
+            if (!same(f, before, fields.get(f.name()))) {
+              changed.add(f.name());
+            }
+          }
+          if (changed.isEmpty()) {
+            return old;
           }
           Instant created = (Instant) old.get().get("created");
           write(c, type, id, created, now, fields, false);
+          if (!call.dryRun()) {
+            Event e =
+                event(
+                    call,
+                    "updated",
+                    type,
+                    id,
+                    inTypeOrder(type, changed),
+                    ":" + now.toEpochMilli());
+            store.append(e);
+            events.add(e);
+          }
           return Optional.of(entity(type, id, created, now, fields));
         });
   }
 
-  /** Deletes an entity; false if there was none. */
+  /** Whether two values of a field are the same once stored. */
+  private static boolean same(EntityType.Field f, Object a, Object b) throws EntityException {
+    if (a == null || b == null) {
+      return a == b;
+    }
+    try {
+      return CANONICAL
+          .writeValueAsString(EntityValues.toStored(f.type(), a))
+          .equals(CANONICAL.writeValueAsString(EntityValues.toStored(f.type(), b)));
+    } catch (JsonProcessingException e) {
+      throw new EntityException("cannot compare '" + f.name() + "': " + e.getOriginalMessage(), e);
+    }
+  }
+
+  /** Deletes an entity; see {@link #delete(String, String, Call)}. */
   public boolean delete(String typeId, String id, boolean dryRun) throws EntityException {
+    return delete(typeId, id, Call.of(dryRun));
+  }
+
+  /** Deletes an entity and emits {@code entity.deleted}; false if there was none. */
+  public boolean delete(String typeId, String id, Call call) throws EntityException {
     EntityType type = type(typeId);
+    checkDepth(call);
+    List<Event> events = new ArrayList<>();
     return run(
-        dryRun,
+        call.dryRun(),
         TOPIC,
+        events,
         c -> {
           int n;
           try (PreparedStatement s =
@@ -246,6 +395,11 @@ public final class EntityService {
             n = s.executeUpdate();
           }
           unique(c, type, id, Map.of(), false);
+          if (n > 0 && !call.dryRun()) {
+            Event e = event(call, "deleted", type, id, null, ":" + clock.instant().toEpochMilli());
+            store.append(e);
+            events.add(e);
+          }
           return n > 0;
         });
   }

@@ -248,6 +248,15 @@ public final class Engine implements EventSink, AutoCloseable {
     executor.shutdown();
   }
 
+  /**
+   * Queues an event that is already in the store, for a caller that stored it in the same
+   * transaction as the change it reports. If the daemon stops before this call, {@link #recover}
+   * finds the event after the restart.
+   */
+  public void queueStored(Event event) {
+    enqueue(event);
+  }
+
   private void enqueue(Event event) {
     synchronized (lock) {
       if (closed) {

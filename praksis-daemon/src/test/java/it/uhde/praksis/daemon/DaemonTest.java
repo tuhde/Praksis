@@ -141,6 +141,94 @@ class DaemonTest {
   }
 
   @Test
+  void anEntityChangeIsAnEventThatRulesHandle() throws Exception {
+    write(
+        "ruleset/entities/note.toml",
+        """
+        format_version = 1
+        id = "note"
+        title = "Note"
+        [[field]]
+        name = "subject"
+        type = "string"
+        """);
+    write(
+        "ruleset/entities/journal.toml",
+        """
+        format_version = 1
+        id = "journal"
+        title = "Journal"
+        [[field]]
+        name = "note"
+        type = "string"
+        required = true
+        """);
+    // a mail makes a note; the note (an event) makes a journal entry; the journal entry makes
+    // a note again, which would go on forever without the depth limit
+    write(
+        "ruleset/rules/note.from-mail.toml",
+        """
+        id = "note.from-mail"
+        effect = "local-write"
+        needs = ["entity.create"]
+        [trigger]
+        kind = "event"
+        type = "mail.received"
+        [[action]]
+        id = "make"
+        capability = "entity.create"
+        args = { type = "note", values = { subject = "from mail" } }
+        """);
+    write(
+        "ruleset/rules/note.journal.toml",
+        """
+        id = "note.journal"
+        effect = "local-write"
+        needs = ["entity.create"]
+        [trigger]
+        kind = "event"
+        type = "entity.created"
+        filter = "event.data.type == 'note' || event.data.type == 'journal'"
+        [[action]]
+        id = "make"
+        capability = "entity.create"
+        args = { type = "journal", values = { cel = "{'note': event.data.id}" } }
+        """);
+    write(
+        "policy.toml",
+        """
+        format_version = 1
+
+        [[grant]]
+        id = "archive"
+        layer = "ruleset"
+        capability = "mail.move"
+        [grant.args]
+        folder = { equals = "Archive" }
+
+        [[grant]]
+        id = "entities"
+        layer = "ruleset"
+        capability = "entity.create"
+        [grant.args]
+        type = { one_of = ["note", "journal"] }
+        """);
+    Files.writeString(mail.resolve("new/1700000000.M1P2.host"), "Subject: hi\n\nbody\n");
+    start();
+    // the chain is cut at the depth limit: the last create is refused, and the log says why
+    await(
+        () ->
+            logHas(
+                x ->
+                    "note.journal".equals(x.ruleId())
+                        && x.message() != null
+                        && x.message().contains("event depth limit")));
+    assertThat(ask(new Request.Changes(0, 0)))
+        .isInstanceOfSatisfying(
+            Response.ChangeList.class, c -> assertThat(c.topics()).contains("entities"));
+  }
+
+  @Test
   void theDocumentationIsServed() throws Exception {
     start();
     {

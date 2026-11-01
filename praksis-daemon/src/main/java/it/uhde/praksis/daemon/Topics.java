@@ -15,7 +15,8 @@ import java.util.concurrent.TimeUnit;
  */
 final class Topics {
   /** Every topic, in the order a client should refresh them. */
-  static final List<String> ALL = List.of("events", "log", "approvals", "shadow", "audit");
+  static final List<String> ALL =
+      List.of("events", "log", "approvals", "shadow", "audit", "entities");
 
   /** The longest a request waits for a change. */
   static final long MAX_WAIT_MILLIS = 30_000;

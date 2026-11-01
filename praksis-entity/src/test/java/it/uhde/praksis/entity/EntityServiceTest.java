@@ -4,6 +4,7 @@ package it.uhde.praksis.entity;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import it.uhde.praksis.capability.Event;
 import it.uhde.praksis.ruleset.Problem;
 import it.uhde.praksis.store.Store;
 import java.nio.file.Path;
@@ -70,6 +71,7 @@ class EntityServiceTest {
   private Store store;
   private EntityService service;
   private final List<String> topics = new ArrayList<>();
+  private final List<Event> queued = new ArrayList<>();
 
   /** A clock that moves one second with every reading, so that "created" orders the entities. */
   private static final class Ticking extends Clock {
@@ -100,7 +102,8 @@ class EntityServiceTest {
     EntityType contact = EntityTypes.parse(CONTACT, "contact", problems).orElseThrow();
     assertThat(problems).isEmpty();
     service =
-        new EntityService(store, new EntityCatalog(Map.of("contact", contact)), new Ticking());
+        new EntityService(
+            store, new EntityCatalog(Map.of("contact", contact)), new Ticking(), queued::add);
   }
 
   @AfterEach
@@ -377,5 +380,118 @@ class EntityServiceTest {
     }
     Map<String, Object> tooDeep = deep;
     assertThatThrownBy(() -> Filter.parse(t, tooDeep)).hasMessageContaining("8 levels");
+  }
+
+  @Test
+  void everyChangeStoresAndQueuesAnEventWithoutValues() throws Exception {
+    Map<String, Object> a = make("A", "a@x", 30L);
+    String id = (String) a.get("id");
+    service.update("contact", id, Map.of("age", 31, "name", "A2"), false);
+    service.delete("contact", id, false);
+
+    assertThat(queued)
+        .extracting(Event::type)
+        .containsExactly("entity.created", "entity.updated", "entity.deleted");
+    Event created = queued.get(0);
+    assertThat(created.source()).isEqualTo("entity");
+    assertThat(created.target()).isEqualTo("entity:contact:" + id);
+    assertThat(created.depth()).isZero();
+    assertThat(created.parent()).isEmpty();
+    assertThat(created.data())
+        .containsEntry("type", "contact")
+        .containsEntry("id", id)
+        .containsEntry("fields", List.of("name", "email", "age"))
+        .doesNotContainKey("entity");
+    assertThat(queued.get(1).data()).containsEntry("fields", List.of("name", "age"));
+    assertThat(queued.get(2).data()).containsOnlyKeys("type", "id");
+    // they are in the store, so that a restart finds them
+    assertThat(store.pending())
+        .extracting(Event::id)
+        .containsExactlyElementsOf(queued.stream().map(Event::id).toList());
+  }
+
+  @Test
+  void anEventNamesTheEventThatCausedTheChange() throws Exception {
+    Event cause =
+        new Event(
+            "ev-1",
+            "entity.created",
+            "entity",
+            Instant.parse("2026-11-01T10:00:00Z"),
+            "entity:contact:x",
+            Optional.empty(),
+            Optional.empty(),
+            2,
+            Map.of());
+    service.create(
+        "contact", Map.of("name", "A"), new EntityService.Call(false, Optional.of(cause), null));
+    assertThat(queued.get(0).parent()).contains("ev-1");
+    assertThat(queued.get(0).depth()).isEqualTo(3);
+  }
+
+  @Test
+  void aLoopOfRulesIsStoppedAtTheDepthLimit() throws Exception {
+    Event cause =
+        new Event(
+            "ev-1",
+            "entity.created",
+            "entity",
+            Instant.parse("2026-11-01T10:00:00Z"),
+            "entity:contact:x",
+            Optional.empty(),
+            Optional.empty(),
+            EntityService.MAX_EVENT_DEPTH,
+            Map.of());
+    EntityService.Call call = new EntityService.Call(false, Optional.of(cause), null);
+    assertThatThrownBy(() -> service.create("contact", Map.of("name", "A"), call))
+        .hasMessageContaining("event depth limit");
+    assertThatThrownBy(() -> service.delete("contact", "x", call))
+        .hasMessageContaining("event depth limit");
+    assertThat(names(Query.all())).isEmpty();
+    assertThat(queued).isEmpty();
+  }
+
+  @Test
+  void anUpdateThatChangesNothingWritesAndEmitsNothing() throws Exception {
+    Map<String, Object> a =
+        service.create(
+            "contact",
+            Map.of("name", "A", "tags", List.of(1, 2), "extra", Map.of("b", 1, "a", 2)),
+            null,
+            false);
+    String id = (String) a.get("id");
+    queued.clear();
+    Map<String, Object> same =
+        service
+            .update(
+                "contact",
+                id,
+                Map.of("name", "A", "tags", List.of(1L, 2L), "extra", Map.of("a", 2, "b", 1)),
+                false)
+            .orElseThrow();
+    assertThat(same.get("updated")).isEqualTo(a.get("updated"));
+    assertThat(queued).isEmpty();
+    service.update("contact", id, java.util.Collections.singletonMap("age", null), false);
+    assertThat(queued).isEmpty(); // removing what is not there is no change either
+    service.update("contact", id, Map.of("tags", List.of(2, 1)), false);
+    assertThat(queued).hasSize(1);
+    assertThat(queued.get(0).data()).containsEntry("fields", List.of("tags"));
+  }
+
+  @Test
+  void aRefusedOrDryRunChangeEmitsNothing() throws Exception {
+    make("A", "a@x", null);
+    queued.clear();
+    assertThatThrownBy(() -> make("B", "a@x", null)).hasMessageContaining("conflict");
+    service.create("contact", Map.of("name", "C"), null, true);
+    assertThat(queued).isEmpty();
+    assertThat(store.pending()).hasSize(1); // only the event of A
+  }
+
+  @Test
+  void aRetryOfACreateEmitsTheEventOnce() throws Exception {
+    service.create("contact", Map.of("name", "A"), "key-1", false);
+    service.create("contact", Map.of("name", "A"), "key-1", false);
+    assertThat(queued).hasSize(1);
   }
 }
