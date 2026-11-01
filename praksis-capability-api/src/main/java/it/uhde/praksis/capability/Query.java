@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-package it.uhde.praksis.entity;
+package it.uhde.praksis.capability;
 
 import java.util.Optional;
 

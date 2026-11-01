@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: Apache-2.0
 package it.uhde.praksis.daemon;
 
+import it.uhde.praksis.capability.Filter;
+import it.uhde.praksis.capability.Query;
 import it.uhde.praksis.entity.EntityException;
 import it.uhde.praksis.entity.EntityService;
 import it.uhde.praksis.entity.EntityType;
 import it.uhde.praksis.entity.EntityWire;
-import it.uhde.praksis.entity.Filter;
-import it.uhde.praksis.entity.Query;
+import it.uhde.praksis.entity.Filters;
 import it.uhde.praksis.protocol.Request;
 import it.uhde.praksis.protocol.Response;
 import it.uhde.praksis.store.AuditEntry;
@@ -100,7 +101,7 @@ final class Entities {
     Optional<Filter> filter =
         q.filter() == null || q.filter().isEmpty()
             ? Optional.empty()
-            : Optional.of(Filter.parse(type, q.filter()));
+            : Optional.of(Filters.parse(type, q.filter()));
     Query query =
         new Query(
             filter,

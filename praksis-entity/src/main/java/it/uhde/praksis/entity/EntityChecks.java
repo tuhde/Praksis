@@ -99,14 +99,14 @@ public final class EntityChecks {
       String where, EntityType type, Map<String, Arg> args, List<Finding> findings) {
     if (args.get("filter") instanceof Arg.Literal(Object filter)) {
       try {
-        Filter.parse(type, filter);
+        Filters.parse(type, filter);
       } catch (EntityException e) {
         findings.add(error(where, e.getMessage()));
       }
     }
     if (args.get("sort") instanceof Arg.Literal(Object sort)
         && sort instanceof String name
-        && Filter.typeOf(type, name).isEmpty()) {
+        && Filters.typeOf(type, name).isEmpty()) {
       findings.add(error(where, "cannot sort by '" + name + "' in type '" + type.id() + "'"));
     }
   }

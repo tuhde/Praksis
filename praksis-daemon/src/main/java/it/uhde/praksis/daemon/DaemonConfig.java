@@ -73,6 +73,7 @@ import java.util.Set;
  * @param params values for ruleset parameters, which win over the defaults in the layers
  * @param shadow the settings for rules on trial
  * @param plan the layer whose grants plans run under
+ * @param entities where the entities of each type are kept
  * @param offline whether nothing may leave this machine: modules that reach other machines are not
  *     used
  * @param enabledModules the modules to load; empty means every module in the directory. Unless
@@ -94,6 +95,7 @@ public record DaemonConfig(
     java.util.Set<String> enabledModules,
     ShadowConfig shadow,
     PlanConfig plan,
+    EntitiesConfig entities,
     boolean offline) {
   private static final String FILE = "praksis.toml";
   private static final Set<String> KEYS =
@@ -111,6 +113,7 @@ public record DaemonConfig(
           "enabled_modules",
           "shadow",
           "plan",
+          "entities",
           "offline");
 
   /** The layers that an AI may propose changes to. */
@@ -231,8 +234,17 @@ public record DaemonConfig(
     // Without a list, the modules that have settings are the ones in use: the runtime image ships
     // several, e.g. two mail backends, and only the one that was configured should start.
     java.util.Set<String> enabled = new java.util.LinkedHashSet<>(table.strings("enabled_modules"));
+    EntitiesConfig entitiesConfig =
+        table.table("entities", false).map(EntitiesConfig::parse).orElse(EntitiesConfig.none());
     if (!table.has("enabled_modules")) {
       enabled.addAll(settings.keySet());
+      // a module that provides a storage that is configured is in use too
+      enabled.addAll(
+          it.uhde.praksis.engine.ModuleLoader.modulesProviding(
+              moduleRoots,
+              entitiesConfig.storages().values().stream()
+                  .map(EntitiesConfig.Storage::backend)
+                  .collect(java.util.stream.Collectors.toSet())));
     }
     if (!layers.isEmpty() && table.has("ruleset")) {
       table.problem("'ruleset' and [[layer]] cannot be used together; make it a layer with path");
@@ -254,6 +266,7 @@ public record DaemonConfig(
             .table("plan", false)
             .map(t -> PlanConfig.parse(t, layerNames))
             .orElse(new PlanConfig(Optional.empty(), 30));
+    EntitiesConfig entities = entitiesConfig;
     if (!problems.isEmpty()) {
       throw new DaemonException(
           "invalid "
@@ -276,6 +289,7 @@ public record DaemonConfig(
         enabled,
         shadow,
         plan,
+        entities,
         offline);
   }
 
@@ -294,7 +308,7 @@ public record DaemonConfig(
   }
 
   /** TOML reading gives small integers as Integer; modules are promised Long (see ValueType). */
-  private static Object normalize(Object value) {
+  static Object normalize(Object value) {
     if (value instanceof Integer i) {
       return i.longValue();
     }
@@ -309,7 +323,7 @@ public record DaemonConfig(
     return value;
   }
 
-  private static Map<String, Object> normalizeMap(Map<String, Object> map) {
+  static Map<String, Object> normalizeMap(Map<String, Object> map) {
     Map<String, Object> out = new LinkedHashMap<>();
     map.forEach((k, v) -> out.put(k, normalize(v)));
     return out;

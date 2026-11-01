@@ -69,6 +69,7 @@ final class ModuleDescriptorReader {
             "module",
             "jdk_modules",
             "sources",
+            "backends",
             "network",
             "capability",
             "event"));
@@ -120,9 +121,11 @@ final class ModuleDescriptorReader {
     for (String n : t.strings("network")) {
       boolean known =
           t.strings("sources").contains(n)
+              || t.strings("backends").contains(n)
               || capabilities.stream().anyMatch(c -> c.name().equals(n));
       if (!known) {
-        t.problem("'network' names '" + n + "', which is neither a capability nor a source");
+        t.problem(
+            "'network' names '" + n + "', which is neither a capability, a source nor a backend");
       }
     }
     if (!problems.isEmpty()) {
@@ -140,7 +143,8 @@ final class ModuleDescriptorReader {
             capabilities,
             events,
             t.strings("sources"),
-            t.strings("network")),
+            t.strings("network"),
+            t.strings("backends")),
         module,
         apiVersion);
   }

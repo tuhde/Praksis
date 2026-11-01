@@ -11,4 +11,5 @@ module it.uhde.praksis.engine {
 
   uses it.uhde.praksis.capability.Capability;
   uses it.uhde.praksis.capability.EventSource;
+  uses it.uhde.praksis.capability.EntityStorage;
 }

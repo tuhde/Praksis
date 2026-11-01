@@ -5,6 +5,7 @@ import it.uhde.praksis.capability.Capability;
 import it.uhde.praksis.capability.CapabilityApi;
 import it.uhde.praksis.capability.CapabilityDescriptor;
 import it.uhde.praksis.capability.CapabilityException;
+import it.uhde.praksis.capability.EntityStorage;
 import it.uhde.praksis.capability.EventSource;
 import it.uhde.praksis.capability.ModuleDescriptor;
 import it.uhde.praksis.expression.ExpressionCompiler;
@@ -87,6 +88,7 @@ public final class ModuleLoader {
     List<ModuleDescriptor> descriptors = new ArrayList<>();
     Map<String, Capability> capabilities = new HashMap<>();
     List<EventSource> sources = new ArrayList<>();
+    Map<String, java.util.function.Supplier<EntityStorage>> backends = new HashMap<>();
 
     for (Path dir : moduleDirs(modulesDirs)) {
       ModuleDescriptorReader.Result read = ModuleDescriptorReader.read(dir.resolve("module.toml"));
@@ -161,6 +163,27 @@ public final class ModuleLoader {
                 + descriptor.sources());
       }
 
+      Map<String, java.util.function.Supplier<EntityStorage>> myBackends = new HashMap<>();
+      for (ServiceLoader.Provider<EntityStorage> p : providerList(layer, EntityStorage.class)) {
+        EntityStorage probe = p.get(); // only to read its name
+        myBackends.put(probe.name(), p::get);
+        probe.close();
+      }
+      if (!myBackends.keySet().equals(new HashSet<>(descriptor.backends()))) {
+        throw new ModuleLoadException(
+            "module '"
+                + name
+                + "' provides entity storages "
+                + new java.util.TreeSet<>(myBackends.keySet())
+                + " but module.toml declares backends "
+                + descriptor.backends());
+      }
+      for (String b : myBackends.keySet()) {
+        if (backends.putIfAbsent(b, myBackends.get(b)) != null) {
+          throw new ModuleLoadException("entity storage '" + b + "' is provided by two modules");
+        }
+      }
+
       for (String c : mine.keySet()) {
         if (capabilities.putIfAbsent(c, mine.get(c)) != null) {
           throw new ModuleLoadException("capability '" + c + "' is provided by two modules");
@@ -179,7 +202,7 @@ public final class ModuleLoader {
     } catch (IllegalArgumentException e) {
       throw new ModuleLoadException(e.getMessage(), e);
     }
-    return new LoadedModules(descriptors, capabilities, sources);
+    return new LoadedModules(descriptors, capabilities, sources, backends);
   }
 
   /** The descriptor in a {@code module.toml}, read without loading anything. */
@@ -207,6 +230,33 @@ public final class ModuleLoader {
       if (enabled.isEmpty() || enabled.contains(name)) {
         names.add(name);
       }
+    }
+    return names;
+  }
+
+  /**
+   * The names of the modules whose {@code module.toml} says that they provide one of these entity
+   * storages, found without loading anything. A module whose descriptor cannot be read is left out;
+   * loading it reports why.
+   */
+  public static Set<String> modulesProviding(List<Path> modulesDirs, Set<String> backends) {
+    Set<String> names = new java.util.TreeSet<>();
+    if (backends.isEmpty()) {
+      return names;
+    }
+    try {
+      for (Path dir : moduleDirs(modulesDirs)) {
+        try {
+          ModuleDescriptor d = ModuleDescriptorReader.read(dir.resolve("module.toml")).descriptor();
+          if (d.backends().stream().anyMatch(backends::contains)) {
+            names.add(d.name());
+          }
+        } catch (ModuleLoadException e) {
+          // reported when the module is loaded
+        }
+      }
+    } catch (ModuleLoadException e) {
+      // the directory cannot be listed; loading reports it
     }
     return names;
   }
@@ -280,6 +330,17 @@ public final class ModuleLoader {
       throw new ModuleLoadException(
           "cannot load module '" + label + "' from " + dir + ": " + e.getMessage(), e);
     }
+  }
+
+  private static <S> List<ServiceLoader.Provider<S>> providerList(
+      ModuleLayer layer, Class<S> service) {
+    List<ServiceLoader.Provider<S>> out = new ArrayList<>();
+    for (ServiceLoader.Provider<S> p : ServiceLoader.load(layer, service).stream().toList()) {
+      if (p.type().getModule().getLayer() == layer) {
+        out.add(p);
+      }
+    }
+    return out;
   }
 
   private static <S> List<S> providers(ModuleLayer layer, Class<S> service) {

@@ -226,4 +226,53 @@ class DaemonConfigTest {
     Files.writeString(home.resolve("praksis.toml"), "format_version = 1\noffline = true\n");
     assertThat(DaemonConfig.load(home).offline()).isTrue();
   }
+
+  @Test
+  void readsWhereEntitiesAreKept() throws Exception {
+    assertThat(DaemonConfig.load(home).entities().storages()).isEmpty();
+    Files.writeString(
+        home.resolve("praksis.toml"),
+        """
+        format_version = 1
+        [entities.storage.contacts]
+        backend = "json-file"
+        directory = "/data/contacts"
+        pretty = true
+        limit = 5
+        [entities.storage.books]
+        backend = "csv-file"
+        [entities.bind]
+        contact = "contacts"
+        book = "books"
+        """);
+    EntitiesConfig e = DaemonConfig.load(home).entities();
+    assertThat(e.storages()).containsOnlyKeys("contacts", "books");
+    assertThat(e.storages().get("contacts").backend()).isEqualTo("json-file");
+    assertThat(e.storages().get("contacts").settings())
+        .containsOnlyKeys("directory", "pretty", "limit")
+        .containsEntry("limit", 5L)
+        .containsEntry("pretty", true);
+    assertThat(e.bind()).containsEntry("contact", "contacts").containsEntry("book", "books");
+  }
+
+  @Test
+  void reportsMistakesInTheEntitySettings() throws Exception {
+    Files.writeString(
+        home.resolve("praksis.toml"),
+        """
+        format_version = 1
+        [entities]
+        what = 1
+        [entities.storage.a]
+        directory = "x"
+        [entities.bind]
+        note = "nowhere"
+        memo = 3
+        """);
+    assertThatThrownBy(() -> DaemonConfig.load(home))
+        .hasMessageContaining("unknown key 'what'")
+        .hasMessageContaining("missing 'backend'")
+        .hasMessageContaining("'note' is bound to 'nowhere', which is not in [entities.storage.*]")
+        .hasMessageContaining("'memo' must name a storage");
+  }
 }

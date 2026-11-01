@@ -44,6 +44,14 @@ public final class Store implements AutoCloseable {
     this.changes = listener;
   }
 
+  /**
+   * Tells the change listener that something changed in a topic, for a change that is kept outside
+   * this database (for example an entity in another storage) but that clients want to hear of.
+   */
+  public void touch(String topic) {
+    changes.accept(topic);
+  }
+
   /** Opens the database file, creating it and its parent directory if needed. */
   public static Store open(Path file) throws StoreException {
     try {

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import it.uhde.praksis.capability.Event;
+import it.uhde.praksis.capability.Query;
 import it.uhde.praksis.ruleset.Problem;
 import it.uhde.praksis.store.Store;
 import java.nio.file.Path;
@@ -129,7 +130,7 @@ class EntityServiceTest {
 
   private static Query where(Map<String, Object> filter) throws EntityException {
     EntityType t = EntityTypes.parse(CONTACT, "contact", new ArrayList<>()).orElseThrow();
-    return new Query(Optional.of(Filter.parse(t, filter)), "name", false, 100, 0);
+    return new Query(Optional.of(Filters.parse(t, filter)), "name", false, 100, 0);
   }
 
   @Test
@@ -354,32 +355,32 @@ class EntityServiceTest {
   @Test
   void badFiltersAreRefusedWithAReason() {
     EntityType t = EntityTypes.parse(CONTACT, "contact", new ArrayList<>()).orElseThrow();
-    assertThatThrownBy(() -> Filter.parse(t, "x")).hasMessageContaining("must be a map");
-    assertThatThrownBy(() -> Filter.parse(t, Map.of("field", "name")))
+    assertThatThrownBy(() -> Filters.parse(t, "x")).hasMessageContaining("must be a map");
+    assertThatThrownBy(() -> Filters.parse(t, Map.of("field", "name")))
         .hasMessageContaining("missing 'op'");
-    assertThatThrownBy(() -> Filter.parse(t, Map.of("op", "like")))
+    assertThatThrownBy(() -> Filters.parse(t, Map.of("op", "like")))
         .hasMessageContaining("unknown op 'like'");
-    assertThatThrownBy(() -> Filter.parse(t, Map.of("op", "equals", "field", "nope", "value", 1)))
+    assertThatThrownBy(() -> Filters.parse(t, Map.of("op", "equals", "field", "nope", "value", 1)))
         .hasMessageContaining("'nope' is not a field");
-    assertThatThrownBy(() -> Filter.parse(t, Map.of("op", "equals", "field", "photo", "value", 1)))
+    assertThatThrownBy(() -> Filters.parse(t, Map.of("op", "equals", "field", "photo", "value", 1)))
         .hasMessageContaining("'photo' is not a field");
-    assertThatThrownBy(() -> Filter.parse(t, Map.of("op", "prefix", "field", "age", "value", "1")))
+    assertThatThrownBy(() -> Filters.parse(t, Map.of("op", "prefix", "field", "age", "value", "1")))
         .hasMessageContaining("not a text field");
-    assertThatThrownBy(() -> Filter.parse(t, Map.of("op", "equals", "field", "age", "value", "x")))
+    assertThatThrownBy(() -> Filters.parse(t, Map.of("op", "equals", "field", "age", "value", "x")))
         .hasMessageContaining("must be of type int");
-    assertThatThrownBy(() -> Filter.parse(t, Map.of("op", "range", "field", "age")))
+    assertThatThrownBy(() -> Filters.parse(t, Map.of("op", "range", "field", "age")))
         .hasMessageContaining("give gt");
-    assertThatThrownBy(() -> Filter.parse(t, Map.of("op", "and", "of", List.of())))
+    assertThatThrownBy(() -> Filters.parse(t, Map.of("op", "and", "of", List.of())))
         .hasMessageContaining("list of conditions");
     assertThatThrownBy(
-            () -> Filter.parse(t, Map.of("op", "equals", "field", "name", "value", "a", "x", 1)))
+            () -> Filters.parse(t, Map.of("op", "equals", "field", "name", "value", "a", "x", 1)))
         .hasMessageContaining("unknown key 'x'");
     Map<String, Object> deep = Map.of("op", "equals", "field", "name", "value", "a");
     for (int i = 0; i < 10; i++) {
       deep = Map.of("op", "not", "of", deep);
     }
     Map<String, Object> tooDeep = deep;
-    assertThatThrownBy(() -> Filter.parse(t, tooDeep)).hasMessageContaining("8 levels");
+    assertThatThrownBy(() -> Filters.parse(t, tooDeep)).hasMessageContaining("8 levels");
   }
 
   @Test
@@ -578,7 +579,7 @@ class EntityServiceTest {
 
     EntityType person = people.catalog().get("person").orElseThrow();
     assertThatThrownBy(
-            () -> Filter.parse(person, Map.of("op", "equals", "field", "iban", "value", "DE01")))
+            () -> Filters.parse(person, Map.of("op", "equals", "field", "iban", "value", "DE01")))
         .hasMessageContaining("sensitive and cannot be used in a filter");
     assertThatThrownBy(
             () -> people.query("person", new Query(Optional.empty(), "iban", false, 10, 0)))

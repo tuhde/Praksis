@@ -462,6 +462,46 @@ class DaemonTest {
   }
 
   @Test
+  void aTypeBoundToAMissingStorageStopsTheStartWithAReason() throws Exception {
+    write(
+        "ruleset/entities/note.toml",
+        """
+        format_version = 1
+        id = "note"
+        title = "Note"
+        [[field]]
+        name = "subject"
+        type = "string"
+        """);
+    String settings = Files.readString(home.resolve("praksis.toml"));
+    write(
+        "praksis.toml",
+        settings
+            + """
+            [entities.storage.notes]
+            backend = "json-file"
+            [entities.bind]
+            note = "notes"
+            """);
+    assertThatThrownBy(this::start)
+        .hasMessageContaining("[entities.storage.notes]: no module provides the entity storage")
+        .hasMessageContaining("'json-file'");
+
+    write(
+        "praksis.toml",
+        settings
+            + """
+            [entities.storage.notes]
+            backend = "json-file"
+            [entities.bind]
+            memo = "notes"
+            """);
+    assertThatThrownBy(this::start)
+        .hasMessageContaining("[entities.bind]: there is no entity type 'memo'")
+        .hasMessageContaining("types: [note]");
+  }
+
+  @Test
   void theDocumentationIsServed() throws Exception {
     start();
     {

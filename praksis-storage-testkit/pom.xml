@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>it.uhde</groupId>
+    <artifactId>praksis-parent</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>praksis-storage-testkit</artifactId>
+  <name>Praksis storage test kit</name>
+  <description>The tests that every entity storage must pass. A backend extends the contract
+    class in its own tests.</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>it.uhde</groupId>
+      <artifactId>praksis-capability-api</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <!-- the parent gives these test scope; here they are the product -->
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <scope>compile</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.assertj</groupId>
+      <artifactId>assertj-core</artifactId>
+      <scope>compile</scope>
+    </dependency>
+  </dependencies>
+</project>

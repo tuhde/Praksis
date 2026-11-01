@@ -3,6 +3,7 @@ package it.uhde.praksis.daemon;
 
 import it.uhde.praksis.capability.Capability;
 import it.uhde.praksis.capability.CapabilityException;
+import it.uhde.praksis.capability.EntityStorage;
 import it.uhde.praksis.capability.Event;
 import it.uhde.praksis.capability.ModuleDescriptor;
 import it.uhde.praksis.docs.Docs;
@@ -15,6 +16,8 @@ import it.uhde.praksis.engine.ModuleLoader;
 import it.uhde.praksis.engine.StoreAuditLog;
 import it.uhde.praksis.entity.EntityCatalog;
 import it.uhde.praksis.entity.EntityService;
+import it.uhde.praksis.entity.EntityStorages;
+import it.uhde.praksis.entity.SqliteEntityStorage;
 import it.uhde.praksis.expression.ExpressionCompiler;
 import it.uhde.praksis.expression.Expressions;
 import it.uhde.praksis.git.GitCli;
@@ -67,6 +70,7 @@ public final class Daemon implements AutoCloseable {
   private Ruleset ruleset;
   private Store store;
   private Entities entities;
+  private EntityStorages entityStorages;
   private final java.util.concurrent.atomic.AtomicReference<EntityService> entityService =
       new java.util.concurrent.atomic.AtomicReference<>();
   private volatile Engine engine;
@@ -111,7 +115,7 @@ public final class Daemon implements AutoCloseable {
    * bottom to top. A file with a problem, or a layer that replaces a type wrongly, stops the start,
    * like a rule that is not valid.
    */
-  private void openEntities(Layers layers, Store store) throws DaemonException {
+  private void openEntities(Layers layers, Store store, GrantPolicy access) throws DaemonException {
     try {
       EntityCatalog.Loaded loaded = EntityCatalog.load(entitySources(layers));
       if (!loaded.problems().isEmpty()) {
@@ -119,19 +123,108 @@ public final class Daemon implements AutoCloseable {
             "the entity types are not valid:\n  "
                 + String.join("\n  ", loaded.problems().stream().map(Object::toString).toList()));
       }
+      EntityCatalog catalog = loaded.catalog();
+      entityStorages = openStorages(catalog, store, access);
       entityService.set(
           new EntityService(
               store,
-              loaded.catalog(),
+              catalog,
               clock,
               event -> {
                 Engine running = engine;
                 if (running != null) {
                   running.queueStored(event);
                 } // else the event is pending in the store and recover() finds it
-              }));
+              },
+              entityStorages));
     } catch (java.io.IOException e) {
       throw new DaemonException("cannot read the entity types: " + e.getMessage(), e);
+    }
+  }
+
+  /**
+   * The storages of the entity types: the daemon's own database for every type that {@code
+   * [entities.bind]} does not bind, and for each configured storage an instance of the backend a
+   * module provides, configured and opened for its types.
+   */
+  private EntityStorages openStorages(EntityCatalog catalog, Store store, GrantPolicy access)
+      throws DaemonException {
+    EntitiesConfig cfg = config.entities();
+    for (String type : cfg.bind().keySet()) {
+      if (catalog.get(type).isEmpty()) {
+        throw new DaemonException(
+            "[entities.bind]: there is no entity type '"
+                + type
+                + "' (types: "
+                + new java.util.TreeSet<>(catalog.types().keySet())
+                + ")");
+      }
+    }
+    java.util.List<it.uhde.praksis.entity.EntityType> unbound = new java.util.ArrayList<>();
+    Map<String, java.util.List<it.uhde.praksis.entity.EntityType>> byStorage =
+        new java.util.HashMap<>();
+    for (it.uhde.praksis.entity.EntityType t : catalog.types().values()) {
+      String name = cfg.bind().get(t.id());
+      if (name == null) {
+        unbound.add(t);
+      } else {
+        byStorage.computeIfAbsent(name, n -> new java.util.ArrayList<>()).add(t);
+      }
+    }
+    {
+      SqliteEntityStorage sqlite = new SqliteEntityStorage(store);
+      sqlite.open(EntityStorages.storageTypes(unbound));
+      Map<String, EntityStorage> bound = new java.util.HashMap<>();
+      java.util.List<EntityStorage> owned = new java.util.ArrayList<>();
+      CredentialResolver credentials = new CredentialResolver(access::policy, store, clock);
+      try {
+        for (EntitiesConfig.Storage cs : cfg.storages().values()) {
+          java.util.List<it.uhde.praksis.entity.EntityType> types =
+              byStorage.getOrDefault(cs.name(), java.util.List.of());
+          if (types.isEmpty()) {
+            LOG.log(
+                System.Logger.Level.WARNING,
+                "[entities.storage." + cs.name() + "] keeps no type: nothing is bound to it");
+            continue;
+          }
+          EntityStorage storage;
+          try {
+            storage =
+                modules
+                    .newBackend(cs.backend())
+                    .orElseThrow(
+                        () ->
+                            new DaemonException(
+                                "[entities.storage."
+                                    + cs.name()
+                                    + "]: no module provides the entity storage '"
+                                    + cs.backend()
+                                    + "' (provided: "
+                                    + new java.util.TreeSet<>(modules.backendNames())
+                                    + ")"));
+          } catch (IllegalStateException e) {
+            throw new DaemonException("[entities.storage." + cs.name() + "]: " + e.getMessage(), e);
+          }
+          owned.add(storage);
+          try {
+            storage.configure(cs.settings());
+            storage.useCredentials(credentials.forComponent("entity-storage:" + cs.name()));
+            java.nio.file.Path data = config.dataDirectory().resolve("storage").resolve(cs.name());
+            java.nio.file.Files.createDirectories(data);
+            storage.useDataDirectory(data);
+            storage.open(EntityStorages.storageTypes(types));
+          } catch (it.uhde.praksis.capability.CapabilityException
+              | it.uhde.praksis.capability.StorageException
+              | java.io.IOException e) {
+            throw new DaemonException("[entities.storage." + cs.name() + "]: " + e.getMessage(), e);
+          }
+          types.forEach(t -> bound.put(t.id(), storage));
+        }
+      } catch (DaemonException e) {
+        owned.forEach(EntityStorage::close);
+        throw e;
+      }
+      return new EntityStorages(sqlite, bound, owned);
     }
   }
 
@@ -176,7 +269,7 @@ public final class Daemon implements AutoCloseable {
       ruleset = effective.ruleset();
       GrantPolicy access = accessPolicy(config, modules.catalog(), effective);
       store = Store.open(config.database());
-      openEntities(layers, store);
+      openEntities(layers, store, access);
       entities = new Entities(entityService::get, store, clock);
       agent.bind(
           config, layers, modules, store, () -> effective, access, new StoreAuditLog(store), clock);
@@ -548,6 +641,9 @@ public final class Daemon implements AutoCloseable {
     }
     if (engine != null) {
       engine.close();
+    }
+    if (entityStorages != null) {
+      entityStorages.close();
     }
     if (store != null) {
       try {

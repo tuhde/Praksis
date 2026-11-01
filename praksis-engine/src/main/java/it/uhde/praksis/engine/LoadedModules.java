@@ -4,6 +4,7 @@ package it.uhde.praksis.engine;
 import it.uhde.praksis.capability.Capability;
 import it.uhde.praksis.capability.CapabilityException;
 import it.uhde.praksis.capability.Credentials;
+import it.uhde.praksis.capability.EntityStorage;
 import it.uhde.praksis.capability.EventSink;
 import it.uhde.praksis.capability.EventSource;
 import it.uhde.praksis.capability.ModuleDescriptor;
@@ -11,21 +12,48 @@ import it.uhde.praksis.ruleset.ModuleCatalog;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.function.Supplier;
 
 /** The modules found in the modules directory, with their capabilities and event sources. */
 public final class LoadedModules implements AutoCloseable {
   private final List<ModuleDescriptor> descriptors;
   private final Map<String, Capability> capabilities;
   private final List<EventSource> sources;
+  private final Map<String, Supplier<EntityStorage>> backends;
   private final List<EventSource> started = new ArrayList<>();
 
   LoadedModules(
       List<ModuleDescriptor> descriptors,
       Map<String, Capability> capabilities,
       List<EventSource> sources) {
+    this(descriptors, capabilities, sources, Map.of());
+  }
+
+  LoadedModules(
+      List<ModuleDescriptor> descriptors,
+      Map<String, Capability> capabilities,
+      List<EventSource> sources,
+      Map<String, Supplier<EntityStorage>> backends) {
     this.descriptors = List.copyOf(descriptors);
     this.capabilities = Map.copyOf(capabilities);
     this.sources = List.copyOf(sources);
+    this.backends = Map.copyOf(backends);
+  }
+
+  /**
+   * A new instance of the entity storage that a module provides under this name, not yet
+   * configured, or empty if no module does. (Several instances of one backend can exist, each for
+   * its own types.)
+   */
+  public Optional<EntityStorage> newBackend(String name) {
+    Supplier<EntityStorage> factory = backends.get(name);
+    return factory == null ? Optional.empty() : Optional.of(factory.get());
+  }
+
+  /** The names of the entity storages the modules provide. */
+  public java.util.Set<String> backendNames() {
+    return backends.keySet();
   }
 
   /**
@@ -43,7 +71,7 @@ public final class LoadedModules implements AutoCloseable {
             throw new IllegalArgumentException("capability '" + name + "' is provided twice");
           }
         });
-    return new LoadedModules(all, merged, sources);
+    return new LoadedModules(all, merged, sources, backends);
   }
 
   /**
@@ -73,7 +101,18 @@ public final class LoadedModules implements AutoCloseable {
         kept.add(s);
       }
     }
-    return new LoadedModules(descriptors, out, kept);
+    Map<String, Supplier<EntityStorage>> backendsOffline = new java.util.HashMap<>();
+    backends.forEach(
+        (name, factory) ->
+            backendsOffline.put(
+                name,
+                network.contains(name)
+                    ? () -> {
+                      throw new IllegalStateException(
+                          "offline = true: the storage '" + name + "' needs the network");
+                    }
+                    : factory));
+    return new LoadedModules(descriptors, out, kept, backendsOffline);
   }
 
   /** A capability of a module that needs the network, while the program is offline. */

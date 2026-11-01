@@ -8,7 +8,9 @@ import it.uhde.praksis.capability.CapabilityException;
 import it.uhde.praksis.capability.EffectClass;
 import it.uhde.praksis.capability.EventTypeDescriptor;
 import it.uhde.praksis.capability.FieldDescriptor;
+import it.uhde.praksis.capability.Filter;
 import it.uhde.praksis.capability.ModuleDescriptor;
+import it.uhde.praksis.capability.Query;
 import it.uhde.praksis.capability.ValueType;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -259,7 +261,7 @@ public final class EntityCapabilities {
     Optional<Filter> filter =
         args.get("filter") == null
             ? Optional.empty()
-            : Optional.of(Filter.parse(t, args.get("filter")));
+            : Optional.of(Filters.parse(t, args.get("filter")));
     Query q =
         new Query(
             filter,

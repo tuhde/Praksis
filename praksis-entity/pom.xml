@@ -35,5 +35,11 @@
       <groupId>com.fasterxml.jackson.dataformat</groupId>
       <artifactId>jackson-dataformat-toml</artifactId>
     </dependency>
+    <dependency>
+      <groupId>it.uhde</groupId>
+      <artifactId>praksis-storage-testkit</artifactId>
+      <version>${project.version}</version>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 </project>
