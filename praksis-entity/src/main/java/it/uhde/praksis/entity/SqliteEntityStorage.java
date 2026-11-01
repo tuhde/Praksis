@@ -302,6 +302,57 @@ public final class SqliteEntityStorage implements EntityStorage {
         });
   }
 
+  /**
+   * An entity as it is stored, without reading its values as the type says: the values are those of
+   * the JSON in the database ({@code String}, {@code Number}, {@code Boolean}, {@code List}, {@code
+   * Map}), also for fields that the type does not have (any more).
+   */
+  public record Raw(
+      String id,
+      Instant created,
+      Instant updated,
+      String createdBy,
+      String updatedBy,
+      Map<String, Object> json) {}
+
+  /** All entities of the type as they are stored, in order of creation. */
+  public List<Raw> raw(String typeId) throws StorageException {
+    return tx(
+        null,
+        c -> {
+          List<Raw> out = new ArrayList<>();
+          try (PreparedStatement s =
+              c.prepareStatement(
+                  "SELECT id, created, updated, created_by, updated_by, json FROM entity"
+                      + " WHERE type = ? ORDER BY created, id")) {
+            s.setString(1, typeId);
+            try (ResultSet r = s.executeQuery()) {
+              while (r.next()) {
+                Map<String, Object> json;
+                try {
+                  json =
+                      JSON.readValue(
+                          r.getString(6),
+                          new com.fasterxml.jackson.core.type.TypeReference<
+                              Map<String, Object>>() {});
+                } catch (JsonProcessingException e) {
+                  throw new StorageException("stored entity " + r.getString(1) + " is damaged", e);
+                }
+                out.add(
+                    new Raw(
+                        r.getString(1),
+                        Instant.parse(r.getString(2)),
+                        Instant.parse(r.getString(3)),
+                        r.getString(4),
+                        r.getString(5),
+                        json));
+              }
+            }
+          }
+          return out;
+        });
+  }
+
   private static StoredEntity row(StorageType type, ResultSet r)
       throws SQLException, StorageException {
     Map<String, Object> stored;

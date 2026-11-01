@@ -49,6 +49,68 @@ Because the entities that are stored must still fit, a replacement may add optio
 relax `required` or `unique`, but it may not remove a field, change its type, add a required field,
 make a field required, unique or a reference, or make a sensitive field readable.
 
+## Changing a type
+
+Your own type file can be edited. Adding an optional field, or relaxing `required` or `unique`, needs
+nothing else. A change that the stored entities do not fit (a field removed, renamed or of another
+type, a new required field, a field that becomes required, unique or a reference) comes with
+**migration steps**, which turn the stored entities into entities of the new version when the
+daemon first starts with it:
+
+    format_version = 1
+    id = "contact"
+    title = "Contact"
+    migrates_from = "sha256:..."          # the version the entities were made under
+
+    [[field]]
+    name = "mobile"
+    type = "string"
+    # ... the other fields of the new version ...
+
+    [[migration]]
+    rename = { from = "phone", to = "mobile" }
+    [[migration]]
+    drop = "fax"
+    [[migration]]
+    convert = { field = "age", to = "int" }
+    [[migration]]
+    default = { field = "country", value = "DE" }
+    [[migration]]
+    check = "email"
+
+| Step | Does |
+|---|---|
+| `rename` | The field gets another name. |
+| `drop` | The field and its values go. |
+| `convert` | The values become another type: text to `int`, `double`, `bool` or `timestamp`; `int` to `double` or `string`; `double` to `int` (whole numbers) or `string`; `bool` or `timestamp` to `string`. |
+| `default` | An entity without a value gets this one (for a new required field). |
+| `check` | Changes nothing. It says that the stored values are meant to fit a rule that the new version adds (unique, a reference), and fails the migration if they do not. |
+
+The version is the hash that `praksis entities types` shows as `version`. A layer that replaces the
+type of a layer below names that version in `based_on` and needs no `migrates_from`. The steps are
+applied in order to every entity; then each is checked as a new entity is checked (types, required
+and unique values, references). If one does not fit, nothing is changed, the daemon does not start
+and says which entity; put the old type file back and it starts as before. No events are emitted.
+The daemon notes in its database which version the entities have, so the steps run once. A change
+without steps, or whose steps start from another version, leaves the data as it is.
+
+`praksis verify` checks the steps against the type: a field that is not there, a name that is taken,
+a conversion that does not exist, and whatever the steps still leave wrong. Migrations work for
+entities in the daemon's own database. For a type kept in another storage the daemon refuses to
+migrate (see [Where entities are kept](storage.md)).
+
+## Export and import
+
+    praksis entities export contact --out contacts.json
+    praksis entities import contact --in contacts.json [--upsert] [--dry-run]
+
+An export is a JSON file with every entity of a type: id, times, who made it and all values,
+**also those of sensitive fields**, so the file is readable by you only. It is the format of the
+`json-file` storage. An import writes the entities with their ids, times and authors and without
+events; everything is checked first as for a new entity (types, required and unique values,
+references, which may point into the file), an id that exists is an error unless `--upsert`, and
+nothing is written if anything is wrong. Both are written to the audit log, without values.
+
 ## Working with entities yourself
 
     praksis entities types                  # the types, their fields, the sets that hold them

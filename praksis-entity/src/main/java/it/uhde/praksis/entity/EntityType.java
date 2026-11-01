@@ -40,6 +40,8 @@ import java.util.regex.Pattern;
  * @param fields the declared fields, in order
  * @param basedOn for a replacement, the hash of the type that it replaces
  * @param raw the type as the plain values of its file, which the hash is made of
+ * @param migrations for a replacement, the steps that turn the entities of the type below into
+ *     entities of this one; see {@link EntityMigration}
  */
 public record EntityType(
     String id,
@@ -47,7 +49,8 @@ public record EntityType(
     Optional<String> description,
     List<Field> fields,
     Optional<String> basedOn,
-    Map<String, Object> raw) {
+    Map<String, Object> raw,
+    List<EntityMigration> migrations) {
 
   /** The version of the file format that this code reads. */
   public static final int SUPPORTED_FORMAT = 1;
@@ -60,7 +63,15 @@ public record EntityType(
   static final Pattern FIELD = Pattern.compile("[a-z][a-z0-9_]*");
 
   private static final Set<String> KEYS =
-      Set.of("format_version", "id", "title", "description", "based_on", "field");
+      Set.of(
+          "format_version",
+          "id",
+          "title",
+          "description",
+          "based_on",
+          "migrates_from",
+          "field",
+          "migration");
   private static final Set<String> FIELD_KEYS =
       Set.of("name", "type", "required", "unique", "sensitive", "description", "ref", "on_delete");
   private static final Set<ValueType> NOT_UNIQUE =
@@ -132,6 +143,14 @@ public record EntityType(
   /** The field with the given name, or empty. */
   public Optional<Field> field(String name) {
     return fields.stream().filter(f -> f.name().equals(name)).findFirst();
+  }
+
+  /**
+   * The hash of the version of the type whose entities the {@code [[migration]]} steps turn into
+   * entities of this one: {@code migrates_from}, else {@code based_on}.
+   */
+  public Optional<String> migratesFrom() {
+    return raw.get("migrates_from") instanceof String s ? Optional.of(s) : basedOn;
   }
 
   /** {@code sha256:<hex>} of the type's content, without {@code based_on}. */
@@ -234,6 +253,17 @@ public record EntityType(
     if (problems.size() > before) {
       return Optional.empty();
     }
-    return Optional.of(new EntityType(id, title, description, List.copyOf(fields), basedOn, raw));
+    List<EntityMigration> migrations = EntityMigration.parse(t);
+    if (!migrations.isEmpty() && basedOn.isEmpty() && t.string("migrates_from", false).isEmpty()) {
+      t.problem(
+          "'migration' steps need to know which version they start from: name it in"
+              + " 'migrates_from' (or 'based_on' for a replacement of a type below)");
+      return Optional.empty();
+    }
+    if (problems.size() > before) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        new EntityType(id, title, description, List.copyOf(fields), basedOn, raw, migrations));
   }
 }

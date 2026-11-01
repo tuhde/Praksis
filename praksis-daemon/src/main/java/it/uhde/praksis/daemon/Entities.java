@@ -63,6 +63,8 @@ final class Entities {
         case Request.EntityCreate c -> create(c);
         case Request.EntityUpdate u -> update(u);
         case Request.EntityDelete d -> delete(d);
+        case Request.EntityExport e -> export(e);
+        case Request.EntityImport i -> importAll(i);
         default -> new Response.Error("not an entity request");
       };
     } catch (EntityException e) {
@@ -196,6 +198,68 @@ final class Entities {
     return deleted
         ? new Response.Done("deleted " + d.type() + " " + d.id())
         : new Response.Error("there is no " + d.type() + " " + d.id());
+  }
+
+  private Response export(Request.EntityExport r) throws EntityException {
+    EntityService.Dump dump = service().export(r.type(), r.offset(), r.limit());
+    List<Map<String, Object>> items = new java.util.ArrayList<>();
+    for (it.uhde.praksis.capability.StoredEntity e : dump.items()) {
+      Map<String, Object> m = new LinkedHashMap<>();
+      m.put("id", e.id());
+      m.put("created", e.created().toString());
+      m.put("updated", e.updated().toString());
+      m.put("created_by", e.createdBy());
+      m.put("updated_by", e.updatedBy());
+      m.put("fields", EntityWire.entity(e.fields()));
+      items.add(m);
+    }
+    // all values leave, the sensitive ones too: it is logged like a look at a secret
+    audit(
+        "entity.export",
+        Map.of("type", r.type(), "offset", r.offset(), "count", dump.items().size()));
+    return new Response.EntityExportPage(items, dump.total());
+  }
+
+  private Response importAll(Request.EntityImport r) throws EntityException {
+    List<EntityService.Imported> items = new java.util.ArrayList<>();
+    for (Map<String, Object> m : r.items() == null ? List.<Map<String, Object>>of() : r.items()) {
+      Object fields = m.get("fields");
+      if (!(fields instanceof Map<?, ?>)) {
+        throw new EntityException("every entity needs \"fields\"");
+      }
+      @SuppressWarnings("unchecked")
+      Map<String, Object> values = (Map<String, Object>) fields;
+      items.add(
+          new EntityService.Imported(
+              m.get("id") instanceof String id ? id : null,
+              time(m.get("created"), "created"),
+              time(m.get("updated"), "updated"),
+              m.get("created_by") instanceof String by ? by : null,
+              m.get("updated_by") instanceof String by ? by : null,
+              values));
+    }
+    EntityService.ImportResult result =
+        service().importAll(r.type(), items, r.upsert(), r.dryRun());
+    if (!r.dryRun()) {
+      audit(
+          "entity.import",
+          Map.of(
+              "type", r.type(),
+              "created", result.created(),
+              "replaced", result.replaced()));
+    }
+    return new Response.EntityImported(result.created(), result.replaced(), r.dryRun());
+  }
+
+  private static java.time.Instant time(Object v, String name) throws EntityException {
+    if (v == null) {
+      return null;
+    }
+    try {
+      return java.time.Instant.parse(String.valueOf(v));
+    } catch (java.time.format.DateTimeParseException e) {
+      throw new EntityException("\"" + name + "\" must be a time like 2026-11-01T10:00:00Z");
+    }
   }
 
   private void audit(String subject, Map<String, Object> detail) {

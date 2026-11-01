@@ -31,6 +31,8 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Response.EntityTypeList.class, name = "entity-types"),
   @JsonSubTypes.Type(value = Response.EntitySetList.class, name = "entity-sets"),
   @JsonSubTypes.Type(value = Response.EntityPage.class, name = "entity-page"),
+  @JsonSubTypes.Type(value = Response.EntityExportPage.class, name = "entity-export"),
+  @JsonSubTypes.Type(value = Response.EntityImported.class, name = "entity-imported"),
   @JsonSubTypes.Type(value = Response.EntityItem.class, name = "entity-item"),
   @JsonSubTypes.Type(value = Response.HelpPage.class, name = "help-page"),
   @JsonSubTypes.Type(value = Response.ResolvedView.class, name = "view"),
@@ -1189,4 +1191,22 @@ public sealed interface Response {
         List<String> sets,
         List<String> members) {}
   }
+
+  /**
+   * Entities with all their values. Times are ISO-8601 text and bytes are Base64.
+   *
+   * @param items {@code id}, {@code created}, {@code updated}, {@code created_by}, {@code
+   *     updated_by} and {@code fields}
+   * @param total how many entities the type has
+   */
+  record EntityExportPage(List<Map<String, Object>> items, long total) implements Response {}
+
+  /**
+   * What an import did, or would do.
+   *
+   * @param created how many entities were new
+   * @param replaced how many replaced an entity
+   * @param dryRun whether this was only a check
+   */
+  record EntityImported(int created, int replaced, boolean dryRun) implements Response {}
 }

@@ -61,6 +61,9 @@ class WireTest {
     for (Request r :
         List.of(
             new Request.EntityTypes(),
+            new Request.EntityExport("note", 0, 500),
+            new Request.EntityImport(
+                "note", List.of(Map.of("id", "1", "fields", Map.of("a", "b"))), true, false),
             new Request.EntitySets(),
             new Request.EntityQuery(
                 "note", Map.of("op", "equals", "field", "a", "value", "b"), "name", true, 5, 10),
@@ -102,6 +105,8 @@ class WireTest {
                         List.of("a", "c")))),
             new Response.EntityPage(List.of(Map.of("id", "1", "subject", "x")), 7),
             new Response.EntityItem(true, Map.of("id", "1"), Map.of("iban", "DE01")),
+            new Response.EntityExportPage(List.of(Map.of("id", "1")), 3),
+            new Response.EntityImported(2, 1, true),
             new Response.EntityItem(false, null, null))) {
       assertThat(Wire.decodeResponse(Wire.encode(r))).isEqualTo(r);
     }

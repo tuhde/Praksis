@@ -53,6 +53,8 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.EntitySets.class, name = "entity-sets"),
   @JsonSubTypes.Type(value = Request.EntityQuery.class, name = "entity-query"),
   @JsonSubTypes.Type(value = Request.EntityRead.class, name = "entity-read"),
+  @JsonSubTypes.Type(value = Request.EntityExport.class, name = "entity-export"),
+  @JsonSubTypes.Type(value = Request.EntityImport.class, name = "entity-import"),
   @JsonSubTypes.Type(value = Request.EntityCreate.class, name = "entity-create"),
   @JsonSubTypes.Type(value = Request.EntityUpdate.class, name = "entity-update"),
   @JsonSubTypes.Type(value = Request.EntityDelete.class, name = "entity-delete"),
@@ -482,4 +484,29 @@ public sealed interface Request {
    * @param id the entity
    */
   record EntityDelete(String type, String id) implements Request {}
+
+  /**
+   * Reads some of the entities of a type with all their values, also those of sensitive fields, for
+   * a file. The entities come in order of creation. Answered with {@link
+   * Response.EntityExportPage}. It is audited like a look at a secret.
+   *
+   * @param type the type
+   * @param offset how many to skip
+   * @param limit how many, at most 1000
+   */
+  record EntityExport(String type, int offset, int limit) implements Request {}
+
+  /**
+   * Writes entities that were exported, with their ids, times and who made them, without events.
+   * Answered with {@link Response.EntityImported}.
+   *
+   * @param type the type
+   * @param items the entities: {@code id}, {@code created}, {@code updated}, {@code created_by},
+   *     {@code updated_by} and {@code fields}
+   * @param upsert whether an entity that exists is replaced (else it is an error)
+   * @param dryRun whether to only check
+   */
+  record EntityImport(
+      String type, java.util.List<Map<String, Object>> items, boolean upsert, boolean dryRun)
+      implements Request {}
 }

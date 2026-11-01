@@ -591,7 +591,9 @@ public final class Praksis {
         Praksis.EntitiesCommand.ShowCommand.class,
         Praksis.EntitiesCommand.CreateCommand.class,
         Praksis.EntitiesCommand.UpdateCommand.class,
-        Praksis.EntitiesCommand.DeleteCommand.class
+        Praksis.EntitiesCommand.DeleteCommand.class,
+        Praksis.EntitiesCommand.ExportCommand.class,
+        Praksis.EntitiesCommand.ImportCommand.class
       })
   static final class EntitiesCommand {
     private static final com.fasterxml.jackson.databind.ObjectMapper JSON =
@@ -675,6 +677,7 @@ public final class Praksis {
           if (t.description() != null) {
             out().printf("    %s%n", t.description());
           }
+          out().printf("    version: %s%n", t.hash());
           if (!t.sets().isEmpty()) {
             out().printf("    in the sets: %s%n", String.join(", ", t.sets()));
           }
@@ -877,6 +880,152 @@ public final class Praksis {
           return EXIT_FAILED;
         }
         print(out(), item.entity());
+        return 0;
+      }
+    }
+
+    @Command(
+        name = "export",
+        description =
+            "Writes all entities of a type to a file (or to the output) as JSON, with their ids,"
+                + " times and who made them, and with the values of sensitive fields too: the file"
+                + " is as secret as they are, so it is readable by you only. The file can be"
+                + " imported into another storage, or used as the file of the json-file storage.")
+    static final class ExportCommand extends Base {
+      @CommandLine.Parameters(index = "0", paramLabel = "<type>", description = "The entity type.")
+      String type;
+
+      @Option(
+          names = "--out",
+          paramLabel = "<file>",
+          description = "The file (default: the output).")
+      java.nio.file.Path out;
+
+      @Override
+      public Integer call() throws java.io.IOException {
+        com.fasterxml.jackson.databind.node.ObjectNode root = JSON.createObjectNode();
+        root.put("format", 1);
+        root.put("type", type);
+        com.fasterxml.jackson.databind.node.ArrayNode list = root.putArray("entities");
+        int offset = 0;
+        while (true) {
+          Response response = send(new Request.EntityExport(type, offset, 500));
+          if (!(response instanceof Response.EntityExportPage page)) {
+            return exitCodeFor(response);
+          }
+          page.items().forEach(item -> list.add(JSON.valueToTree(item)));
+          offset += page.items().size();
+          if (page.items().isEmpty() || offset >= page.total()) {
+            break;
+          }
+        }
+        String text = JSON.writerWithDefaultPrettyPrinter().writeValueAsString(root);
+        if (this.out == null) {
+          out().println(text);
+        } else {
+          writeSecret(this.out, text);
+          err().printf("%d entities written to %s%n", list.size(), this.out);
+        }
+        return 0;
+      }
+
+      /** Writes a file that only the owner can read. */
+      private static void writeSecret(java.nio.file.Path file, String text)
+          throws java.io.IOException {
+        java.nio.file.Files.deleteIfExists(file);
+        try {
+          java.nio.file.Files.createFile(
+              file,
+              java.nio.file.attribute.PosixFilePermissions.asFileAttribute(
+                  java.nio.file.attribute.PosixFilePermissions.fromString("rw-------")));
+        } catch (UnsupportedOperationException e) {
+          java.nio.file.Files.createFile(file);
+        }
+        java.nio.file.Files.writeString(file, text);
+      }
+    }
+
+    @Command(
+        name = "import",
+        description =
+            "Writes entities from an export file, with their ids, times and who made them, and"
+                + " without events. Everything is checked first; an entity that exists is an error"
+                + " unless --upsert. The type must be defined, and a type that others refer to"
+                + " must be imported after the types it refers to.")
+    static final class ImportCommand extends Base {
+      @CommandLine.Parameters(index = "0", paramLabel = "<type>", description = "The entity type.")
+      String type;
+
+      @Option(names = "--in", required = true, paramLabel = "<file>", description = "The file.")
+      java.nio.file.Path in;
+
+      @Option(names = "--upsert", description = "Replace an entity that exists.")
+      boolean upsert;
+
+      @Option(names = "--dry-run", description = "Only check.")
+      boolean dryRun;
+
+      /** Part of a request is kept below this many characters of JSON. */
+      private static final int CHUNK_CHARS = 400_000;
+
+      @Override
+      @SuppressWarnings("unchecked")
+      public Integer call() throws java.io.IOException {
+        com.fasterxml.jackson.databind.JsonNode root;
+        try {
+          root = JSON.readTree(java.nio.file.Files.readAllBytes(in));
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+          err().println(in + " is not valid JSON: " + e.getOriginalMessage());
+          return 2;
+        }
+        if (root.path("format").asInt(-1) != 1 || !root.path("entities").isArray()) {
+          err()
+              .println(
+                  in + " is not an export file (\"format\": 1 and \"entities\" are expected).");
+          return 2;
+        }
+        if (!type.equals(root.path("type").asText(null))) {
+          err()
+              .println(
+                  in + " holds entities of the type " + root.path("type") + ", not " + type + ".");
+          return 2;
+        }
+        java.util.List<java.util.List<java.util.Map<String, Object>>> chunks =
+            new java.util.ArrayList<>();
+        java.util.List<java.util.Map<String, Object>> current = new java.util.ArrayList<>();
+        int size = 0;
+        for (com.fasterxml.jackson.databind.JsonNode item : root.path("entities")) {
+          int chars = item.toString().length();
+          if (!current.isEmpty() && size + chars > CHUNK_CHARS) {
+            chunks.add(current);
+            current = new java.util.ArrayList<>();
+            size = 0;
+          }
+          current.add(JSON.convertValue(item, java.util.Map.class));
+          size += chars;
+        }
+        if (!current.isEmpty()) {
+          chunks.add(current);
+        }
+        // check every part first, then write them
+        int created = 0;
+        int replaced = 0;
+        for (boolean check : dryRun ? new boolean[] {true} : new boolean[] {true, false}) {
+          created = 0;
+          replaced = 0;
+          for (var chunk : chunks) {
+            Response response = send(new Request.EntityImport(type, chunk, upsert, check));
+            if (!(response instanceof Response.EntityImported done)) {
+              return exitCodeFor(response);
+            }
+            created += done.created();
+            replaced += done.replaced();
+          }
+        }
+        out()
+            .printf(
+                "%s%d new, %d replaced%n",
+                dryRun ? "Checked, nothing written: " : "Imported: ", created, replaced);
         return 0;
       }
     }

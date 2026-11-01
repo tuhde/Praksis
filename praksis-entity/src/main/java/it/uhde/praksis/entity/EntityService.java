@@ -700,6 +700,311 @@ public final class EntityService {
     }
   }
 
+  /**
+   * Some of the entities of a type with all their values, also those of sensitive fields, in order
+   * of creation, for an export. The caller is a person; no rule can export.
+   */
+  public Dump export(String typeId, int offset, int limit) throws EntityException {
+    type(typeId);
+    if (limit < 1 || limit > Query.MAX_LIMIT || offset < 0) {
+      throw new EntityException("limit must be from 1 to " + Query.MAX_LIMIT + ", offset from 0");
+    }
+    try {
+      EntityStorage.Page page =
+          storages
+              .of(typeId)
+              .query(typeId, new Query(Optional.empty(), "created", false, limit, offset));
+      return new Dump(page.items(), page.total());
+    } catch (StorageException e) {
+      throw failed(e);
+    }
+  }
+
+  /** A part of an export. */
+  public record Dump(List<StoredEntity> items, long total) {}
+
+  /**
+   * An entity as an import brings it: the id, the times and who made it (a missing one is now and
+   * {@link #USER}), and the values as an export wrote them.
+   */
+  public record Imported(
+      String id,
+      Instant created,
+      Instant updated,
+      String createdBy,
+      String updatedBy,
+      Map<String, Object> fields) {}
+
+  /** What an import did. */
+  public record ImportResult(int created, int replaced) {}
+
+  /**
+   * Writes entities that an export made, with their ids, times and provenance, and no events (a
+   * restore or a move would flood the rules). Everything is checked first, as a create is: known
+   * fields, types, required and unique values (against the stored entities and within the import)
+   * and references (to stored entities, or to entities of the same import). An id that exists is an
+   * error unless {@code upsert}. Nothing is written if anything is wrong, and with the daemon's own
+   * database the write is one transaction.
+   */
+  public ImportResult importAll(String typeId, List<Imported> items, boolean upsert, boolean dryRun)
+      throws EntityException {
+    EntityType type = type(typeId);
+    EntityStorage storage = storages.of(typeId);
+    synchronized (writes) {
+      try {
+        Instant now = Instant.parse(EntityValues.time(clock.instant()));
+        List<StoredEntity> ready = new ArrayList<>();
+        Map<String, StoredEntity> byId = new LinkedHashMap<>();
+        for (Imported item : items) {
+          String where = "entity '" + item.id() + "': ";
+          if (item.id() == null || item.id().isBlank() || item.id().length() > 100) {
+            throw new EntityException("an entity needs an id of 1 to 100 characters");
+          }
+          if (byId.containsKey(item.id())) {
+            throw new EntityException("the id " + item.id() + " is in the import twice");
+          }
+          Map<String, Object> fields;
+          try {
+            fields = checked(type, EntityWire.values(type, item.fields()), true);
+          } catch (EntityException e) {
+            throw new EntityException(where + e.getMessage(), e);
+          }
+          StoredEntity entity =
+              new StoredEntity(
+                  item.id(),
+                  item.created() == null ? now : Instant.parse(EntityValues.time(item.created())),
+                  item.updated() == null ? now : Instant.parse(EntityValues.time(item.updated())),
+                  item.createdBy() == null || item.createdBy().isBlank() ? USER : item.createdBy(),
+                  item.updatedBy() == null || item.updatedBy().isBlank() ? USER : item.updatedBy(),
+                  fields);
+          byId.put(entity.id(), entity);
+          ready.add(entity);
+        }
+        int replaced = 0;
+        for (StoredEntity e : ready) {
+          boolean exists = storage.get(typeId, e.id()).isPresent();
+          if (exists && !upsert) {
+            throw new EntityException(
+                "entity '" + e.id() + "' exists already; use upsert to replace it");
+          }
+          replaced += exists ? 1 : 0;
+        }
+        // unique values: not used by an entity outside the import, and not twice inside it
+        for (EntityType.Field f : type.fields()) {
+          if (!f.unique()) {
+            continue;
+          }
+          Map<Object, String> seen = new java.util.HashMap<>();
+          for (StoredEntity e : ready) {
+            Object v = e.fields().get(f.name());
+            if (v == null) {
+              continue;
+            }
+            String twin = seen.put(v, e.id());
+            Optional<String> owner = storage.findUnique(typeId, f.name(), v);
+            if (twin != null || (owner.isPresent() && !byId.containsKey(owner.get()))) {
+              throw new EntityException(
+                  "entity '"
+                      + e.id()
+                      + "': another '"
+                      + typeId
+                      + "' already has "
+                      + f.name()
+                      + (f.sensitive() ? "" : " = " + v));
+            }
+          }
+        }
+        // references: to a stored entity, or to one of the import
+        for (StoredEntity e : ready) {
+          for (EntityType.Field f : type.fields()) {
+            Object value = e.fields().get(f.name());
+            if (f.ref().isEmpty() || value == null) {
+              continue;
+            }
+            List<?> ids = value instanceof List<?> l ? l : List.of(value);
+            for (Object each : ids) {
+              if (!(each instanceof String target) || target.isEmpty()) {
+                throw new EntityException(
+                    "entity '" + e.id() + "': field '" + f.name() + "' must hold ids");
+              }
+              boolean inImport = f.ref().get().equals(typeId) && byId.containsKey(target);
+              if (!inImport && storages.of(f.ref().get()).get(f.ref().get(), target).isEmpty()) {
+                throw new EntityException(
+                    "entity '"
+                        + e.id()
+                        + "': field '"
+                        + f.name()
+                        + "' refers to "
+                        + f.ref().get()
+                        + " '"
+                        + target
+                        + "', which does not exist");
+              }
+            }
+          }
+        }
+        if (!dryRun) {
+          storage.atomically(
+              () -> {
+                for (StoredEntity e : ready) {
+                  if (storage.get(typeId, e.id()).isPresent()) {
+                    storage.replace(typeId, e);
+                  } else {
+                    storage.insert(typeId, e);
+                  }
+                }
+                return null;
+              });
+          if (!(storage instanceof SqliteEntityStorage)) {
+            store.touch("entities");
+          }
+        }
+        return new ImportResult(ready.size() - replaced, replaced);
+      } catch (StorageException e) {
+        throw failed(e);
+      }
+    }
+  }
+
+  /**
+   * Turns all entities of a type into entities of its current version: the steps of the versions
+   * after the one they were made under are applied in order, then every entity is checked as a
+   * create is checked (known fields, types, required, unique values, references). Nothing is
+   * written if any entity does not fit; with the daemon's database the write is one transaction. No
+   * events are emitted.
+   *
+   * @param from the version that the stored entities have, or null if the layers do not have it
+   *     (the type was changed in place)
+   * @param versions the versions after it, oldest first, the last being the current one
+   * @return how many entities were rewritten
+   */
+  public int migrate(String typeId, EntityType from, List<EntityCatalog.Version> versions)
+      throws EntityException {
+    EntityType target = type(typeId);
+    EntityStorage storage = storages.of(typeId);
+    synchronized (writes) {
+      try {
+        if (!(storage instanceof SqliteEntityStorage sqlite)) {
+          throw new EntityException(
+              "the entities of type '"
+                  + typeId
+                  + "' are kept in the storage '"
+                  + storage.name()
+                  + "', which cannot migrate them (only the daemon's own database can): change"
+                  + " the file or the table by hand, or export the entities before the type is"
+                  + " replaced, edit the export and import it");
+        }
+        List<StoredEntity> old = new ArrayList<>();
+        for (SqliteEntityStorage.Raw raw : sqlite.raw(typeId)) {
+          Map<String, Object> fields = new LinkedHashMap<>();
+          for (var e : raw.json().entrySet()) {
+            EntityType.Field f = from == null ? null : from.field(e.getKey()).orElse(null);
+            try {
+              fields.put(
+                  e.getKey(),
+                  f == null || e.getValue() == null
+                      ? e.getValue()
+                      : EntityValues.fromStored(f.type(), e.getValue()));
+            } catch (RuntimeException ex) {
+              throw new EntityException(
+                  "entity '"
+                      + raw.id()
+                      + "': the stored value of '"
+                      + e.getKey()
+                      + "' is not a "
+                      + f.type().id(),
+                  ex);
+            }
+          }
+          old.add(
+              new StoredEntity(
+                  raw.id(),
+                  raw.created(),
+                  raw.updated(),
+                  raw.createdBy(),
+                  raw.updatedBy(),
+                  fields));
+        }
+        List<StoredEntity> migrated = new ArrayList<>();
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        for (StoredEntity e : old) {
+          ids.add(e.id());
+        }
+        for (StoredEntity e : old) {
+          String where = "entity '" + e.id() + "': ";
+          Map<String, Object> fields = new LinkedHashMap<>(e.fields());
+          EntityType previous = from;
+          try {
+            for (EntityCatalog.Version v : versions) {
+              fields = EntityMigration.apply(fields, v.steps(), previous);
+              previous = v.type();
+            }
+            fields = checked(target, fields, true);
+          } catch (EntityException ex) {
+            throw new EntityException(where + ex.getMessage(), ex);
+          }
+          migrated.add(
+              new StoredEntity(
+                  e.id(), e.created(), e.updated(), e.createdBy(), e.updatedBy(), fields));
+        }
+        for (EntityType.Field f : target.fields()) {
+          Map<Object, String> seen = new java.util.HashMap<>();
+          for (StoredEntity e : migrated) {
+            Object v = e.fields().get(f.name());
+            if (v == null) {
+              continue;
+            }
+            if (f.unique() && seen.put(v, e.id()) != null) {
+              throw new EntityException(
+                  "entity '"
+                      + e.id()
+                      + "': another '"
+                      + typeId
+                      + "' has the same "
+                      + f.name()
+                      + (f.sensitive() ? "" : " = " + v));
+            }
+            if (f.ref().isPresent()) {
+              List<?> targets = v instanceof List<?> l ? l : List.of(v);
+              for (Object each : targets) {
+                if (!(each instanceof String ref) || ref.isEmpty()) {
+                  throw new EntityException(
+                      "entity '" + e.id() + "': field '" + f.name() + "' must hold ids");
+                }
+                boolean inside = f.ref().get().equals(typeId) && ids.contains(ref);
+                if (!inside && storages.of(f.ref().get()).get(f.ref().get(), ref).isEmpty()) {
+                  throw new EntityException(
+                      "entity '"
+                          + e.id()
+                          + "': field '"
+                          + f.name()
+                          + "' refers to "
+                          + f.ref().get()
+                          + " '"
+                          + ref
+                          + "', which does not exist");
+                }
+              }
+            }
+          }
+        }
+        storage.atomically(
+            () -> {
+              for (StoredEntity e : migrated) {
+                storage.replace(typeId, e);
+              }
+              return null;
+            });
+        if (!(storage instanceof SqliteEntityStorage)) {
+          store.touch("entities");
+        }
+        return migrated.size();
+      } catch (StorageException e) {
+        throw failed(e);
+      }
+    }
+  }
+
   // --- checks and conversion ---
 
   /** The values converted to Java types; with {@code create} the required fields must be there. */

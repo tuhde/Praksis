@@ -106,4 +106,18 @@ audit log work the same everywhere. Two things differ:
 - A storage that is on another machine cannot be used in [offline mode](offline.md). A file or an
   in-memory database can.
 
-There is no command yet that moves the entities of a type to another storage.
+## Moving a type to another storage
+
+    praksis entities export contact --out contacts.json    # while it is where it is
+    # change [entities.bind] (or bind_set) in praksis.toml, restart the daemon
+    praksis entities import contact --in contacts.json
+
+The ids, times and authors are kept, so references to the entities stay valid. Delete the old data
+yourself when you have checked the new place. A type that others refer to must be imported after the
+types it refers to.
+
+## Changing a type that is kept elsewhere
+
+Migration steps for a changed type (see [Entities](entities.md)) work for the daemon's own database
+only. For a type in a file or a table: export the entities before you change the type, edit the
+export (or the file or the table) to the new shape, change the type, and import.

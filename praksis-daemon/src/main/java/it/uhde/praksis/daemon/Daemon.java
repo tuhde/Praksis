@@ -15,6 +15,7 @@ import it.uhde.praksis.engine.ModuleLoadException;
 import it.uhde.praksis.engine.ModuleLoader;
 import it.uhde.praksis.engine.StoreAuditLog;
 import it.uhde.praksis.entity.EntityCatalog;
+import it.uhde.praksis.entity.EntityMigrations;
 import it.uhde.praksis.entity.EntityService;
 import it.uhde.praksis.entity.EntityStorages;
 import it.uhde.praksis.entity.SqliteEntityStorage;
@@ -118,7 +119,7 @@ public final class Daemon implements AutoCloseable {
   private void openEntities(EntityCatalog catalog, Store store, GrantPolicy access)
       throws DaemonException {
     entityStorages = openStorages(catalog, store, access);
-    entityService.set(
+    EntityService service =
         new EntityService(
             store,
             catalog,
@@ -129,7 +130,18 @@ public final class Daemon implements AutoCloseable {
                 running.queueStored(event);
               } // else the event is pending in the store and recover() finds it
             },
-            entityStorages));
+            entityStorages);
+    try {
+      Map<String, Integer> migrated = EntityMigrations.run(service, catalog, store, clock);
+      migrated.forEach(
+          (type, n) ->
+              LOG.log(
+                  System.Logger.Level.INFO,
+                  "migrated " + n + " " + type + " entities to the new version of the type"));
+    } catch (it.uhde.praksis.entity.EntityException e) {
+      throw new DaemonException("cannot migrate the entities: " + e.getMessage(), e);
+    }
+    entityService.set(service);
   }
 
   /**
@@ -515,6 +527,8 @@ public final class Daemon implements AutoCloseable {
         case Request.EntityCreate r -> entities.handle(r);
         case Request.EntityUpdate r -> entities.handle(r);
         case Request.EntityDelete r -> entities.handle(r);
+        case Request.EntityExport r -> entities.handle(r);
+        case Request.EntityImport r -> entities.handle(r);
         case Request.Stop s -> new Response.Stopped();
       };
     } catch (Injection.Invalid | Approvals.Failure | Shadows.Failure | DaemonException e) {

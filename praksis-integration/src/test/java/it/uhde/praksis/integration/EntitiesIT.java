@@ -14,6 +14,12 @@ import org.junit.jupiter.api.Test;
  * to the events of the changes, with the grants and the audit log of any rule.
  */
 class EntitiesIT {
+  private static String id(String output) {
+    Matcher m = Pattern.compile("(?m)^id: (\\S+)$").matcher(output);
+    assertThat(m.find()).as(output).isTrue();
+    return m.group(1);
+  }
+
   private static void write(Path file, String text) throws Exception {
     Files.createDirectories(file.getParent());
     Files.writeString(file, text);
@@ -171,6 +177,95 @@ class EntitiesIT {
       assertThat(h.cli("entities", "delete", "person", id).exit()).isZero();
       assertThat(h.cli("entities", "delete", "person", id).exit()).isEqualTo(1);
       assertThat(h.cli("entities", "list", "person").output()).contains("0 of 0");
+      h.stop(daemon);
+    }
+  }
+
+  @Test
+  void anExportIsASecretFileThatBringsTheEntitiesBackAndImportChecksFirst() throws Exception {
+    try (Harness h = new Harness()) {
+      write(
+          h.home.resolve("ruleset/entities/person.toml"),
+          """
+          format_version = 1
+          id = "person"
+          title = "Person"
+
+          [[field]]
+          name = "name"
+          type = "string"
+          required = true
+          unique = true
+
+          [[field]]
+          name = "iban"
+          type = "string"
+          sensitive = true
+
+          [[field]]
+          name = "boss"
+          type = "string"
+          ref = "person"
+          """);
+      Process daemon = h.startDaemon();
+      String boss =
+          id(
+              h.cli("entities", "create", "person", "--set", "name=Mei", "--set", "iban=DE01")
+                  .output());
+      String worker =
+          id(
+              h.cli("entities", "create", "person", "--set", "name=Ole", "--set", "boss=" + boss)
+                  .output());
+
+      Path file = h.home.resolve("people.json");
+      Harness.CliResult exported = h.cli("entities", "export", "person", "--out", file.toString());
+      assertThat(exported.exit()).as(exported.output()).isZero();
+      assertThat(Files.readString(file))
+          .contains("\"format\" : 1")
+          .contains("\"type\" : \"person\"")
+          .contains("\"id\" : \"" + boss + "\"")
+          .contains("\"iban\" : \"DE01\""); // the secret is in the file
+      assertThat(java.nio.file.Files.getPosixFilePermissions(file))
+          .containsExactlyInAnyOrder(
+              java.nio.file.attribute.PosixFilePermission.OWNER_READ,
+              java.nio.file.attribute.PosixFilePermission.OWNER_WRITE);
+      // the audit log says that all values left, and holds none of them
+      assertThat(h.cli("audit").output()).contains("entity.export").doesNotContain("DE01");
+
+      // delete everything, check the import without writing, then bring it back
+      assertThat(h.cli("entities", "delete", "person", worker).exit()).isZero();
+      assertThat(h.cli("entities", "delete", "person", boss).exit()).isZero();
+      Harness.CliResult checked =
+          h.cli("entities", "import", "person", "--in", file.toString(), "--dry-run");
+      assertThat(checked.output()).contains("Checked, nothing written: 2 new, 0 replaced");
+      assertThat(h.cli("entities", "list", "person").output()).contains("0 of 0");
+      Harness.CliResult imported = h.cli("entities", "import", "person", "--in", file.toString());
+      assertThat(imported.exit()).as(imported.output()).isZero();
+      assertThat(imported.output()).contains("Imported: 2 new, 0 replaced");
+      Harness.CliResult shown = h.cli("entities", "show", "person", boss, "--reveal", "iban");
+      assertThat(shown.output())
+          .contains("name: Mei")
+          .contains("created_by: user")
+          .contains("iban: DE01  (revealed)");
+      assertThat(h.cli("entities", "show", "person", worker).output()).contains("boss: " + boss);
+
+      // importing again is an error, unless it replaces
+      Harness.CliResult again = h.cli("entities", "import", "person", "--in", file.toString());
+      assertThat(again.exit()).isEqualTo(1);
+      assertThat(again.output()).contains("exists already; use upsert");
+      assertThat(
+              h.cli("entities", "import", "person", "--in", file.toString(), "--upsert").output())
+          .contains("Imported: 0 new, 2 replaced");
+
+      // a file of another type, and a file that is not an export
+      Harness.CliResult wrong = h.cli("entities", "import", "note", "--in", file.toString());
+      assertThat(wrong.exit()).isEqualTo(2);
+      assertThat(wrong.output()).contains("holds entities of the type \"person\", not note");
+      Files.writeString(h.home.resolve("junk.json"), "{\"hello\": 1}");
+      assertThat(
+              h.cli("entities", "import", "person", "--in", h.home.resolve("junk.json").toString())
+                  .exit())
+          .isEqualTo(2);
       h.stop(daemon);
     }
   }

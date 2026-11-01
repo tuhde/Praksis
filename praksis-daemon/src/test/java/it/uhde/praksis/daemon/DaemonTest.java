@@ -778,6 +778,97 @@ class DaemonTest {
   }
 
   @Test
+  void aTypeThatIsReplacedWithStepsMigratesItsEntitiesAtTheNextStart() throws Exception {
+    String v1 =
+        """
+        format_version = 1
+        id = "contact"
+        title = "Contact"
+        [[field]]
+        name = "name"
+        type = "string"
+        [[field]]
+        name = "phone"
+        type = "string"
+        [[field]]
+        name = "age"
+        type = "string"
+        """;
+    write("ruleset/entities/contact.toml", v1);
+    Daemon first = start();
+    String ada =
+        (String)
+            ((Response.EntityItem)
+                    ask(
+                        new Request.EntityCreate(
+                            "contact", Map.of("name", "Ada", "phone", "123", "age", "41"))))
+                .entity()
+                .get("id");
+    first.close();
+
+    // the same type, edited in place with steps from the version it was made under: phone becomes
+    // mobile, age a number, a country is required
+    String hash =
+        it.uhde.praksis.entity.EntityTypes.parse(v1, "contact", new java.util.ArrayList<>())
+            .orElseThrow()
+            .hash();
+    write(
+        "ruleset/entities/contact.toml",
+        "format_version = 1\nid = \"contact\"\ntitle = \"Contact\"\nmigrates_from = \""
+            + hash
+            + "\"\n[[field]]\nname = \"name\"\ntype = \"string\"\n"
+            + "[[field]]\nname = \"mobile\"\ntype = \"string\"\n"
+            + "[[field]]\nname = \"age\"\ntype = \"int\"\n"
+            + "[[field]]\nname = \"country\"\ntype = \"string\"\nrequired = true\n"
+            + "[[migration]]\nrename = { from = \"phone\", to = \"mobile\" }\n"
+            + "[[migration]]\nconvert = { field = \"age\", to = \"int\" }\n"
+            + "[[migration]]\ndefault = { field = \"country\", value = \"DE\" }\n");
+    start();
+    Response.EntityItem migrated =
+        (Response.EntityItem) ask(new Request.EntityRead("contact", ada, null));
+    assertThat(migrated.entity())
+        .containsEntry("mobile", "123")
+        .containsEntry("age", 41)
+        .containsEntry("country", "DE")
+        .doesNotContainKey("phone");
+    assertThat(((Response.AuditLines) ask(new Request.Audit(50))).lines())
+        .anyMatch(
+            l -> "entity.migrate".equals(l.subject()) && l.detail().contains("\"entities\":1"));
+  }
+
+  @Test
+  void aMigrationThatDoesNotFitStopsTheStartAndLeavesTheEntitiesAlone() throws Exception {
+    String v1 =
+        "format_version = 1\nid = \"contact\"\ntitle = \"Contact\"\n[[field]]\nname = \"age\"\ntype = \"string\"\n";
+    write("ruleset/entities/contact.toml", v1);
+    Daemon first = start();
+    ask(new Request.EntityCreate("contact", Map.of("age", "old")));
+    first.close();
+    String hash =
+        it.uhde.praksis.entity.EntityTypes.parse(v1, "contact", new java.util.ArrayList<>())
+            .orElseThrow()
+            .hash();
+    write(
+        "ruleset/entities/contact.toml",
+        "format_version = 1\nid = \"contact\"\ntitle = \"Contact\"\nmigrates_from = \""
+            + hash
+            + "\"\n[[field]]\nname = \"age\"\ntype = \"int\"\n"
+            + "[[migration]]\nconvert = { field = \"age\", to = \"int\" }\n");
+    assertThatThrownBy(this::start)
+        .hasMessageContaining("cannot migrate the entities")
+        .hasMessageContaining("the value old of 'age' cannot be a int");
+    // back to the old type: the entities are still there and fit
+    write("ruleset/entities/contact.toml", v1);
+    start();
+    assertThat(
+            ((Response.EntityPage)
+                    ask(new Request.EntityQuery("contact", null, null, false, null, null)))
+                .items())
+        .singleElement()
+        .satisfies(e -> assertThat(e).containsEntry("age", "old"));
+  }
+
+  @Test
   void theDocumentationIsServed() throws Exception {
     start();
     {

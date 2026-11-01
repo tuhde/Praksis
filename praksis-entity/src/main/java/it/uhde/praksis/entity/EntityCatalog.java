@@ -25,16 +25,26 @@ public final class EntityCatalog {
   private final Map<String, String> owners;
   private final Map<String, EntitySet> sets;
   private final Map<String, String> setOwners;
+  private final Map<String, List<Version>> versions;
+
+  /**
+   * One version of a type: the hash of its file, the type, and the steps that turn the entities of
+   * the version below into entities of this one (none for the first version, or for a replacement
+   * that needs none).
+   */
+  public record Version(String hash, List<EntityMigration> steps, EntityType type) {}
 
   public EntityCatalog(Map<String, EntityType> types) {
-    this(types, Map.of(), Map.of(), Map.of());
+    this(types, Map.of(), Map.of(), Map.of(), Map.of());
   }
 
   private EntityCatalog(
       Map<String, EntityType> types,
       Map<String, String> owners,
       Map<String, EntitySet> sets,
-      Map<String, String> setOwners) {
+      Map<String, String> setOwners,
+      Map<String, List<Version>> versions) {
+    this.versions = Map.copyOf(versions);
     this.types = Map.copyOf(types);
     this.owners = Map.copyOf(owners);
     this.sets = Map.copyOf(sets);
@@ -67,6 +77,7 @@ public final class EntityCatalog {
     Map<String, EntityType> all = new LinkedHashMap<>();
     Map<String, String> definedBy = new LinkedHashMap<>();
     Map<String, String> owners = new LinkedHashMap<>();
+    Map<String, List<Version>> versions = new LinkedHashMap<>();
     List<Problem> problems = new ArrayList<>();
     for (Source layer : layers) {
       EntityTypes.Loaded loaded = EntityTypes.load(layer.directory());
@@ -77,9 +88,17 @@ public final class EntityCatalog {
         String where = "layer '" + layer.name() + "': entities/" + type.id() + ".toml";
         EntityType below = all.get(type.id());
         if (below == null && type.basedOn().isEmpty()) {
+          List<String> stepProblems = new ArrayList<>();
+          EntityMigration.check(type.migrations(), type, stepProblems);
+          stepProblems.forEach(m -> problems.add(new Problem(where, "migration " + m)));
           all.put(type.id(), type);
           definedBy.put(type.id(), layer.name());
           owners.put(type.id(), layer.name());
+          // steps of a type that is not a replacement start from the version named in
+          // 'migrates_from', which the layers do not have
+          versions
+              .computeIfAbsent(type.id(), k -> new ArrayList<>())
+              .add(new Version(type.hash(), type.migrations(), type));
         } else if (below == null) {
           problems.add(
               new Problem(
@@ -106,7 +125,7 @@ public final class EntityCatalog {
                       + ", not "
                       + type.basedOn().get()));
         } else {
-          List<String> broken = incompatibilities(below, type);
+          List<String> broken = acceptance(below, type);
           broken.forEach(
               message ->
                   problems.add(
@@ -114,6 +133,9 @@ public final class EntityCatalog {
           if (broken.isEmpty()) {
             all.put(type.id(), type);
             owners.put(type.id(), layer.name());
+            versions
+                .computeIfAbsent(type.id(), k -> new ArrayList<>())
+                .add(new Version(type.hash(), type.migrations(), type));
           }
         }
       }
@@ -180,7 +202,7 @@ public final class EntityCatalog {
       }
     }
     checkSets(allSets, setOwners, all, problems);
-    return new Loaded(new EntityCatalog(all, owners, allSets, setOwners), problems);
+    return new Loaded(new EntityCatalog(all, owners, allSets, setOwners, versions), problems);
   }
 
   /** Every member of a set exists, sets do not contain themselves, and they are not too deep. */
@@ -287,6 +309,32 @@ public final class EntityCatalog {
     Set<String> out = new TreeSet<>();
     sets.keySet().stream().filter(id -> members(id).contains(typeId)).forEach(out::add);
     return out;
+  }
+
+  /**
+   * What stops a replacement: without migration steps what {@link #incompatibilities} finds, with
+   * them the steps that cannot be done and what is still wrong with the entities as the steps leave
+   * them.
+   */
+  public static List<String> acceptance(EntityType old, EntityType replacement) {
+    if (replacement.migrations().isEmpty()) {
+      return incompatibilities(old, replacement);
+    }
+    List<String> problems = new ArrayList<>();
+    List<EntityType.Field> shape =
+        EntityMigration.shape(old, replacement.migrations(), replacement, problems);
+    if (!problems.isEmpty()) {
+      return problems;
+    }
+    EntityType migrated =
+        new EntityType(
+            old.id(), old.title(), old.description(), shape, old.basedOn(), old.raw(), List.of());
+    return incompatibilities(migrated, replacement);
+  }
+
+  /** The versions of a type, oldest first; the last is the one in use. */
+  public List<Version> versions(String typeId) {
+    return versions.getOrDefault(typeId, List.of());
   }
 
   /**

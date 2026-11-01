@@ -414,6 +414,32 @@ Arguments:
 - `<type>`: The entity type.
 - `<id>`: The entity.
 
+#### praksis entities export
+
+Writes all entities of a type to a file (or to the output) as JSON, with their ids, times and who made them, and with the values of sensitive fields too: the file is as secret as they are, so it is readable by you only. The file can be imported into another storage, or used as the file of the json-file storage.
+
+Arguments:
+
+- `<type>`: The entity type.
+
+Options:
+
+- `--out` `<file>`: The file (default: the output).
+
+#### praksis entities import
+
+Writes entities from an export file, with their ids, times and who made them, and without events. Everything is checked first; an entity that exists is an error unless --upsert. The type must be defined, and a type that others refer to must be imported after the types it refers to.
+
+Arguments:
+
+- `<type>`: The entity type.
+
+Options:
+
+- `--in` `<file>`: The file.
+- `--upsert`: Replace an entity that exists.
+- `--dry-run`: Only check.
+
 ### praksis help
 
 Shows the documentation. Without a topic it lists the topics; a topic is the path of a page without .md, for example user/concepts.
