@@ -311,6 +311,50 @@ public abstract class EntityStorageContract {
   }
 
   @Test
+  public void anEmptyTextIsNotAMissingValue() throws Exception {
+    EntityStorage s = storage();
+    s.insert("person", person("a", 1, fields("name", "A", "note", "")));
+    s.insert("person", person("b", 2, fields("name", "B")));
+    assertThat(s.get("person", "a").orElseThrow().fields()).containsEntry("note", "");
+    assertThat(s.get("person", "b").orElseThrow().fields()).doesNotContainKey("note");
+    assertThat(ids(s.query("person", where(new Filter.Equals("note", ""))))).containsExactly("a");
+  }
+
+  @Test
+  public void textsThatLookLikeOtherThingsStayTexts() throws Exception {
+    EntityStorage s = storage();
+    List<String> texts =
+        List.of(
+            "=1+1",
+            "+49 30",
+            "-5",
+            "@mention",
+            "'=x",
+            "''@y",
+            "\tTab",
+            " leading",
+            "trailing ",
+            "a,b;c\"d",
+            "line\nbreak\r\nand more",
+            "  ",
+            "true",
+            "123",
+            "null",
+            "{\"a\":1}",
+            "\u00e4\u00f6\u00fc \u2603 \ud83d\ude00");
+    for (int i = 0; i < texts.size(); i++) {
+      s.insert("person", person("t" + i, i, fields("name", "N" + i, "note", texts.get(i))));
+    }
+    s.close();
+    EntityStorage again = storage();
+    for (int i = 0; i < texts.size(); i++) {
+      assertThat(again.get("person", "t" + i).orElseThrow().fields())
+          .as("text %d", i)
+          .containsEntry("note", texts.get(i));
+    }
+  }
+
+  @Test
   public void atomicallyReturnsWhatTheWorkReturns() throws Exception {
     EntityStorage s = storage();
     String result =
