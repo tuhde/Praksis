@@ -130,6 +130,24 @@ in the rule that fetched it, and nothing is copied out of the control of its own
 
 ## The desktop program
 
+With several identities the program reads their names from `identities.toml` in
+`~/.config/praksis-desktop`:
+
+    format_version = 1
+
+    [[identity]]
+    name = "private"
+
+    [[identity]]
+    name = "work"
+    colour = "#1565c0"
+    home = "~/.praksis-work"      # optional; this is the default for the name
+
+It shows a list to pick from (`praksis-desktop --identity work` opens one at once) and opens one
+window per identity, each connected to its own daemon. A window has a strip in the colour of the
+identity with its name on top, and every confirmation and notification names the identity, so that
+nothing is approved or sent as the wrong one.
+
 The **Peers** tab shows each peer with its key and whether it can be reached, what it offers under its
 name with anything unusable marked and the reason, the pins (pin a set, accept a change, remove a pin)
 and the requests of the peers to approve or refuse.
