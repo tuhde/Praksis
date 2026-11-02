@@ -71,7 +71,8 @@ class ScreensApiIT {
         // what changed: everything at first, then only what happens, and the call waits for it
         Response.ChangeList first = (Response.ChangeList) h.ask(new Request.Changes(0, 0));
         assertThat(first.topics())
-            .containsExactly("events", "log", "approvals", "shadow", "audit", "entities");
+            .containsExactly(
+                "events", "log", "approvals", "shadow", "audit", "entities", "catalog", "remote");
         AtomicReference<Response> waited = new AtomicReference<>();
         Thread waiter =
             Thread.ofVirtual()

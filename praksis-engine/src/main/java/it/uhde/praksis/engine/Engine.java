@@ -318,6 +318,12 @@ public final class Engine implements EventSink, AutoCloseable {
     store.markDone(event.id());
   }
 
+  /**
+   * Set by {@link #fire} on the thread that fired the rule when the event was not handled and was
+   * kept as missed (a capability out of reach), so that a replay leaves it missed and stops.
+   */
+  private final ThreadLocal<Boolean> keptMissed = ThreadLocal.withInitial(() -> false);
+
   /** Whether the rules after this one still get the event. */
   private enum Flow {
     NEXT,
@@ -353,6 +359,7 @@ public final class Engine implements EventSink, AutoCloseable {
       if (e instanceof UnavailableException) {
         // nothing is wrong with the rule: the event is kept for a replay, like a missed event
         miss(ruleId, event);
+        keptMissed.set(true);
         log(
             event,
             Optional.of(ruleId),
@@ -551,9 +558,13 @@ public final class Engine implements EventSink, AutoCloseable {
                   Optional.empty(),
                   Outcome.OK,
                   "replay after approval");
+              keptMissed.set(false);
               fire(rule, event, allowOnce);
               if (disabled.containsKey(ruleId)) {
                 break; // denied again: this event stays missed
+              }
+              if (keptMissed.get()) {
+                break; // out of reach again: this event and the ones after it stay missed
               }
               store.removeMissed(ruleId, event.id());
             }

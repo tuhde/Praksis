@@ -471,6 +471,45 @@ class EngineTest {
   }
 
   @Test
+  void aReplayWhileTheCapabilityIsStillOutOfReachKeepsTheEventsMissed() throws Exception {
+    rule("a", "", call("x", "test.record", "'one'"));
+    java.util.concurrent.atomic.AtomicBoolean away =
+        new java.util.concurrent.atomic.AtomicBoolean(true);
+    ModuleCatalog catalog =
+        newCatalog()
+            .withAvailability(
+                name ->
+                    away.get() && name.equals("test.record")
+                        ? Optional.of("acme cannot be reached")
+                        : Optional.empty());
+    Event first = event("t", "m1");
+    Event second = event("t", "m2");
+    try (Engine engine =
+        new Engine(
+            RulesetLoader.load(dir.resolve("ruleset")),
+            catalog,
+            Expressions.compiler(),
+            capabilities,
+            store,
+            Engine.Options.defaults())) {
+      run(engine, first, second);
+      assertThat(store.missed("a")).containsExactly(first.id(), second.id());
+
+      // a replay that comes too early does not lose them
+      engine.replay("a", missedEvents("a"), false);
+      assertThat(engine.awaitIdle(Duration.ofSeconds(5))).isTrue();
+      assertThat(calls).isEmpty();
+      assertThat(store.missed("a")).containsExactly(first.id(), second.id());
+
+      away.set(false);
+      engine.replay("a", missedEvents("a"), false);
+      assertThat(engine.awaitIdle(Duration.ofSeconds(5))).isTrue();
+    }
+    assertThat(calls).containsExactly("record:one", "record:one");
+    assertThat(store.missed("a")).isEmpty();
+  }
+
+  @Test
   void allowOnceLetsTheCallThroughWithoutAGrantAndReplayStopsWhenDeniedAgain() throws Exception {
     rule("a", "", call("x", "test.record", "'one'"));
     Engine.Options options =
