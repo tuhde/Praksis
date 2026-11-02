@@ -427,6 +427,35 @@ public final class Daemon implements AutoCloseable {
     }
   }
 
+  /** Pins, accepts or removes a pin on behalf of a person, and reads the policy again. */
+  private String pinSet(Request.PinSet r) throws IOException, Approvals.Failure, StoreException {
+    RemotePins pins = new RemotePins(config.home());
+    var remote = new RemoteCatalogs(config.home()).cached(r.peer());
+    String message;
+    switch (r.action()) {
+      case "unpin" -> {
+        if (!pins.unpin(r.peer(), r.set())) {
+          throw new Approvals.Failure(r.peer() + "/" + r.set() + " is not pinned");
+        }
+        message = "unpinned " + r.peer() + "/" + r.set();
+      }
+      case "pin", "accept" -> {
+        if (remote.isEmpty()) {
+          throw new Approvals.Failure("there is no catalog of " + r.peer());
+        }
+        var pin =
+            r.action().equals("pin")
+                ? pins.pin(r.peer(), r.set(), remote.get().catalog(), clock.instant())
+                : pins.accept(r.peer(), r.set(), remote.get().catalog(), clock.instant());
+        message = pin.name() + " is pinned to " + pin.members();
+      }
+      default -> throw new Approvals.Failure("the action must be 'pin', 'accept' or 'unpin'");
+    }
+    approvals.reload();
+    topics.bump("remote");
+    return message;
+  }
+
   /** Whether a function of a remote was accepted; unknown while the daemon starts. */
   private boolean remoteAccepted(String peer, String capability) throws IOException {
     RemoteRequests requests = remoteRequests;
@@ -635,6 +664,18 @@ public final class Daemon implements AutoCloseable {
         case Request.Approvals a -> approvals.list();
         case Request.Answer a ->
             new Response.Done(approvals.answer(a.id(), a.decision(), a.missed()));
+        case Request.Peers r ->
+            RemoteOverview.build(
+                config,
+                name -> Optional.ofNullable(remoteFeeds.get(name)),
+                (peer, capability) -> {
+                  try {
+                    return remoteAccepted(peer, capability);
+                  } catch (IOException e) {
+                    return false;
+                  }
+                });
+        case Request.PinSet r -> new Response.Done(pinSet(r));
         case Request.RemoteRequests r -> remoteRequests.list();
         case Request.RemoteAnswer r ->
             new Response.Done(remoteRequests.answer(r.id(), r.decision()));
@@ -711,6 +752,8 @@ public final class Daemon implements AutoCloseable {
       return new Response.Error(e.getMessage());
     } catch (StoreException e) {
       return new Response.Error("store: " + e.getMessage());
+    } catch (IOException e) {
+      return new Response.Error(e.getMessage());
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
       return new Response.Error("interrupted");

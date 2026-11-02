@@ -47,6 +47,7 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Response.PlanDetail.class, name = "plan-detail"),
   @JsonSubTypes.Type(value = Response.StagedDetail.class, name = "staged-detail"),
   @JsonSubTypes.Type(value = Response.Done.class, name = "done"),
+  @JsonSubTypes.Type(value = Response.PeerOverview.class, name = "peer-overview"),
   @JsonSubTypes.Type(value = Response.RemoteRequestList.class, name = "remote-request-list"),
   @JsonSubTypes.Type(value = Response.PeerChallenge.class, name = "peer-challenge"),
   @JsonSubTypes.Type(value = Response.PeerWelcome.class, name = "peer-welcome"),
@@ -1088,6 +1089,52 @@ public sealed interface Response {
         this(name, type, required, label, value, null);
       }
     }
+  }
+
+  /**
+   * The other daemons this one knows.
+   *
+   * @param fingerprint the fingerprint of this daemon's own key, to read out to the other side
+   * @param peers the peers
+   */
+  record PeerOverview(String fingerprint, List<PeerInfo> peers) implements Response {
+    /**
+     * One peer. Names and texts that came from the peer are cleaned but still untrusted.
+     *
+     * @param name its name here, which prefixes what it offers
+     * @param fingerprint the fingerprint of its key
+     * @param socket where it is reached, or null if it only connects to this daemon
+     * @param standingRead whether its safe read functions are accepted without asking
+     * @param state {@code connected}, {@code unreachable}, {@code no catalog} or {@code inbound
+     *     only}
+     * @param since when it became unreachable, or null
+     * @param fetched when its catalog was received, or null
+     * @param stale whether the catalog is the one kept from before
+     * @param entries what it offers
+     */
+    public record PeerInfo(
+        String name,
+        String fingerprint,
+        String socket,
+        boolean standingRead,
+        String state,
+        String since,
+        String fetched,
+        boolean stale,
+        List<Entry> entries) {}
+
+    /**
+     * One thing a peer offers.
+     *
+     * @param kind {@code capability}, {@code type}, {@code set}, {@code member} (of a set) or
+     *     {@code pin}
+     * @param name the name as used here, e.g. {@code acme/invoice}
+     * @param detail a short description (the effect of a capability, the members of a pin)
+     * @param state {@code ok}, {@code unavailable} (the peer stopped offering it or cannot be
+     *     reached), {@code not accepted} or {@code changed} (a pin that the peer's set has left)
+     * @param why why it cannot be used, or what changed, or null
+     */
+    public record Entry(String kind, String name, String detail, String state, String why) {}
   }
 
   /**

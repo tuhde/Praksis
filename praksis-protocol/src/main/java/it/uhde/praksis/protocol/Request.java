@@ -58,6 +58,8 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.EntityCreate.class, name = "entity-create"),
   @JsonSubTypes.Type(value = Request.EntityUpdate.class, name = "entity-update"),
   @JsonSubTypes.Type(value = Request.EntityDelete.class, name = "entity-delete"),
+  @JsonSubTypes.Type(value = Request.Peers.class, name = "peers"),
+  @JsonSubTypes.Type(value = Request.PinSet.class, name = "pin-set"),
   @JsonSubTypes.Type(value = Request.RemoteRequests.class, name = "remote-requests"),
   @JsonSubTypes.Type(value = Request.RemoteAnswer.class, name = "remote-answer"),
   @JsonSubTypes.Type(value = Request.PeerHello.class, name = "peer-hello"),
@@ -68,6 +70,23 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.Stop.class, name = "stop")
 })
 public sealed interface Request {
+  /**
+   * Asks for the other daemons this one knows and what they offer, with what cannot be used now.
+   * Answered with {@link Response.PeerOverview}. For a person at the local socket.
+   */
+  record Peers() implements Request {}
+
+  /**
+   * Pins a set of a peer, moves a pin to what the peer offers now, or removes it. A person does
+   * this; it is the approval that a grant on the set relies on. Answered with {@link
+   * Response.Done}.
+   *
+   * @param peer the peer
+   * @param set its set
+   * @param action {@code pin}, {@code accept} or {@code unpin}
+   */
+  record PinSet(String peer, String set, String action) implements Request {}
+
   /**
    * Asks for the requests that connected daemons caused: new functions to accept and changes of
    * pinned sets to approve. Answered with {@link Response.RemoteRequestList}. Like all approvals
