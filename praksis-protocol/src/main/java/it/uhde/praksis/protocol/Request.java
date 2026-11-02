@@ -61,6 +61,7 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.PeerHello.class, name = "peer-hello"),
   @JsonSubTypes.Type(value = Request.PeerProve.class, name = "peer-prove"),
   @JsonSubTypes.Type(value = Request.PeerCatalog.class, name = "peer-catalog"),
+  @JsonSubTypes.Type(value = Request.PeerCall.class, name = "peer-call"),
   @JsonSubTypes.Type(value = Request.Stop.class, name = "stop")
 })
 public sealed interface Request {
@@ -89,6 +90,23 @@ public sealed interface Request {
    * cover.
    */
   record PeerCatalog() implements Request {}
+
+  /**
+   * A call of a capability by a peer (only on a connection that did the handshake). It runs here,
+   * under the grants for the peer, and nothing else decides: what the peer's own policy allows is
+   * checked by the peer before it sends. Answered with {@link Response.PeerCallResult}, or an
+   * error.
+   *
+   * @param capability the capability, with its name here (no prefix)
+   * @param args the arguments; timestamps are ISO-8601 strings and bytes are Base64 strings
+   * @param dryRun check and change nothing (refused if the capability cannot do it)
+   */
+  record PeerCall(String capability, java.util.Map<String, Object> args, boolean dryRun)
+      implements Request {
+    public PeerCall {
+      args = args == null ? java.util.Map.of() : args;
+    }
+  }
 
   /** Asks how the daemon is doing. Answered with {@link Response.StatusReport}. */
   record Status() implements Request {}

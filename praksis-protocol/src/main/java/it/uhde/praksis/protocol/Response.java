@@ -50,6 +50,7 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Response.PeerChallenge.class, name = "peer-challenge"),
   @JsonSubTypes.Type(value = Response.PeerWelcome.class, name = "peer-welcome"),
   @JsonSubTypes.Type(value = Response.PeerCatalog.class, name = "peer-catalog"),
+  @JsonSubTypes.Type(value = Response.PeerCallResult.class, name = "peer-call-result"),
   @JsonSubTypes.Type(value = Response.Stopped.class, name = "stopped"),
   @JsonSubTypes.Type(value = Response.Error.class, name = "error")
 })
@@ -1149,6 +1150,18 @@ public sealed interface Response {
      * @param scopable whether a grant can restrict it
      */
     public record Field(String name, String type, boolean required, boolean scopable) {}
+  }
+
+  /**
+   * The result of {@link Request.PeerCall}. Timestamps are ISO-8601 strings and bytes are Base64
+   * strings. The values come from another daemon and are untrusted.
+   *
+   * @param results the results by name
+   */
+  record PeerCallResult(Map<String, Object> results) implements Response {
+    public PeerCallResult {
+      results = results == null ? Map.of() : results;
+    }
   }
 
   /** The daemon is shutting down. */

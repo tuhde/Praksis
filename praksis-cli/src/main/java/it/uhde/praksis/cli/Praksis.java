@@ -1722,6 +1722,7 @@ public final class Praksis {
         Praksis.Peers.ShowKeyCommand.class,
         Praksis.Peers.AddCommand.class,
         Praksis.Peers.CatalogCommand.class,
+        Praksis.Peers.CallCommand.class,
         Praksis.Peers.RemoveCommand.class
       })
   static final class Peers {
@@ -1783,6 +1784,42 @@ public final class Praksis {
       @Override
       public Integer call() throws InterruptedException {
         return runDaemonCommand("--admin", "peers", "catalog", name);
+      }
+    }
+
+    @Command(
+        name = "call",
+        description =
+            "Calls a capability of a peer as yourself. The peer's grants for this daemon decide;"
+                + " no local grant is needed.")
+    static final class CallCommand extends Base {
+      @CommandLine.Parameters(index = "0", paramLabel = "<name>", description = "The peer.")
+      String name;
+
+      @CommandLine.Parameters(
+          index = "1",
+          paramLabel = "<capability>",
+          description = "Its name at the peer, e.g. entity.read.")
+      String capability;
+
+      @Option(names = "--arg", description = "An argument, name=value (repeatable).")
+      java.util.List<String> argument = new java.util.ArrayList<>();
+
+      @Option(names = "--dry-run", description = "Check and change nothing.")
+      boolean dryRun;
+
+      @Override
+      public Integer call() throws InterruptedException {
+        java.util.List<String> args =
+            new java.util.ArrayList<>(
+                java.util.List.of("--admin", "peers", "call", name, capability));
+        for (String a : argument) {
+          args.addAll(java.util.List.of("--arg", a));
+        }
+        if (dryRun) {
+          args.add("--dry-run");
+        }
+        return runDaemonCommand(args.toArray(String[]::new));
       }
     }
 

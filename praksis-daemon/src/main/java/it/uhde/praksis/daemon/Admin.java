@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package it.uhde.praksis.daemon;
 
+import it.uhde.praksis.engine.AccessPolicy;
 import it.uhde.praksis.engine.LoadedModules;
 import it.uhde.praksis.engine.ModuleLoadException;
 import it.uhde.praksis.engine.ModuleLoader;
@@ -110,7 +111,7 @@ final class Admin {
       return 1;
     }
     err.println(
-        "usage: peers [list|show-key|add <name> <key> [--socket path] [--standing-read]|remove <name>|catalog <name>] | layers status | layers update [--dry-run] [--accept-new-access] [name...] | proposals [...] | agent [...] | effective | verify [--replay] [-n N] [--update] [--layer name=dir|@ref] | test");
+        "usage: peers [list|show-key|add <name> <key> [--socket path] [--standing-read]|remove <name>|catalog <name>|call <name> <capability> [--arg k=v]... [--dry-run]] | layers status | layers update [--dry-run] [--accept-new-access] [name...] | proposals [...] | agent [...] | effective | verify [--replay] [-n N] [--update] [--layer name=dir|@ref] | test");
     return 2;
   }
 
@@ -170,6 +171,9 @@ final class Admin {
           }
           return catalog(config, peers, args.get(1), out, err);
         }
+        case "call" -> {
+          return call(config, peers, args.subList(1, args.size()), out, err);
+        }
         case "remove" -> {
           if (args.size() != 2) {
             err.println("usage: peers remove <name>");
@@ -191,6 +195,61 @@ final class Admin {
     } catch (java.io.IOException e) {
       err.println(e.getMessage());
       return 1;
+    }
+  }
+
+  /** A person calls a capability of a peer: no local policy applies, the remote's grants do. */
+  private static int call(
+      DaemonConfig config, Peers peers, List<String> args, PrintWriter out, PrintWriter err)
+      throws java.io.IOException {
+    if (args.size() < 2) {
+      err.println("usage: peers call <name> <capability> [--arg k=v]... [--dry-run]");
+      return 2;
+    }
+    java.util.Map<String, Object> given = new java.util.LinkedHashMap<>();
+    boolean dryRun = false;
+    for (int i = 2; i < args.size(); i++) {
+      if (args.get(i).equals("--dry-run")) {
+        dryRun = true;
+      } else if (args.get(i).equals("--arg") && i + 1 < args.size()) {
+        String kv = args.get(++i);
+        int eq = kv.indexOf('=');
+        if (eq < 1) {
+          err.println("--arg needs name=value");
+          return 2;
+        }
+        given.put(kv.substring(0, eq), literal(kv.substring(eq + 1)));
+      } else {
+        err.println("unknown option " + args.get(i));
+        return 2;
+      }
+    }
+    RemoteCalls calls =
+        new RemoteCalls(
+            peers,
+            new RemoteCatalogs(config.home()),
+            (rule, capability, a) -> AccessPolicy.Decision.allow(),
+            (time, rule, capability, a, allowed, error) -> {},
+            java.time.Clock.systemUTC());
+    try {
+      var results = calls.call("user", args.get(0), args.get(1), given, dryRun);
+      results.forEach((k, v) -> out.println(k + " = " + v));
+      return 0;
+    } catch (java.io.IOException e) {
+      err.println(e.getMessage());
+      return 1;
+    }
+  }
+
+  /** A value given on the command line: a number or true/false if it reads as one. */
+  private static Object literal(String text) {
+    if (text.equals("true") || text.equals("false")) {
+      return Boolean.parseBoolean(text);
+    }
+    try {
+      return Long.parseLong(text);
+    } catch (NumberFormatException e) {
+      return text;
     }
   }
 

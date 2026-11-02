@@ -70,6 +70,8 @@ permission is the narrower of the two. A peer grant must name a peer that is lis
 does not start. Every call of a peer, allowed or denied, is in the audit log with the actor
 `peer:<name>`.
 
+To call a capability of a peer yourself, run `praksis peers catalog <name>` once and then `praksis peers call <name> entity.read --arg type=invoice`. The peer's grants decide; you need no grant of your own.
+
 ## When a rule needs more
 
 If a rule calls something no grant covers, only that rule is disabled, the events it missed are

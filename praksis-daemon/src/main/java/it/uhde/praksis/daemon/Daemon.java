@@ -72,6 +72,7 @@ public final class Daemon implements AutoCloseable {
   private Store store;
   private volatile PeerAccess peerAccess;
   private volatile GrantPolicy grants;
+  private volatile PeerCalls peerCalls;
   private Entities entities;
   private EntityStorages entityStorages;
   private final java.util.concurrent.atomic.AtomicReference<EntityService> entityService =
@@ -267,6 +268,7 @@ public final class Daemon implements AutoCloseable {
       store = Store.open(config.database());
       grants = access;
       peerAccess = new PeerAccess(access::policy, store::audit);
+      peerCalls = new PeerCalls(modules.catalog()::capability, modules.capabilities(), peerAccess);
       openEntities(entityCatalog, store, access);
       entities = new Entities(entityService::get, store, clock);
       agent.bind(
@@ -407,6 +409,9 @@ public final class Daemon implements AutoCloseable {
         return PeerCatalogs.build(peer, grants.policy(), modules.catalog(), t, s);
       }
       return new Response.Error("the entities are not available");
+    }
+    if (request instanceof Request.PeerCall call) {
+      return peerCalls == null ? new Response.Error("not ready") : peerCalls.call(peer, call);
     }
     return new Response.Error("a peer cannot do this");
   }
@@ -584,6 +589,7 @@ public final class Daemon implements AutoCloseable {
         case Request.PeerHello h -> new Response.Error("not a handshake connection");
         case Request.PeerProve p -> new Response.Error("not a handshake connection");
         case Request.PeerCatalog p -> new Response.Error("only a peer can ask for this");
+        case Request.PeerCall p -> new Response.Error("only a peer can ask for this");
       };
     } catch (Injection.Invalid | Approvals.Failure | Shadows.Failure | DaemonException e) {
       return new Response.Error(e.getMessage());

@@ -188,6 +188,20 @@ Arguments:
 
 - `<name>`: The peer.
 
+#### praksis peers call
+
+Calls a capability of a peer as yourself. The peer's grants for this daemon decide; no local grant is needed.
+
+Arguments:
+
+- `<name>`: The peer.
+- `<capability>`: Its name at the peer, e.g. entity.read.
+
+Options:
+
+- `--arg` `<argument>`: An argument, name=value (repeatable).
+- `--dry-run`: Check and change nothing.
+
 #### praksis peers remove
 
 Removes a peer.
