@@ -36,6 +36,8 @@ import java.util.Set;
  *                              # runtime image; else the class path is used
  * dry_run    = false
  * offline    = false            # true: modules that need the network are not used
+ * identity   = "private"        # the name of this daemon when a person runs one per role
+ * shared_modules = "/opt/praksis-modules"  # modules that several identities use, read only
  *
  * [[layer]]                    # ruleset layers, bottom to top; without any, "ruleset" is used
  * name = "mail"
@@ -76,6 +78,10 @@ import java.util.Set;
  * @param entities where the entities of each type are kept
  * @param offline whether nothing may leave this machine: modules that reach other machines are not
  *     used
+ * @param identity the name of the identity this daemon is (the role of the person it serves, e.g.
+ *     {@code private}), or empty for a daemon that is not one of several; a name is lower case
+ *     letters, digits and '-', and the home directory of a named identity is {@code
+ *     ~/.praksis-<name>} unless it was started with another
  * @param enabledModules the modules to load; empty means every module in the directory. Unless
  *     {@code enabled_modules} says otherwise these are the modules that have a {@code [module.*]}
  *     section.
@@ -96,7 +102,8 @@ public record DaemonConfig(
     ShadowConfig shadow,
     PlanConfig plan,
     EntitiesConfig entities,
-    boolean offline) {
+    boolean offline,
+    Optional<String> identity) {
   private static final String FILE = "praksis.toml";
   private static final Set<String> KEYS =
       Set.of(
@@ -114,7 +121,9 @@ public record DaemonConfig(
           "shadow",
           "plan",
           "entities",
-          "offline");
+          "offline",
+          "identity",
+          "shared_modules");
 
   /** The layers that an AI may propose changes to. */
   public List<LayerConfig> aiMaintainedLayers() {
@@ -212,6 +221,17 @@ public record DaemonConfig(
     if (!table.has("modules")) {
       installed("modules").filter(i -> !i.equals(modules)).ifPresent(moduleRoots::add);
     }
+    // Several identities can use one directory of installed modules; it is only read from here
+    table
+        .string("shared_modules", false)
+        .map(s -> dir.resolve(s).normalize())
+        .ifPresent(
+            shared -> {
+              if (!moduleRoots.contains(shared)) {
+                // after the home, before what ships with the image
+                moduleRoots.add(1, shared);
+              }
+            });
     Path lockfile = path(table, dir, "lockfile", "modules.lock");
     Path database = path(table, dir, "database", "praksis.db");
     Optional<Path> expression =
@@ -221,6 +241,15 @@ public record DaemonConfig(
             .or(() -> installed("expression"));
     boolean dryRun = table.bool("dry_run", false);
     boolean offline = table.bool("offline", false);
+    Optional<String> identity = table.string("identity", false);
+    identity.ifPresent(
+        name -> {
+          if (!name.matches("[a-z][a-z0-9-]{0,15}")) {
+            table.problem(
+                "'identity' must be lower case letters, digits and '-', start with a letter and"
+                    + " have 16 characters at most");
+          }
+        });
     Map<String, Map<String, Object>> settings = new LinkedHashMap<>();
     table
         .table("module", false)
@@ -300,7 +329,8 @@ public record DaemonConfig(
         shadow,
         plan,
         entities,
-        offline);
+        offline,
+        identity);
   }
 
   /** The directory of what ships with the runtime image, if this is one: {@code lib/praksis}. */

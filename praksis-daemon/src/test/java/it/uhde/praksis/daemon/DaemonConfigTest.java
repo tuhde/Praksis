@@ -283,4 +283,25 @@ class DaemonConfigTest {
         .hasMessageContaining("the set 'people' is bound to 'nowhere'")
         .hasMessageContaining("'crowd' must name a storage");
   }
+
+  @Test
+  void anIdentityAndASharedModuleDirectoryAreRead() throws Exception {
+    Files.writeString(
+        home.resolve("praksis.toml"),
+        "format_version = 1\nidentity = \"private\"\nshared_modules = \"../shared\"\n");
+    DaemonConfig c = DaemonConfig.load(home);
+    assertThat(c.identity()).contains("private");
+    // after the home, before whatever ships with the image
+    assertThat(c.moduleRoots().get(0)).isEqualTo(home.resolve("modules"));
+    assertThat(c.moduleRoots().get(1)).isEqualTo(home.resolve("../shared").normalize());
+    assertThat(DaemonConfig.load(Files.createTempDirectory("nohome")).identity()).isEmpty();
+  }
+
+  @Test
+  void anIdentityNameMustBePlain() throws Exception {
+    Files.writeString(
+        home.resolve("praksis.toml"), "format_version = 1\nidentity = \"Bad Name\"\n");
+    org.junit.jupiter.api.Assertions.assertThrows(
+        DaemonException.class, () -> DaemonConfig.load(home));
+  }
 }

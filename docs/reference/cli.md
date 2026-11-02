@@ -7,6 +7,7 @@
 Options of every command:
 
 - `--home` `<home>`: The Praksis home directory (default: $PRAKSIS_HOME, else ~/.praksis). It holds the configuration, the ruleset, the modules and the daemon's socket.
+- `--identity` `<identity>`: The identity to act as (default: $PRAKSIS_IDENTITY): its home is ~/.praksis-NAME. --home wins over it. See `praksis identity`.
 
 ## Commands
 
@@ -257,6 +258,26 @@ Removes a peer.
 Arguments:
 
 - `<name>`: The peer.
+
+### praksis identity
+
+Manages identities: one daemon per role of yours (private, work, ...), each with its own home. Use one with --identity NAME.
+
+#### praksis identity create
+
+Makes the home ~/.praksis-NAME for a new identity with a praksis.toml that names it.
+
+Arguments:
+
+- `<name>`: Lower case letters, digits and '-', starting with a letter.
+
+Options:
+
+- `--shared-modules` `<sharedModules>`: A directory of installed modules that this identity shares with others.
+
+#### praksis identity list
+
+Lists the identities of this machine and whether they run.
 
 ### praksis effective
 

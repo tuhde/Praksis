@@ -35,6 +35,7 @@ import picocli.CommandLine.Spec;
       Praksis.Agent.class,
       Praksis.Layers.class,
       Praksis.Peers.class,
+      Praksis.Identity.class,
       Praksis.Effective.class,
       Praksis.Verify.class,
       Praksis.RunTests.class,
@@ -63,6 +64,14 @@ public final class Praksis {
               + " configuration, the ruleset, the modules and the daemon's socket.")
   Path home;
 
+  @Option(
+      names = "--identity",
+      scope = ScopeType.INHERIT,
+      description =
+          "The identity to act as (default: $PRAKSIS_IDENTITY): its home is ~/.praksis-NAME."
+              + " --home wins over it. See 'praksis identity'.")
+  String identity;
+
   @Spec CommandSpec spec;
 
   public static void main(String[] args) {
@@ -74,9 +83,16 @@ public final class Praksis {
     if (home != null) {
       return home.toAbsolutePath().normalize();
     }
+    if (identity != null && !identity.isBlank()) {
+      return Identities.home(identity);
+    }
     String env = System.getenv("PRAKSIS_HOME");
     if (env != null && !env.isBlank()) {
       return Path.of(env).toAbsolutePath().normalize();
+    }
+    String named = System.getenv("PRAKSIS_IDENTITY");
+    if (named != null && !named.isBlank()) {
+      return Identities.home(named);
     }
     return Path.of(System.getProperty("user.home"), ".praksis");
   }
@@ -1710,6 +1726,59 @@ public final class Praksis {
       @Override
       public Integer call() throws InterruptedException {
         return runDaemonCommand("--list-modules");
+      }
+    }
+  }
+
+  @Command(
+      name = "identity",
+      description =
+          "Manages identities: one daemon per role of yours (private, work, ...), each with its"
+              + " own home. Use one with --identity NAME.",
+      subcommands = {Praksis.Identity.CreateCommand.class, Praksis.Identity.ListCommand.class})
+  static final class Identity {
+    @Command(
+        name = "create",
+        description =
+            "Makes the home ~/.praksis-NAME for a new identity with a praksis.toml that names it.")
+    static final class CreateCommand extends Base {
+      @CommandLine.Parameters(
+          paramLabel = "<name>",
+          description = "Lower case letters, digits and '-', starting with a letter.")
+      String name;
+
+      @Option(
+          names = "--shared-modules",
+          description = "A directory of installed modules that this identity shares with others.")
+      Path sharedModules;
+
+      @Override
+      public Integer call() {
+        try {
+          Path made = Identities.create(name, sharedModules);
+          out().println("Made " + made + ". Start it with: praksis --identity " + name + " start");
+          return 0;
+        } catch (IllegalArgumentException | IOException e) {
+          err().println(e.getMessage());
+          return EXIT_FAILED;
+        }
+      }
+    }
+
+    @Command(
+        name = "list",
+        description = "Lists the identities of this machine and whether they run.")
+    static final class ListCommand extends Base {
+      @Override
+      public Integer call() {
+        var all = Identities.list();
+        if (all.isEmpty()) {
+          out().println("No identities (praksis identity create <name>).");
+        }
+        for (Identities.Found f : all) {
+          out().printf("%-16s %-8s %s%n", f.name(), f.running() ? "running" : "stopped", f.home());
+        }
+        return 0;
       }
     }
   }
