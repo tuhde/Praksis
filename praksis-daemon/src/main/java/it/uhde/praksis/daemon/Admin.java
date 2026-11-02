@@ -91,6 +91,9 @@ final class Admin {
       if (!args.isEmpty() && args.get(0).equals("identity")) {
         return identity(args.subList(1, args.size()), out, err);
       }
+      if (!args.isEmpty() && args.get(0).equals("web")) {
+        return web(config, args.subList(1, args.size()), out, err);
+      }
       if (!args.isEmpty() && args.get(0).equals("peers")) {
         return peers(config, args.subList(1, args.size()), out, err);
       }
@@ -114,8 +117,63 @@ final class Admin {
       return 1;
     }
     err.println(
-        "usage: identity link <homeA> <nameA> <homeB> <nameB> | identity check <name> <home>... | peers [list|show-key|add <name> <key> [--socket path] [--standing-read]|remove <name>|catalog <name>|call <name> <capability> [--arg k=v]... [--dry-run]|pins [name]|pin <name> <set>|accept-pin <name> <set>|unpin <name> <set>] | layers status | layers update [--dry-run] [--accept-new-access] [name...] | proposals [...] | agent [...] | effective | verify [--replay] [-n N] [--update] [--layer name=dir|@ref] | test");
+        "usage: web token [create <name> [--read-only]|list|revoke <name>] | identity link <homeA> <nameA> <homeB> <nameB> | identity check <name> <home>... | peers [list|show-key|add <name> <key> [--socket path] [--standing-read]|remove <name>|catalog <name>|call <name> <capability> [--arg k=v]... [--dry-run]|pins [name]|pin <name> <set>|accept-pin <name> <set>|unpin <name> <set>] | layers status | layers update [--dry-run] [--accept-new-access] [name...] | proposals [...] | agent [...] | effective | verify [--replay] [-n N] [--update] [--layer name=dir|@ref] | test");
     return 2;
+  }
+
+  /** The tokens of web clients. */
+  private static int web(DaemonConfig config, List<String> args, PrintWriter out, PrintWriter err) {
+    if (args.isEmpty() || !args.get(0).equals("token")) {
+      err.println("usage: web token [create <name> [--read-only]|list|revoke <name>]");
+      return 2;
+    }
+    WebTokens tokens = new WebTokens(config.home());
+    try {
+      String sub = args.size() < 2 ? "list" : args.get(1);
+      switch (sub) {
+        case "create" -> {
+          if (args.size() < 3) {
+            err.println("usage: web token create <name> [--read-only]");
+            return 2;
+          }
+          boolean readOnly = args.contains("--read-only");
+          String secret = tokens.create(args.get(2), readOnly, java.time.Instant.now());
+          out.println(secret);
+          out.println(
+              "This is shown once; only a hash is kept. Give it to the client '"
+                  + args.get(2)
+                  + "'; revoke it with: praksis web token revoke "
+                  + args.get(2));
+          return 0;
+        }
+        case "list" -> {
+          List<WebTokens.Token> all = tokens.list();
+          if (all.isEmpty()) {
+            out.println("no web tokens");
+          }
+          for (WebTokens.Token t : all) {
+            out.println(t.name() + (t.readOnly() ? " (read only)" : "") + "  made " + t.created());
+          }
+          return 0;
+        }
+        case "revoke" -> {
+          if (args.size() != 3) {
+            err.println("usage: web token revoke <name>");
+            return 2;
+          }
+          tokens.revoke(args.get(2));
+          out.println("revoked " + args.get(2));
+          return 0;
+        }
+        default -> {
+          err.println("usage: web token [create <name> [--read-only]|list|revoke <name>]");
+          return 2;
+        }
+      }
+    } catch (DaemonException e) {
+      err.println(e.getMessage());
+      return 1;
+    }
   }
 
   /** Tools for people who run one daemon per role. */

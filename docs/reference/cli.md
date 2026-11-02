@@ -259,6 +259,38 @@ Arguments:
 
 - `<name>`: The peer.
 
+### praksis web
+
+Manages the access of web clients to this daemon.
+
+#### praksis web token
+
+Makes, lists and revokes the tokens with which web clients log in.
+
+##### praksis web token create
+
+Makes a token and shows it once; only a hash of it is kept.
+
+Arguments:
+
+- `<name>`: The client it is for.
+
+Options:
+
+- `--read-only`: The client may only look.
+
+##### praksis web token list
+
+Lists the tokens by name, never their secrets.
+
+##### praksis web token revoke
+
+Revokes a token; its client is logged out at once.
+
+Arguments:
+
+- `<name>`: The token.
+
 ### praksis identity
 
 Manages identities: one daemon per role of yours (private, work, ...), each with its own home. Use one with --identity NAME.

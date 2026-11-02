@@ -35,6 +35,7 @@ import picocli.CommandLine.Spec;
       Praksis.Agent.class,
       Praksis.Layers.class,
       Praksis.Peers.class,
+      Praksis.Web.class,
       Praksis.Identity.class,
       Praksis.Effective.class,
       Praksis.Verify.class,
@@ -2097,6 +2098,63 @@ public final class Praksis {
       @Override
       public Integer call() throws InterruptedException {
         return runDaemonCommand("--admin", "peers", "remove", name);
+      }
+    }
+  }
+
+  @Command(
+      name = "web",
+      description = "Manages the access of web clients to this daemon.",
+      subcommands = {Praksis.Web.TokenCommand.class})
+  static final class Web {
+    @Command(
+        name = "token",
+        description = "Makes, lists and revokes the tokens with which web clients log in.",
+        subcommands = {
+          Praksis.Web.TokenCommand.CreateCommand.class,
+          Praksis.Web.TokenCommand.ListCommand.class,
+          Praksis.Web.TokenCommand.RevokeCommand.class
+        })
+    static final class TokenCommand {
+      @Command(
+          name = "create",
+          description = "Makes a token and shows it once; only a hash of it is kept.")
+      static final class CreateCommand extends Base {
+        @CommandLine.Parameters(paramLabel = "<name>", description = "The client it is for.")
+        String name;
+
+        @Option(names = "--read-only", description = "The client may only look.")
+        boolean readOnly;
+
+        @Override
+        public Integer call() throws InterruptedException {
+          java.util.List<String> args =
+              new java.util.ArrayList<>(
+                  java.util.List.of("--admin", "web", "token", "create", name));
+          if (readOnly) {
+            args.add("--read-only");
+          }
+          return runDaemonCommand(args.toArray(String[]::new));
+        }
+      }
+
+      @Command(name = "list", description = "Lists the tokens by name, never their secrets.")
+      static final class ListCommand extends Base {
+        @Override
+        public Integer call() throws InterruptedException {
+          return runDaemonCommand("--admin", "web", "token", "list");
+        }
+      }
+
+      @Command(name = "revoke", description = "Revokes a token; its client is logged out at once.")
+      static final class RevokeCommand extends Base {
+        @CommandLine.Parameters(paramLabel = "<name>", description = "The token.")
+        String name;
+
+        @Override
+        public Integer call() throws InterruptedException {
+          return runDaemonCommand("--admin", "web", "token", "revoke", name);
+        }
       }
     }
   }
