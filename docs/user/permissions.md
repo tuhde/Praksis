@@ -51,54 +51,9 @@ cleared). See [Entities](entities.md).
 
 ## Other daemons
 
-A daemon that connects to this one (see `praksis peers`) can do nothing until you give it a grant. A
-peer grant is like a grant for a layer, but it names the peer as it is listed in `peers.toml`:
-
-```toml
-[[peer_grant]]
-id = "acme-read-invoices"
-peer = "acme"
-capability = "entity.read"
-note = "the company may read the invoices it sent me"
-
-[peer_grant.args]
-type = { one_of = ["invoice"] }
-```
-
-This is the ceiling: what the peer's own policy lets its rules do is decided there, and the effective
-permission is the narrower of the two. A peer grant must name a peer that is listed, or the daemon
-does not start. Every call of a peer, allowed or denied, is in the audit log with the actor
-`peer:<name>`.
-
-A grant of your own can name a set of a peer, but only a **pinned** one. `praksis peers pin acme finance`
-records the members the set has now, and a grant such as `type = { set = "acme/finance" }` covers
-exactly those. If the company adds a type to its set, the pin does not move and your grant does not
-widen: `praksis peers pins` shows the difference, and `praksis peers accept-pin acme finance` is your
-approval. A grant that names a set that is not pinned stops the daemon from starting.
-
-A function that a peer offers anew is not used by rules until you accept it: `praksis peers requests`
-lists what waits (new functions, and changes of pinned sets), `praksis peers answer <number> approve`
-or `refuse` answers. Accepting does not grant anything by itself; your grants still decide who may
-use the function. For a peer you trust to read, set `standing_read = true` in `peers.toml`: the
-functions that only read are then accepted as they appear. Anything that writes, sends or deletes
-always asks. One peer can have 20 requests waiting; more are asked again when there is room.
-
-A rule can call an accepted function of a peer under the peer's name, for example `capability =
-"acme/entity.read"`, and a grant in `policy.toml` names it the same way (`capability =
-"acme/entity.read"`, with `type = { set = "acme/finance" }` for a pinned set). The call runs at the
-peer, under the peer's grants, and both sides have to allow it. If the peer cannot be reached, the
-rule does not fail and is not disabled: the event is skipped for that rule and kept as missed, and
-`praksis approvals replay <rule>` handles it once the peer is back. If the peer stops offering the
-function, `praksis verify` reports every rule that calls it as an error. The functions that rules can
-name are the ones in the kept catalogs when the daemon starts; a function that a peer offers later
-can be used in rules after the next start.
-
-The **Peers** tab of the desktop program shows the same: each peer with its key and whether it can be
-reached, what it offers under its name, with anything that cannot be used marked and the reason, the
-pins (pin a set, accept a change, remove a pin) and the requests of the peers to approve or refuse.
-What a peer sends is shown as text.
-
-To call a capability of a peer yourself, run `praksis peers catalog <name>` once and then `praksis peers call <name> entity.read --arg type=invoice`. The peer's grants decide; you need no grant of your own.
+A daemon that connects to this one can do nothing until a `[[peer_grant]]` in `policy.toml` gives it
+something, and what it offers to you is allowed by your own grants and by its. Keys, peer grants,
+pinned sets, requests and calls from rules are in [Other daemons](peers.md).
 
 ## When a rule needs more
 
