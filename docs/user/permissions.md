@@ -93,6 +93,11 @@ function, `praksis verify` reports every rule that calls it as an error. The fun
 name are the ones in the kept catalogs when the daemon starts; a function that a peer offers later
 can be used in rules after the next start.
 
+The **Peers** tab of the desktop program shows the same: each peer with its key and whether it can be
+reached, what it offers under its name, with anything that cannot be used marked and the reason, the
+pins (pin a set, accept a change, remove a pin) and the requests of the peers to approve or refuse.
+What a peer sends is shown as text.
+
 To call a capability of a peer yourself, run `praksis peers catalog <name>` once and then `praksis peers call <name> entity.read --arg type=invoice`. The peer's grants decide; you need no grant of your own.
 
 ## When a rule needs more
