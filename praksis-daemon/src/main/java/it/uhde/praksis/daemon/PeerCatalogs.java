@@ -92,6 +92,21 @@ final class PeerCatalogs {
         PeerVersions.CATALOG_VERSION, List.copyOf(capabilities), withSets, offeredSets);
   }
 
+  /** A hash of a catalog: equal catalogs have equal hashes. */
+  static String hash(Response.PeerCatalog catalog) {
+    try {
+      byte[] h =
+          java.security.MessageDigest.getInstance("SHA-256")
+              .digest(
+                  it.uhde.praksis.protocol.Wire.encode(catalog)
+                      .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+      return java.util.HexFormat.of().formatHex(h);
+    } catch (java.security.NoSuchAlgorithmException
+        | it.uhde.praksis.protocol.ProtocolException e) {
+      throw new IllegalStateException(e);
+    }
+  }
+
   private static Response.PeerCatalog.CapabilityInfo capability(CapabilityDescriptor c) {
     return new Response.PeerCatalog.CapabilityInfo(
         c.name(),

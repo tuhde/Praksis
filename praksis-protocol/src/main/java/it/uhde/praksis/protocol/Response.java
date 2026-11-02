@@ -51,6 +51,7 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Response.PeerWelcome.class, name = "peer-welcome"),
   @JsonSubTypes.Type(value = Response.PeerCatalog.class, name = "peer-catalog"),
   @JsonSubTypes.Type(value = Response.PeerCallResult.class, name = "peer-call-result"),
+  @JsonSubTypes.Type(value = Response.PeerChangeList.class, name = "peer-change-list"),
   @JsonSubTypes.Type(value = Response.Stopped.class, name = "stopped"),
   @JsonSubTypes.Type(value = Response.Error.class, name = "error")
 })
@@ -1163,6 +1164,18 @@ public sealed interface Response {
       results = results == null ? Map.of() : results;
     }
   }
+
+  /**
+   * The answer to {@link Request.PeerChanges}.
+   *
+   * @param counter the counter to send next time
+   * @param topics what changed that a peer can follow: {@code catalog} (what is offered) and {@code
+   *     entities} (data of the types it may use)
+   * @param catalogHash a hash of the catalog that is offered to this peer now, so that it can tell
+   *     whether it holds the current one, also when a change did not raise a topic
+   */
+  record PeerChangeList(long counter, List<String> topics, String catalogHash)
+      implements Response {}
 
   /** The daemon is shutting down. */
   record Stopped() implements Response {}

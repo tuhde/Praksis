@@ -292,6 +292,10 @@ final class Admin {
               + "  "
               + s.members().stream().map(remote::qualified).toList());
     }
+    RemoteFeed feed = new RemoteFeed(config.home(), name, java.time.Clock.systemUTC(), t -> {});
+    feed.gone()
+        .forEach(
+            (key, since) -> out.println("unavailable  " + key + "  not offered since " + since));
     return 0;
   }
 

@@ -62,6 +62,7 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.PeerProve.class, name = "peer-prove"),
   @JsonSubTypes.Type(value = Request.PeerCatalog.class, name = "peer-catalog"),
   @JsonSubTypes.Type(value = Request.PeerCall.class, name = "peer-call"),
+  @JsonSubTypes.Type(value = Request.PeerChanges.class, name = "peer-changes"),
   @JsonSubTypes.Type(value = Request.Stop.class, name = "stop")
 })
 public sealed interface Request {
@@ -107,6 +108,16 @@ public sealed interface Request {
       args = args == null ? java.util.Map.of() : args;
     }
   }
+
+  /**
+   * Asks what has changed for the peer since a counter, and waits if nothing has (only on a
+   * connection that did the handshake). Answered with {@link Response.PeerChangeList}. The catalog
+   * is not sent: the answer says whether it is another one, and the peer asks for it.
+   *
+   * @param since the counter of the last answer; 0 for the first request
+   * @param waitMillis how long to wait for a change (at most 30 seconds)
+   */
+  record PeerChanges(long since, int waitMillis) implements Request {}
 
   /** Asks how the daemon is doing. Answered with {@link Response.StatusReport}. */
   record Status() implements Request {}

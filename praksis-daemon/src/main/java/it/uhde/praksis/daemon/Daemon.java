@@ -73,6 +73,7 @@ public final class Daemon implements AutoCloseable {
   private volatile PeerAccess peerAccess;
   private volatile GrantPolicy grants;
   private volatile PeerCalls peerCalls;
+  private final List<Thread> feeds = new java.util.concurrent.CopyOnWriteArrayList<>();
   private Entities entities;
   private EntityStorages entityStorages;
   private final java.util.concurrent.atomic.AtomicReference<EntityService> entityService =
@@ -332,6 +333,7 @@ public final class Daemon implements AutoCloseable {
               new PeerHandshake(new Peers(config.home())),
               this::handlePeer);
       api.start();
+      startFeeds();
       modules.startSources(engine);
     } catch (RulesetException e) {
       throw new DaemonException(
@@ -397,18 +399,55 @@ public final class Daemon implements AutoCloseable {
     }
   }
 
+  /** Follows the catalog of every listed peer that has a socket. */
+  private void startFeeds() throws IOException {
+    Peers own = new Peers(config.home());
+    for (Peers.Peer peer : own.list()) {
+      if (peer.socket().isEmpty()) {
+        continue;
+      }
+      RemoteFeed feed = new RemoteFeed(config.home(), peer.name(), clock, topics::bump);
+      feeds.add(
+          Thread.ofVirtual().name("praksis-feed-" + peer.name()).start(() -> feed.run(own, peer)));
+    }
+  }
+
+  /** What is offered to this peer now, or null while the daemon starts. */
+  private Response.PeerCatalog catalogFor(Peers.Peer peer) {
+    if (grants == null || modules == null || entities == null) {
+      return null;
+    }
+    Response types = entities.handle(new Request.EntityTypes());
+    Response sets = entities.handle(new Request.EntitySets());
+    if (types instanceof Response.EntityTypeList t && sets instanceof Response.EntitySetList s) {
+      return PeerCatalogs.build(peer, grants.policy(), modules.catalog(), t, s);
+    }
+    return null;
+  }
+
   /** Answers a request of another daemon that has proven its key. */
   private Response handlePeer(Peers.Peer peer, Request request) {
     if (request instanceof Request.PeerCatalog) {
-      if (grants == null || modules == null || entities == null) {
-        return new Response.Error("not ready");
+      Response.PeerCatalog catalog = catalogFor(peer);
+      return catalog == null ? new Response.Error("not ready") : catalog;
+    }
+    if (request instanceof Request.PeerChanges c) {
+      try {
+        Response.ChangeList changes = topics.changes(c.since(), c.waitMillis());
+        Response.PeerCatalog catalog = catalogFor(peer);
+        if (catalog == null) {
+          return new Response.Error("not ready");
+        }
+        return new Response.PeerChangeList(
+            changes.counter(),
+            changes.topics().stream()
+                .filter(t -> t.equals("catalog") || t.equals("entities"))
+                .toList(),
+            PeerCatalogs.hash(catalog));
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        return new Response.Error("interrupted");
       }
-      Response types = entities.handle(new Request.EntityTypes());
-      Response sets = entities.handle(new Request.EntitySets());
-      if (types instanceof Response.EntityTypeList t && sets instanceof Response.EntitySetList s) {
-        return PeerCatalogs.build(peer, grants.policy(), modules.catalog(), t, s);
-      }
-      return new Response.Error("the entities are not available");
     }
     if (request instanceof Request.PeerCall call) {
       return peerCalls == null ? new Response.Error("not ready") : peerCalls.call(peer, call);
@@ -530,7 +569,11 @@ public final class Daemon implements AutoCloseable {
         case Request.Missed m -> new Response.Done(approvals.missed(m.rule(), m.action()));
         case Request.Grants g -> approvals.grants();
         case Request.Revoke r -> new Response.Done(approvals.revoke(r.id()));
-        case Request.Reload r -> new Response.Done(approvals.reload());
+        case Request.Reload r -> {
+          Response done = new Response.Done(approvals.reload());
+          topics.bump("catalog");
+          yield done;
+        }
         case Request.Shadow s -> shadows.list();
         case Request.ShadowPromote p -> new Response.Done(shadows.promote(p.rule()));
         case Request.ShadowReset r -> new Response.Done(shadows.reset(r.rule()));
@@ -590,6 +633,7 @@ public final class Daemon implements AutoCloseable {
         case Request.PeerProve p -> new Response.Error("not a handshake connection");
         case Request.PeerCatalog p -> new Response.Error("only a peer can ask for this");
         case Request.PeerCall p -> new Response.Error("only a peer can ask for this");
+        case Request.PeerChanges p -> new Response.Error("only a peer can ask for this");
       };
     } catch (Injection.Invalid | Approvals.Failure | Shadows.Failure | DaemonException e) {
       return new Response.Error(e.getMessage());
@@ -696,6 +740,7 @@ public final class Daemon implements AutoCloseable {
       return;
     }
     stopped.countDown();
+    feeds.forEach(Thread::interrupt);
     topics.close();
     if (modules != null) {
       modules.stopSources();
