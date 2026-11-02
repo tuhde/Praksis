@@ -110,7 +110,7 @@ final class Admin {
       return 1;
     }
     err.println(
-        "usage: peers [list|show-key|add <name> <key> [--socket path] [--standing-read]|remove <name>] | layers status | layers update [--dry-run] [--accept-new-access] [name...] | proposals [...] | agent [...] | effective | verify [--replay] [-n N] [--update] [--layer name=dir|@ref] | test");
+        "usage: peers [list|show-key|add <name> <key> [--socket path] [--standing-read]|remove <name>|catalog <name>] | layers status | layers update [--dry-run] [--accept-new-access] [name...] | proposals [...] | agent [...] | effective | verify [--replay] [-n N] [--update] [--layer name=dir|@ref] | test");
     return 2;
   }
 
@@ -163,6 +163,13 @@ final class Admin {
           out.println("added " + args.get(1) + "  " + Peers.fingerprint(args.get(2)));
           return 0;
         }
+        case "catalog" -> {
+          if (args.size() != 2) {
+            err.println("usage: peers catalog <name>");
+            return 2;
+          }
+          return catalog(config, peers, args.get(1), out, err);
+        }
         case "remove" -> {
           if (args.size() != 2) {
             err.println("usage: peers remove <name>");
@@ -185,6 +192,48 @@ final class Admin {
       err.println(e.getMessage());
       return 1;
     }
+  }
+
+  private static int catalog(
+      DaemonConfig config, Peers peers, String name, PrintWriter out, PrintWriter err)
+      throws java.io.IOException {
+    Peers.Peer peer = peers.byName(name).orElse(null);
+    if (peer == null) {
+      err.println("no peer named " + name);
+      return 1;
+    }
+    RemoteCatalogs catalogs = new RemoteCatalogs(config.home());
+    RemoteCatalogs.Remote remote;
+    try (PeerLink link = PeerLink.connect(peers, peer)) {
+      remote = catalogs.fetch(link);
+    } catch (java.io.IOException e) {
+      remote = catalogs.cached(name).orElse(null);
+      if (remote == null) {
+        err.println(e.getMessage());
+        return 1;
+      }
+      err.println("warning: " + e.getMessage() + " (showing the catalog kept from before)");
+    }
+    out.println(
+        name
+            + (remote.stale() ? "  STALE, fetched " : "  fetched ")
+            + remote.fetched()
+            + (remote.dropped() > 0 ? "  (" + remote.dropped() + " entries left out)" : ""));
+    var c = remote.catalog();
+    for (var x : c.capabilities()) {
+      out.println("capability  " + remote.qualified(x.name()) + "  " + x.effect());
+    }
+    for (var t : c.types()) {
+      out.println("type        " + remote.qualified(t.id()) + "  " + t.title());
+    }
+    for (var s : c.sets()) {
+      out.println(
+          "set         "
+              + remote.qualified(s.id())
+              + "  "
+              + s.members().stream().map(remote::qualified).toList());
+    }
+    return 0;
   }
 
   private static int status(DaemonConfig config, Layers layers, PrintWriter out)

@@ -71,6 +71,7 @@ public final class Daemon implements AutoCloseable {
   private Ruleset ruleset;
   private Store store;
   private volatile PeerAccess peerAccess;
+  private volatile GrantPolicy grants;
   private Entities entities;
   private EntityStorages entityStorages;
   private final java.util.concurrent.atomic.AtomicReference<EntityService> entityService =
@@ -264,6 +265,7 @@ public final class Daemon implements AutoCloseable {
       EntityCatalog entityCatalog = EntitySets.catalog(layers.sources(layers.readLock()));
       GrantPolicy access = accessPolicy(config, modules.catalog(), effective, entityCatalog);
       store = Store.open(config.database());
+      grants = access;
       peerAccess = new PeerAccess(access::policy, store::audit);
       openEntities(entityCatalog, store, access);
       entities = new Entities(entityService::get, store, clock);
@@ -325,7 +327,8 @@ public final class Daemon implements AutoCloseable {
               config.socket(),
               this::handle,
               this::requestStop,
-              new PeerHandshake(new Peers(config.home())));
+              new PeerHandshake(new Peers(config.home())),
+              this::handlePeer);
       api.start();
       modules.startSources(engine);
     } catch (RulesetException e) {
@@ -390,6 +393,22 @@ public final class Daemon implements AutoCloseable {
               origin.hash(),
               detail));
     }
+  }
+
+  /** Answers a request of another daemon that has proven its key. */
+  private Response handlePeer(Peers.Peer peer, Request request) {
+    if (request instanceof Request.PeerCatalog) {
+      if (grants == null || modules == null || entities == null) {
+        return new Response.Error("not ready");
+      }
+      Response types = entities.handle(new Request.EntityTypes());
+      Response sets = entities.handle(new Request.EntitySets());
+      if (types instanceof Response.EntityTypeList t && sets instanceof Response.EntitySetList s) {
+        return PeerCatalogs.build(peer, grants.policy(), modules.catalog(), t, s);
+      }
+      return new Response.Error("the entities are not available");
+    }
+    return new Response.Error("a peer cannot do this");
   }
 
   /** A grant for a peer needs a peer of that name in {@code peers.toml}. */
@@ -564,6 +583,7 @@ public final class Daemon implements AutoCloseable {
         case Request.Stop s -> new Response.Stopped();
         case Request.PeerHello h -> new Response.Error("not a handshake connection");
         case Request.PeerProve p -> new Response.Error("not a handshake connection");
+        case Request.PeerCatalog p -> new Response.Error("only a peer can ask for this");
       };
     } catch (Injection.Invalid | Approvals.Failure | Shadows.Failure | DaemonException e) {
       return new Response.Error(e.getMessage());

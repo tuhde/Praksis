@@ -180,6 +180,14 @@ Options:
 - `--socket` `<socket>`: Where to reach it.
 - `--standing-read`: Allow read access to what it offers.
 
+#### praksis peers catalog
+
+Asks a peer what it offers (capabilities, entity types and sets, under its name). If it cannot be reached, shows the catalog kept from the last time, marked stale.
+
+Arguments:
+
+- `<name>`: The peer.
+
 #### praksis peers remove
 
 Removes a peer.

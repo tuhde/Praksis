@@ -1721,6 +1721,7 @@ public final class Praksis {
         Praksis.Peers.ListCommand.class,
         Praksis.Peers.ShowKeyCommand.class,
         Praksis.Peers.AddCommand.class,
+        Praksis.Peers.CatalogCommand.class,
         Praksis.Peers.RemoveCommand.class
       })
   static final class Peers {
@@ -1767,6 +1768,21 @@ public final class Praksis {
           args.add("--standing-read");
         }
         return runDaemonCommand(args.toArray(String[]::new));
+      }
+    }
+
+    @Command(
+        name = "catalog",
+        description =
+            "Asks a peer what it offers (capabilities, entity types and sets, under its name)."
+                + " If it cannot be reached, shows the catalog kept from the last time, marked stale.")
+    static final class CatalogCommand extends Base {
+      @CommandLine.Parameters(paramLabel = "<name>", description = "The peer.")
+      String name;
+
+      @Override
+      public Integer call() throws InterruptedException {
+        return runDaemonCommand("--admin", "peers", "catalog", name);
       }
     }
 

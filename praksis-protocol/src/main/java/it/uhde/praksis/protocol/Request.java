@@ -60,6 +60,7 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.EntityDelete.class, name = "entity-delete"),
   @JsonSubTypes.Type(value = Request.PeerHello.class, name = "peer-hello"),
   @JsonSubTypes.Type(value = Request.PeerProve.class, name = "peer-prove"),
+  @JsonSubTypes.Type(value = Request.PeerCatalog.class, name = "peer-catalog"),
   @JsonSubTypes.Type(value = Request.Stop.class, name = "stop")
 })
 public sealed interface Request {
@@ -81,6 +82,13 @@ public sealed interface Request {
    * @param signature the signature (Base64)
    */
   record PeerProve(String signature) implements Request {}
+
+  /**
+   * Asks what the daemon offers to the peer that is connected (only on a connection that did the
+   * handshake). Answered with {@link Response.PeerCatalog}: only what the grants for this peer
+   * cover.
+   */
+  record PeerCatalog() implements Request {}
 
   /** Asks how the daemon is doing. Answered with {@link Response.StatusReport}. */
   record Status() implements Request {}

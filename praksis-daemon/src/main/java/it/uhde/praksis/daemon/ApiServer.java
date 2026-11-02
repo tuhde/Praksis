@@ -33,6 +33,7 @@ final class ApiServer implements AutoCloseable {
   private final Function<Request, Response> handler;
   private final Runnable afterStop;
   private final PeerHandshake handshake;
+  private final java.util.function.BiFunction<Peers.Peer, Request, Response> peerHandler;
   private final Set<SocketChannel> connections = ConcurrentHashMap.newKeySet();
   private ServerSocketChannel server;
 
@@ -54,6 +55,20 @@ final class ApiServer implements AutoCloseable {
       Function<Request, Response> handler,
       Runnable afterStop,
       PeerHandshake handshake) {
+    this(socket, handler, afterStop, handshake, null);
+  }
+
+  /**
+   * @param peerHandler answers the requests of a connection that is a peer, with the peer; null
+   *     refuses them all
+   */
+  ApiServer(
+      Path socket,
+      Function<Request, Response> handler,
+      Runnable afterStop,
+      PeerHandshake handshake,
+      java.util.function.BiFunction<Peers.Peer, Request, Response> peerHandler) {
+    this.peerHandler = peerHandler;
     this.handshake = handshake;
     this.socket = socket;
     this.handler = handler;
@@ -112,7 +127,10 @@ final class ApiServer implements AutoCloseable {
                     : handshake.prove(session, prove);
             hangUp = response instanceof Response.Error;
           } else if (session.state != PeerHandshake.Session.State.LOCAL) {
-            response = new Response.Error("a peer cannot do this");
+            response =
+                session.peer().isEmpty() || peerHandler == null
+                    ? new Response.Error("a peer cannot do this")
+                    : peerHandler.apply(session.peer().get(), request);
           } else {
             response = handler.apply(request);
           }

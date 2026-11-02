@@ -49,6 +49,7 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Response.Done.class, name = "done"),
   @JsonSubTypes.Type(value = Response.PeerChallenge.class, name = "peer-challenge"),
   @JsonSubTypes.Type(value = Response.PeerWelcome.class, name = "peer-welcome"),
+  @JsonSubTypes.Type(value = Response.PeerCatalog.class, name = "peer-catalog"),
   @JsonSubTypes.Type(value = Response.Stopped.class, name = "stopped"),
   @JsonSubTypes.Type(value = Response.Error.class, name = "error")
 })
@@ -1106,6 +1107,49 @@ public sealed interface Response {
    * @param catalog the catalog version that was agreed
    */
   record PeerWelcome(String peer, int protocol, int catalog) implements Response {}
+
+  /**
+   * What a daemon offers to one peer: the capabilities, entity types and entity sets that the
+   * grants for that peer cover. Everything in it is text from another daemon and is untrusted.
+   * Commands and views follow when calls can be forwarded.
+   *
+   * @param version the catalog version, see {@link PeerVersions#CATALOG_VERSION}
+   * @param capabilities the capabilities that the peer may call at least in some form
+   * @param types the entity types it may use, without owner (layer names stay private)
+   * @param sets the entity sets, reduced to the types it may use
+   */
+  record PeerCatalog(
+      int version,
+      List<CapabilityInfo> capabilities,
+      List<EntityTypeList.EntityTypeInfo> types,
+      List<EntitySetList.EntitySetInfo> sets)
+      implements Response {
+    /**
+     * A capability.
+     *
+     * @param name the name
+     * @param effect the effect class
+     * @param supportsDryRun whether it can be asked to change nothing
+     * @param params the parameters
+     * @param results the results
+     */
+    public record CapabilityInfo(
+        String name,
+        String effect,
+        boolean supportsDryRun,
+        List<Field> params,
+        List<Field> results) {}
+
+    /**
+     * A parameter or result.
+     *
+     * @param name the name
+     * @param type the type of its values
+     * @param required whether it must be given
+     * @param scopable whether a grant can restrict it
+     */
+    public record Field(String name, String type, boolean required, boolean scopable) {}
+  }
 
   /** The daemon is shutting down. */
   record Stopped() implements Response {}
