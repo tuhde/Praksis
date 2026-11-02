@@ -45,7 +45,10 @@ An account belongs to exactly one identity: two daemons on the same mailbox woul
 module settings. Credentials are never shared, and neither are settings; only layers (for example
 `Praksis-Mail`) and one directory of installed modules (`shared_modules` in `praksis.toml`) can be
 used by all. A company you are connected to as one identity is not visible to another identity unless
-the first offers it on as a function of its own.
+the first offers it on as a function of its own: a peer grant cannot name a function that this
+daemon has itself from another daemon (such as `acme/entity.read`), because a daemon is not a relay.
+The human signing keys of the trust setting are a list per identity (`[trust] human_keys` in each
+`policy.toml`).
 
 ## What the other side lets you do
 
