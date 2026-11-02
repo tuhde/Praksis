@@ -30,6 +30,15 @@ final class RemoteCalls {
   private final Clock clock;
   private final Accepted accepted;
 
+  /** The remote could not be reached or would not talk to us: the call was not made. */
+  static final class Unreachable extends IOException {
+    private static final long serialVersionUID = 1L;
+
+    Unreachable(String message, Throwable cause) {
+      super(message, cause);
+    }
+  }
+
   /** Whether a function of a remote was accepted. */
   @FunctionalInterface
   interface Accepted {
@@ -97,7 +106,13 @@ final class RemoteCalls {
       audit.record(clock.instant(), caller, qualified, args, false, Optional.of(decision.reason()));
       throw new IOException(decision.reason());
     }
-    try (PeerLink link = PeerLink.connect(peers, peer)) {
+    PeerLink link;
+    try {
+      link = PeerLink.connect(peers, peer);
+    } catch (IOException e) {
+      throw new Unreachable(peerName + " cannot be reached: " + e.getMessage(), e);
+    }
+    try (link) {
       Response r = link.send(new Request.PeerCall(capability, args, dryRun));
       if (r instanceof Response.PeerCallResult result) {
         audit.record(clock.instant(), caller, qualified, args, true, Optional.empty());

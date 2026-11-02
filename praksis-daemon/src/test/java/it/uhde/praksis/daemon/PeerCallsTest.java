@@ -182,6 +182,44 @@ class PeerCallsTest {
   }
 
   @Test
+  void aRuleCallsARemoteCapabilityAndAnUnreachableRemoteIsUnavailable() throws Exception {
+    RemoteCalls calls = remote((r, c, a) -> AccessPolicy.Decision.allow());
+    RemoteCapability capability = new RemoteCapability("acme", "demo.echo", calls);
+    CapabilityContext context =
+        new CapabilityContext() {
+          public boolean dryRun() {
+            return false;
+          }
+
+          public String idempotencyKey() {
+            return "k";
+          }
+
+          public Optional<String> ruleId() {
+            return Optional.of("rule1");
+          }
+
+          public Optional<it.uhde.praksis.capability.Event> event() {
+            return Optional.empty();
+          }
+        };
+    assertEquals("acme/demo.echo", capability.name());
+    assertEquals("hi", capability.invoke(context, Map.of("text", "hi")).get("text"));
+
+    // the remote refuses: the call fails, but the remote is not "unavailable"
+    org.junit.jupiter.api.Assertions.assertFalse(
+        assertThrows(
+                it.uhde.praksis.capability.CapabilityException.class,
+                () -> capability.invoke(context, Map.of("text", "secret")))
+            instanceof it.uhde.praksis.engine.UnavailableException);
+
+    server.close();
+    assertThrows(
+        it.uhde.praksis.engine.UnavailableException.class,
+        () -> capability.invoke(context, Map.of("text", "hi")));
+  }
+
+  @Test
   void aFunctionThatIsNotAcceptedIsNotCalled() {
     accepted = false;
     RemoteCalls allowAll = remote((r, c, a) -> AccessPolicy.Decision.allow());

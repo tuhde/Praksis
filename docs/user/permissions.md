@@ -83,6 +83,16 @@ use the function. For a peer you trust to read, set `standing_read = true` in `p
 functions that only read are then accepted as they appear. Anything that writes, sends or deletes
 always asks. One peer can have 20 requests waiting; more are asked again when there is room.
 
+A rule can call an accepted function of a peer under the peer's name, for example `capability =
+"acme/entity.read"`, and a grant in `policy.toml` names it the same way (`capability =
+"acme/entity.read"`, with `type = { set = "acme/finance" }` for a pinned set). The call runs at the
+peer, under the peer's grants, and both sides have to allow it. If the peer cannot be reached, the
+rule does not fail and is not disabled: the event is skipped for that rule and kept as missed, and
+`praksis approvals replay <rule>` handles it once the peer is back. If the peer stops offering the
+function, `praksis verify` reports every rule that calls it as an error. The functions that rules can
+name are the ones in the kept catalogs when the daemon starts; a function that a peer offers later
+can be used in rules after the next start.
+
 To call a capability of a peer yourself, run `praksis peers catalog <name>` once and then `praksis peers call <name> entity.read --arg type=invoice`. The peer's grants decide; you need no grant of your own.
 
 ## When a rule needs more

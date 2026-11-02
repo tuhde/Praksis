@@ -91,6 +91,7 @@ public final class Verifier {
       String where = "rules/" + rule.id() + ".toml";
       unusedNeeds(rule, where, findings);
       effectOverstated(rule, where, findings);
+      unavailable(rule, where, findings);
     }
     shadowed(ruleset.rules(), findings);
     return new Report(findings);
@@ -104,6 +105,22 @@ public final class Verifier {
       }
     }
     return out;
+  }
+
+  /** A rule that calls a capability of another daemon that cannot be used now would fail. */
+  private void unavailable(Rule rule, String where, List<Finding> out) {
+    for (String capability : called(rule)) {
+      catalog
+          .unavailable(capability)
+          .ifPresent(
+              why ->
+                  out.add(
+                      new Finding(
+                          Severity.ERROR,
+                          "remote-unavailable",
+                          where,
+                          "calls '" + capability + "', which cannot be used now: " + why)));
+    }
   }
 
   private static void unusedNeeds(Rule rule, String where, List<Finding> out) {

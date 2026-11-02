@@ -135,6 +135,40 @@ class VerifierTest {
   }
 
   @Test
+  void aRuleThatCallsWhatACatalogSaysIsUnavailableIsAnError() throws Exception {
+    ModuleCatalog catalog =
+        new ModuleCatalog(
+                List.of(
+                    new ModuleDescriptor(
+                        "mail",
+                        "0.1.0",
+                        List.of(),
+                        List.copyOf(CATALOG.capabilities()),
+                        List.of(CATALOG.eventType("mail.received").orElseThrow()),
+                        List.of())))
+            .withAvailability(
+                name ->
+                    name.equals("mail.move")
+                        ? java.util.Optional.of("acme no longer offers it")
+                        : java.util.Optional.empty());
+    Files.createDirectories(dir.resolve("rules"));
+    Files.writeString(dir.resolve("ruleset.toml"), "format_version = 1\nname = \"t\"\n");
+    Files.writeString(
+        dir.resolve("rules/a.toml"), rule("a", "local-write", "\"mail.move\"", "", MOVE));
+    Verifier.Report report =
+        new Verifier(Expressions.compiler(), catalog).verify(RulesetLoader.load(dir));
+    assertThat(report.ok()).isFalse();
+    assertThat(report.findings())
+        .filteredOn(f -> f.check().equals("remote-unavailable"))
+        .singleElement()
+        .satisfies(
+            f -> {
+              assertThat(f.severity()).isEqualTo(Severity.ERROR);
+              assertThat(f.message()).contains("mail.move").contains("acme no longer offers it");
+            });
+  }
+
+  @Test
   void anOverstatedEffectIsAWarning() throws Exception {
     Verifier.Report report = verify("a", rule("a", "destructive", "\"mail.move\"", "", MOVE));
     assertThat(report.findings())

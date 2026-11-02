@@ -48,21 +48,24 @@ class EngineTest {
   private final Map<String, Capability> capabilities = new HashMap<>();
   private int counter;
 
-  private static final ModuleCatalog CATALOG =
-      new ModuleCatalog(
-          List.of(
-              new ModuleDescriptor(
-                  "test",
-                  "0",
-                  List.of(),
-                  List.of(
-                      capability("test.record", EffectClass.LOCAL_WRITE),
-                      capability("test.fail", EffectClass.LOCAL_WRITE),
-                      capability("test.slow", EffectClass.LOCAL_WRITE)),
-                  List.of(
-                      new EventTypeDescriptor(
-                          "test.event",
-                          List.of(new FieldDescriptor("name", ValueType.STRING, true, false)))))));
+  private static final ModuleCatalog CATALOG = newCatalog();
+
+  private static ModuleCatalog newCatalog() {
+    return new ModuleCatalog(
+        List.of(
+            new ModuleDescriptor(
+                "test",
+                "0",
+                List.of(),
+                List.of(
+                    capability("test.record", EffectClass.LOCAL_WRITE),
+                    capability("test.fail", EffectClass.LOCAL_WRITE),
+                    capability("test.slow", EffectClass.LOCAL_WRITE)),
+                List.of(
+                    new EventTypeDescriptor(
+                        "test.event",
+                        List.of(new FieldDescriptor("name", ValueType.STRING, true, false)))))));
+  }
 
   private static CapabilityDescriptor capability(String name, EffectClass effect) {
     return new CapabilityDescriptor(
@@ -428,6 +431,43 @@ class EngineTest {
     assertThat(calls).containsExactly("record:one", "record:one", "record:one");
     assertThat(store.missed("a")).isEmpty();
     assertThat(store.recentLog(50)).anyMatch(l -> l.message().equals("replay after approval"));
+  }
+
+  @Test
+  void anUnavailableCapabilitySkipsTheEventAndKeepsItForAReplay() throws Exception {
+    rule("a", "", call("x", "test.record", "'one'"));
+    java.util.concurrent.atomic.AtomicBoolean away =
+        new java.util.concurrent.atomic.AtomicBoolean(true);
+    ModuleCatalog catalog =
+        newCatalog()
+            .withAvailability(
+                name ->
+                    away.get() && name.equals("test.record")
+                        ? Optional.of("acme cannot be reached")
+                        : Optional.empty());
+    Event first = event("t", "m1");
+    try (Engine engine =
+        new Engine(
+            RulesetLoader.load(dir.resolve("ruleset")),
+            catalog,
+            Expressions.compiler(),
+            capabilities,
+            store,
+            Engine.Options.defaults())) {
+      run(engine, first);
+      assertThat(calls).isEmpty();
+      // the rule is not disabled and no permission is asked for: it just did not run
+      assertThat(engine.disabledRules()).isEmpty();
+      assertThat(store.missed("a")).containsExactly(first.id());
+      assertThat(store.recentLog(10))
+          .anyMatch(l -> l.message().startsWith("skipped, recorded as missed"));
+
+      away.set(false);
+      engine.replay("a", missedEvents("a"), false);
+      assertThat(engine.awaitIdle(Duration.ofSeconds(5))).isTrue();
+    }
+    assertThat(calls).containsExactly("record:one");
+    assertThat(store.missed("a")).isEmpty();
   }
 
   @Test

@@ -22,6 +22,8 @@ public final class LoadedModules implements AutoCloseable {
   private final List<EventSource> sources;
   private final Map<String, Supplier<EntityStorage>> backends;
   private final List<EventSource> started = new ArrayList<>();
+  private java.util.function.Function<String, Optional<String>> availability =
+      n -> Optional.empty();
 
   LoadedModules(
       List<ModuleDescriptor> descriptors,
@@ -71,7 +73,9 @@ public final class LoadedModules implements AutoCloseable {
             throw new IllegalArgumentException("capability '" + name + "' is provided twice");
           }
         });
-    return new LoadedModules(all, merged, sources, backends);
+    LoadedModules next = new LoadedModules(all, merged, sources, backends);
+    next.availability = availability;
+    return next;
   }
 
   /**
@@ -116,7 +120,9 @@ public final class LoadedModules implements AutoCloseable {
                       storage.useOffline();
                       return storage;
                     }));
-    return new LoadedModules(descriptors, out, kept, backendsOffline);
+    LoadedModules next = new LoadedModules(descriptors, out, kept, backendsOffline);
+    next.availability = availability;
+    return next;
   }
 
   /** A capability of a module that needs the network, while the program is offline. */
@@ -151,7 +157,16 @@ public final class LoadedModules implements AutoCloseable {
 
   /** The descriptors by capability and event type name, for validating rulesets. */
   public ModuleCatalog catalog() {
-    return new ModuleCatalog(descriptors);
+    return new ModuleCatalog(descriptors).withAvailability(availability);
+  }
+
+  /**
+   * Tells the catalog which capabilities (those of other daemons) cannot be used now. Returns this.
+   */
+  public LoadedModules withAvailability(
+      java.util.function.Function<String, Optional<String>> availability) {
+    this.availability = availability;
+    return this;
   }
 
   /** The capability implementations by name. */

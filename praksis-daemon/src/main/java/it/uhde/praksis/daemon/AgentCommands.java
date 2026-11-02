@@ -108,13 +108,15 @@ final class AgentCommands {
     out.println();
     Admin.Checked checked;
     try (LoadedModules modules =
-        Builtins.add(
-            ModuleLoader.load(
-                config.moduleRoots(),
-                config.lockfile(),
-                config.moduleSettings(),
-                config.enabledModules()),
-            new Agent())) {
+        Remotes.add(
+            config,
+            Builtins.add(
+                ModuleLoader.load(
+                    config.moduleRoots(),
+                    config.lockfile(),
+                    config.moduleSettings(),
+                    config.enabledModules()),
+                new Agent()))) {
       StringWriter errors = new StringWriter();
       checked = checkWith(config, layers, staged, files, modules, new PrintWriter(errors));
       if (checked == null) {

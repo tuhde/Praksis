@@ -610,13 +610,15 @@ final class Admin {
   static Checked check(DaemonConfig config, Layers layers, Check.Options options, PrintWriter err)
       throws DaemonException {
     try (LoadedModules modules =
-        Builtins.add(
-            ModuleLoader.load(
-                config.moduleRoots(),
-                config.lockfile(),
-                config.moduleSettings(),
-                config.enabledModules()),
-            new Agent())) {
+        Remotes.add(
+            config,
+            Builtins.add(
+                ModuleLoader.load(
+                    config.moduleRoots(),
+                    config.lockfile(),
+                    config.moduleSettings(),
+                    config.enabledModules()),
+                new Agent()))) {
       return check(config, layers, options, err, modules);
     } catch (ModuleLoadException ex) {
       err.println("cannot check the ruleset against the modules: " + ex.getMessage());
@@ -860,13 +862,15 @@ final class Admin {
     List<LayerStack.Source> sources = layers.sources(layers.readLock());
     RuleTestRunner.Report report;
     try (LoadedModules modules =
-        Builtins.add(
-            ModuleLoader.load(
-                config.moduleRoots(),
-                config.lockfile(),
-                config.moduleSettings(),
-                config.enabledModules()),
-            new Agent())) {
+        Remotes.add(
+            config,
+            Builtins.add(
+                ModuleLoader.load(
+                    config.moduleRoots(),
+                    config.lockfile(),
+                    config.moduleSettings(),
+                    config.enabledModules()),
+                new Agent()))) {
       report =
           new RuleTestRunner(modules.catalog(), Daemon.compiler(config))
               .run(sources, java.util.Map.of());
@@ -933,13 +937,15 @@ final class Admin {
   static Layers.AccessCheck accessFor(DaemonConfig config) {
     return (effective, sources) -> {
       try (LoadedModules modules =
-          Builtins.add(
-              ModuleLoader.load(
-                  config.moduleRoots(),
-                  config.lockfile(),
-                  config.moduleSettings(),
-                  config.enabledModules()),
-              new Agent())) {
+          Remotes.add(
+              config,
+              Builtins.add(
+                  ModuleLoader.load(
+                      config.moduleRoots(),
+                      config.lockfile(),
+                      config.moduleSettings(),
+                      config.enabledModules()),
+                  new Agent()))) {
         Permissions.Needs needs = Permissions.of(effective, modules.catalog());
         List<Permissions.Requirement> uncovered =
             Permissions.uncovered(
@@ -964,13 +970,15 @@ final class Admin {
   static Function<Ruleset, List<Problem>> validatorFor(DaemonConfig config) {
     return ruleset -> {
       try (LoadedModules modules =
-          Builtins.add(
-              ModuleLoader.load(
-                  config.moduleRoots(),
-                  config.lockfile(),
-                  config.moduleSettings(),
-                  config.enabledModules()),
-              new Agent())) {
+          Remotes.add(
+              config,
+              Builtins.add(
+                  ModuleLoader.load(
+                      config.moduleRoots(),
+                      config.lockfile(),
+                      config.moduleSettings(),
+                      config.enabledModules()),
+                  new Agent()))) {
         ExpressionCompiler compiler = Daemon.compiler(config);
         return new ArrayList<>(new RulesetValidator(compiler, modules.catalog()).validate(ruleset));
       } catch (ModuleLoadException | DaemonException ex) {

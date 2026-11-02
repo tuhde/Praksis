@@ -350,6 +350,17 @@ public final class Engine implements EventSink, AutoCloseable {
       }
       return run(rule, event, allowOnce) ? Flow.END : Flow.NEXT;
     } catch (Exception e) {
+      if (e instanceof UnavailableException) {
+        // nothing is wrong with the rule: the event is kept for a replay, like a missed event
+        miss(ruleId, event);
+        log(
+            event,
+            Optional.of(ruleId),
+            Optional.empty(),
+            rule.rule().required() ? Outcome.FAILED : Outcome.SKIPPED,
+            "skipped, recorded as missed: " + message(e));
+        return rule.rule().required() ? Flow.END : Flow.NEXT;
+      }
       if (e instanceof Denied d) {
         if (disabled.putIfAbsent(ruleId, d.reason) == null) {
           options.denials().denied(ruleId, d.capability, d.args, event);
@@ -621,6 +632,11 @@ public final class Engine implements EventSink, AutoCloseable {
           });
     }
     CapabilityDescriptor descriptor = catalog.capability(call.capability()).orElseThrow();
+    Optional<String> unavailable = catalog.unavailable(call.capability());
+    if (unavailable.isPresent()) {
+      throw new UnavailableException(
+          call.capability() + " cannot be used now: " + unavailable.get());
+    }
     AccessPolicy.Decision decision =
         allowOnce
             ? AccessPolicy.Decision.allow()
@@ -673,6 +689,9 @@ public final class Engine implements EventSink, AutoCloseable {
               shown,
               true,
               Optional.of(message(e)));
+      if (e instanceof UnavailableException) {
+        throw e;
+      }
       throw new IllegalStateException("call of " + call.capability() + " failed: " + message(e), e);
     }
   }

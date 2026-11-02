@@ -74,6 +74,8 @@ public final class Daemon implements AutoCloseable {
   private volatile GrantPolicy grants;
   private volatile PeerCalls peerCalls;
   private volatile RemoteRequests remoteRequests;
+  private final Map<String, RemoteFeed> remoteFeeds =
+      new java.util.concurrent.ConcurrentHashMap<>();
   private final List<Thread> feeds = new java.util.concurrent.CopyOnWriteArrayList<>();
   private Entities entities;
   private EntityStorages entityStorages;
@@ -249,6 +251,18 @@ public final class Daemon implements AutoCloseable {
               config.enabledModules());
       Agent agent = new Agent();
       modules = Builtins.add(modules, agent, entityService::get);
+      modules =
+          Remotes.add(
+              config,
+              modules,
+              this::remoteAvailability,
+              new RemoteCalls(
+                  new Peers(config.home()),
+                  new RemoteCatalogs(config.home()),
+                  (rule, capability, a) -> it.uhde.praksis.engine.AccessPolicy.Decision.allow(),
+                  (time, rule, capability, a, allowed, error) -> {},
+                  clock,
+                  (peer, capability) -> remoteAccepted(peer, capability)));
       if (config.offline()) {
         modules = modules.offline();
         LOG.log(
@@ -413,6 +427,44 @@ public final class Daemon implements AutoCloseable {
     }
   }
 
+  /** Whether a function of a remote was accepted; unknown while the daemon starts. */
+  private boolean remoteAccepted(String peer, String capability) throws IOException {
+    RemoteRequests requests = remoteRequests;
+    if (requests == null) {
+      return false;
+    }
+    try {
+      return requests.accepted(peer, capability);
+    } catch (StoreException e) {
+      throw new IOException(e.getMessage(), e);
+    }
+  }
+
+  /** Why a capability of another daemon cannot be used now, if it cannot. */
+  private Optional<String> remoteAvailability(String qualified) {
+    int slash = qualified.indexOf('/');
+    if (slash < 1) {
+      return Optional.empty();
+    }
+    String peer = qualified.substring(0, slash);
+    String capability = qualified.substring(slash + 1);
+    RemoteFeed feed = remoteFeeds.get(peer);
+    if (feed != null) {
+      Optional<String> why = feed.unavailable("capability:" + capability);
+      if (why.isPresent()) {
+        return why;
+      }
+    }
+    try {
+      if (!remoteAccepted(peer, capability)) {
+        return Optional.of("not accepted yet (praksis peers requests)");
+      }
+    } catch (IOException e) {
+      return Optional.of(e.getMessage());
+    }
+    return Optional.empty();
+  }
+
   /** Follows the catalog of every listed peer that has a socket. */
   private void startFeeds() throws IOException {
     Peers own = new Peers(config.home());
@@ -422,6 +474,7 @@ public final class Daemon implements AutoCloseable {
       }
       RemoteFeed feed = new RemoteFeed(config.home(), peer.name(), clock, topics::bump);
       feed.onCatalog(c -> remoteRequests.onCatalog(peer, c));
+      remoteFeeds.put(peer.name(), feed);
       feeds.add(
           Thread.ofVirtual().name("praksis-feed-" + peer.name()).start(() -> feed.run(own, peer)));
     }
