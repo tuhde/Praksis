@@ -58,9 +58,30 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.EntityCreate.class, name = "entity-create"),
   @JsonSubTypes.Type(value = Request.EntityUpdate.class, name = "entity-update"),
   @JsonSubTypes.Type(value = Request.EntityDelete.class, name = "entity-delete"),
+  @JsonSubTypes.Type(value = Request.PeerHello.class, name = "peer-hello"),
+  @JsonSubTypes.Type(value = Request.PeerProve.class, name = "peer-prove"),
   @JsonSubTypes.Type(value = Request.Stop.class, name = "stop")
 })
 public sealed interface Request {
+  /**
+   * The first message of another daemon that wants to connect (cascading daemons). Answered with
+   * {@link Response.PeerChallenge}, or with an error if the key is not listed or the versions do
+   * not fit.
+   *
+   * @param key the public key of the connecting daemon (Base64, X.509)
+   * @param nonce random bytes of the connecting daemon (Base64), so that the answer is fresh
+   * @param versions what it speaks
+   */
+  record PeerHello(String key, String nonce, PeerVersions versions) implements Request {}
+
+  /**
+   * The proof of the connecting daemon that it holds its key: its signature over the transcript of
+   * the handshake. Answered with {@link Response.PeerWelcome}.
+   *
+   * @param signature the signature (Base64)
+   */
+  record PeerProve(String signature) implements Request {}
+
   /** Asks how the daemon is doing. Answered with {@link Response.StatusReport}. */
   record Status() implements Request {}
 

@@ -32,6 +32,7 @@ final class ApiServer implements AutoCloseable {
   private final Path socket;
   private final Function<Request, Response> handler;
   private final Runnable afterStop;
+  private final PeerHandshake handshake;
   private final Set<SocketChannel> connections = ConcurrentHashMap.newKeySet();
   private ServerSocketChannel server;
 
@@ -40,6 +41,20 @@ final class ApiServer implements AutoCloseable {
    * @param afterStop run after the answer to a {@link Request.Stop} has been sent
    */
   ApiServer(Path socket, Function<Request, Response> handler, Runnable afterStop) {
+    this(socket, handler, afterStop, null);
+  }
+
+  /**
+   * @param handshake lets other daemons connect, or null to refuse them. A connection that has
+   *     begun the handshake is served by nobody else yet: until a peer has the permissions of its
+   *     grants (a later step) every other request on it is refused.
+   */
+  ApiServer(
+      Path socket,
+      Function<Request, Response> handler,
+      Runnable afterStop,
+      PeerHandshake handshake) {
+    this.handshake = handshake;
     this.socket = socket;
     this.handler = handler;
     this.afterStop = afterStop;
@@ -78,12 +93,29 @@ final class ApiServer implements AutoCloseable {
       InputStream in = Channels.newInputStream(channel);
       OutputStream out = Channels.newOutputStream(channel);
       String line;
+      PeerHandshake.Session session = new PeerHandshake.Session();
       while ((line = Wire.readLine(in)) != null) {
         Request request = null;
         Response response;
+        boolean hangUp = false;
         try {
           request = Wire.decodeRequest(line);
-          response = handler.apply(request);
+          if (request instanceof Request.PeerHello hello) {
+            response =
+                handshake == null
+                    ? new Response.Error("this daemon does not accept other daemons")
+                    : handshake.hello(session, hello);
+          } else if (request instanceof Request.PeerProve prove) {
+            response =
+                handshake == null
+                    ? new Response.Error("this daemon does not accept other daemons")
+                    : handshake.prove(session, prove);
+            hangUp = response instanceof Response.Error;
+          } else if (session.state != PeerHandshake.Session.State.LOCAL) {
+            response = new Response.Error("a peer cannot do this");
+          } else {
+            response = handler.apply(request);
+          }
         } catch (ProtocolException e) {
           response = new Response.Error(e.getMessage());
         } catch (RuntimeException e) {
@@ -94,6 +126,9 @@ final class ApiServer implements AutoCloseable {
         out.flush();
         if (request instanceof Request.Stop) {
           afterStop.run();
+        }
+        if (hangUp) {
+          return;
         }
       }
     } catch (IOException e) {

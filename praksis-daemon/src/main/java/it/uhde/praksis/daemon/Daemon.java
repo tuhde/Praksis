@@ -318,7 +318,12 @@ public final class Daemon implements AutoCloseable {
               agent.plansOf());
       approvals.sync();
       engine.recover();
-      api = new ApiServer(config.socket(), this::handle, this::requestStop);
+      api =
+          new ApiServer(
+              config.socket(),
+              this::handle,
+              this::requestStop,
+              new PeerHandshake(new Peers(config.home())));
       api.start();
       modules.startSources(engine);
     } catch (RulesetException e) {
@@ -530,6 +535,8 @@ public final class Daemon implements AutoCloseable {
         case Request.EntityExport r -> entities.handle(r);
         case Request.EntityImport r -> entities.handle(r);
         case Request.Stop s -> new Response.Stopped();
+        case Request.PeerHello h -> new Response.Error("not a handshake connection");
+        case Request.PeerProve p -> new Response.Error("not a handshake connection");
       };
     } catch (Injection.Invalid | Approvals.Failure | Shadows.Failure | DaemonException e) {
       return new Response.Error(e.getMessage());

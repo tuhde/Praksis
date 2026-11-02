@@ -47,6 +47,8 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Response.PlanDetail.class, name = "plan-detail"),
   @JsonSubTypes.Type(value = Response.StagedDetail.class, name = "staged-detail"),
   @JsonSubTypes.Type(value = Response.Done.class, name = "done"),
+  @JsonSubTypes.Type(value = Response.PeerChallenge.class, name = "peer-challenge"),
+  @JsonSubTypes.Type(value = Response.PeerWelcome.class, name = "peer-welcome"),
   @JsonSubTypes.Type(value = Response.Stopped.class, name = "stopped"),
   @JsonSubTypes.Type(value = Response.Error.class, name = "error")
 })
@@ -1083,6 +1085,27 @@ public sealed interface Response {
       }
     }
   }
+
+  /**
+   * The answer to {@link Request.PeerHello}: who this daemon is, proven by a signature, and a
+   * challenge for the other.
+   *
+   * @param key the public key of this daemon
+   * @param nonce random bytes of this daemon (Base64)
+   * @param versions what it speaks
+   * @param signature its signature over the transcript, which includes both nonces and both keys
+   */
+  record PeerChallenge(String key, String nonce, PeerVersions versions, String signature)
+      implements Response {}
+
+  /**
+   * The connecting daemon is accepted.
+   *
+   * @param peer the name under which this daemon lists the connecting one
+   * @param protocol the protocol version that was agreed
+   * @param catalog the catalog version that was agreed
+   */
+  record PeerWelcome(String peer, int protocol, int catalog) implements Response {}
 
   /** The daemon is shutting down. */
   record Stopped() implements Response {}
