@@ -366,6 +366,9 @@ final class Approvals implements Denials {
       List<Problem> problems =
           policy.check(
               catalog, config.layerNames(), config.storageComponents(), entitySets.keySet());
+      problems = new ArrayList<>(problems);
+      problems.addAll(Daemon.peerGrantProblems(config, policy));
+      problems.addAll(EntitySets.pinProblems(config, policy));
       if (!problems.isEmpty()) {
         throw new RulesetException(problems);
       }

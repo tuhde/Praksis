@@ -70,6 +70,12 @@ permission is the narrower of the two. A peer grant must name a peer that is lis
 does not start. Every call of a peer, allowed or denied, is in the audit log with the actor
 `peer:<name>`.
 
+A grant of your own can name a set of a peer, but only a **pinned** one. `praksis peers pin acme finance`
+records the members the set has now, and a grant such as `type = { set = "acme/finance" }` covers
+exactly those. If the company adds a type to its set, the pin does not move and your grant does not
+widen: `praksis peers pins` shows the difference, and `praksis peers accept-pin acme finance` is your
+approval. A grant that names a set that is not pinned stops the daemon from starting.
+
 To call a capability of a peer yourself, run `praksis peers catalog <name>` once and then `praksis peers call <name> entity.read --arg type=invoice`. The peer's grants decide; you need no grant of your own.
 
 ## When a rule needs more

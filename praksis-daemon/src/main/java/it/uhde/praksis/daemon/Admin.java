@@ -111,7 +111,7 @@ final class Admin {
       return 1;
     }
     err.println(
-        "usage: peers [list|show-key|add <name> <key> [--socket path] [--standing-read]|remove <name>|catalog <name>|call <name> <capability> [--arg k=v]... [--dry-run]] | layers status | layers update [--dry-run] [--accept-new-access] [name...] | proposals [...] | agent [...] | effective | verify [--replay] [-n N] [--update] [--layer name=dir|@ref] | test");
+        "usage: peers [list|show-key|add <name> <key> [--socket path] [--standing-read]|remove <name>|catalog <name>|call <name> <capability> [--arg k=v]... [--dry-run]|pins [name]|pin <name> <set>|accept-pin <name> <set>|unpin <name> <set>] | layers status | layers update [--dry-run] [--accept-new-access] [name...] | proposals [...] | agent [...] | effective | verify [--replay] [-n N] [--update] [--layer name=dir|@ref] | test");
     return 2;
   }
 
@@ -171,6 +171,12 @@ final class Admin {
           }
           return catalog(config, peers, args.get(1), out, err);
         }
+        case "pins" -> {
+          return pins(config, args.subList(1, args.size()), out, err);
+        }
+        case "pin", "accept-pin", "unpin" -> {
+          return pin(config, sub, args.subList(1, args.size()), out, err);
+        }
         case "call" -> {
           return call(config, peers, args.subList(1, args.size()), out, err);
         }
@@ -196,6 +202,79 @@ final class Admin {
       err.println(e.getMessage());
       return 1;
     }
+  }
+
+  /** Lists the pinned remote sets and how the remotes' sets differ from them now. */
+  private static int pins(DaemonConfig config, List<String> args, PrintWriter out, PrintWriter err)
+      throws java.io.IOException {
+    RemotePins pins = new RemotePins(config.home());
+    RemoteCatalogs catalogs = new RemoteCatalogs(config.home());
+    if (pins.pins().isEmpty()) {
+      out.println("no pinned remote sets");
+    }
+    for (RemotePins.Pin pin : pins.pins().values()) {
+      if (!args.isEmpty() && !args.get(0).equals(pin.peer())) {
+        continue;
+      }
+      out.println(pin.name() + "  " + pin.members() + "  approved " + pin.approved());
+      var remote = catalogs.cached(pin.peer());
+      if (remote.isEmpty()) {
+        out.println("  (no catalog of " + pin.peer() + " to compare with)");
+        continue;
+      }
+      for (var p : pins.pending(pin.peer(), remote.get().catalog())) {
+        if (p.pin().set().equals(pin.set()) && p.changed()) {
+          out.println(
+              p.gone()
+                  ? "  CHANGED: the set is no longer offered"
+                  : "  CHANGED: adds "
+                      + p.added()
+                      + ", removes "
+                      + p.removed()
+                      + (remote.get().stale() ? "  (catalog is stale)" : "")
+                      + "  -> praksis peers accept-pin "
+                      + pin.peer()
+                      + " "
+                      + pin.set());
+        }
+      }
+    }
+    return 0;
+  }
+
+  private static int pin(
+      DaemonConfig config, String sub, List<String> args, PrintWriter out, PrintWriter err)
+      throws java.io.IOException {
+    if (args.size() != 2) {
+      err.println("usage: peers " + sub + " <name> <set>");
+      return 2;
+    }
+    RemotePins pins = new RemotePins(config.home());
+    if (sub.equals("unpin")) {
+      if (!pins.unpin(args.get(0), args.get(1))) {
+        err.println(args.get(0) + "/" + args.get(1) + " is not pinned");
+        return 1;
+      }
+      out.println("unpinned " + args.get(0) + "/" + args.get(1));
+      return 0;
+    }
+    var remote = new RemoteCatalogs(config.home()).cached(args.get(0));
+    if (remote.isEmpty()) {
+      err.println("no catalog of " + args.get(0) + " (praksis peers catalog " + args.get(0) + ")");
+      return 1;
+    }
+    if (remote.get().stale()) {
+      err.println(
+          "warning: the catalog of " + args.get(0) + " was fetched " + remote.get().fetched());
+    }
+    var pin =
+        sub.equals("pin")
+            ? pins.pin(args.get(0), args.get(1), remote.get().catalog(), java.time.Instant.now())
+            : pins.accept(
+                args.get(0), args.get(1), remote.get().catalog(), java.time.Instant.now());
+    out.println(pin.name() + " is pinned to " + pin.members());
+    out.println("run 'praksis reload' for a running daemon to use it");
+    return 0;
   }
 
   /** A person calls a capability of a peer: no local policy applies, the remote's grants do. */

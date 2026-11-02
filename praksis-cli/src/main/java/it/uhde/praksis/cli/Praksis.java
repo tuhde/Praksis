@@ -1723,6 +1723,10 @@ public final class Praksis {
         Praksis.Peers.AddCommand.class,
         Praksis.Peers.CatalogCommand.class,
         Praksis.Peers.CallCommand.class,
+        Praksis.Peers.PinsCommand.class,
+        Praksis.Peers.PinCommand.class,
+        Praksis.Peers.AcceptPinCommand.class,
+        Praksis.Peers.UnpinCommand.class,
         Praksis.Peers.RemoveCommand.class
       })
   static final class Peers {
@@ -1820,6 +1824,73 @@ public final class Praksis {
           args.add("--dry-run");
         }
         return runDaemonCommand(args.toArray(String[]::new));
+      }
+    }
+
+    @Command(
+        name = "pins",
+        description =
+            "Lists the pinned remote sets and shows where the remote's set now differs from the"
+                + " pin.")
+    static final class PinsCommand extends Base {
+      @CommandLine.Parameters(arity = "0..1", paramLabel = "<name>", description = "One peer.")
+      String name;
+
+      @Override
+      public Integer call() throws InterruptedException {
+        return name == null
+            ? runDaemonCommand("--admin", "peers", "pins")
+            : runDaemonCommand("--admin", "peers", "pins", name);
+      }
+    }
+
+    @Command(
+        name = "pin",
+        description =
+            "Pins a set of a peer to the members it has now, so that a grant can name it as peer/set"
+                + " (for example acme/finance). This is your approval of exactly these members.")
+    static final class PinCommand extends Base {
+      @CommandLine.Parameters(index = "0", paramLabel = "<name>", description = "The peer.")
+      String name;
+
+      @CommandLine.Parameters(index = "1", paramLabel = "<set>", description = "Its set.")
+      String set;
+
+      @Override
+      public Integer call() throws InterruptedException {
+        return runDaemonCommand("--admin", "peers", "pin", name, set);
+      }
+    }
+
+    @Command(
+        name = "accept-pin",
+        description =
+            "Moves a pin to the members the remote's set has now (after you looked at 'peers"
+                + " pins'). Grants on the set then cover the new members.")
+    static final class AcceptPinCommand extends Base {
+      @CommandLine.Parameters(index = "0", paramLabel = "<name>", description = "The peer.")
+      String name;
+
+      @CommandLine.Parameters(index = "1", paramLabel = "<set>", description = "Its set.")
+      String set;
+
+      @Override
+      public Integer call() throws InterruptedException {
+        return runDaemonCommand("--admin", "peers", "accept-pin", name, set);
+      }
+    }
+
+    @Command(name = "unpin", description = "Removes a pin.")
+    static final class UnpinCommand extends Base {
+      @CommandLine.Parameters(index = "0", paramLabel = "<name>", description = "The peer.")
+      String name;
+
+      @CommandLine.Parameters(index = "1", paramLabel = "<set>", description = "Its set.")
+      String set;
+
+      @Override
+      public Integer call() throws InterruptedException {
+        return runDaemonCommand("--admin", "peers", "unpin", name, set);
       }
     }
 

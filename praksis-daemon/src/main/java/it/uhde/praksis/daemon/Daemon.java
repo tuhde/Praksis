@@ -492,6 +492,7 @@ public final class Daemon implements AutoCloseable {
               catalog, config.layerNames(), config.storageComponents(), entities.sets().keySet());
       problems = new java.util.ArrayList<>(problems);
       problems.addAll(peerGrantProblems(config, policy));
+      problems.addAll(EntitySets.pinProblems(config, policy));
       if (!problems.isEmpty()) {
         throw new RulesetException(problems);
       }

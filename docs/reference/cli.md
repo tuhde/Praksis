@@ -202,6 +202,41 @@ Options:
 - `--arg` `<argument>`: An argument, name=value (repeatable).
 - `--dry-run`: Check and change nothing.
 
+#### praksis peers pins
+
+Lists the pinned remote sets and shows where the remote's set now differs from the pin.
+
+Arguments:
+
+- `<name>`: One peer.
+
+#### praksis peers pin
+
+Pins a set of a peer to the members it has now, so that a grant can name it as peer/set (for example acme/finance). This is your approval of exactly these members.
+
+Arguments:
+
+- `<name>`: The peer.
+- `<set>`: Its set.
+
+#### praksis peers accept-pin
+
+Moves a pin to the members the remote`s set has now (after you looked at `peers pins'). Grants on the set then cover the new members.
+
+Arguments:
+
+- `<name>`: The peer.
+- `<set>`: Its set.
+
+#### praksis peers unpin
+
+Removes a pin.
+
+Arguments:
+
+- `<name>`: The peer.
+- `<set>`: Its set.
+
 #### praksis peers remove
 
 Removes a peer.

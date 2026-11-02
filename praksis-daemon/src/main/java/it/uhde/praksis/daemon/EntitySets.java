@@ -53,7 +53,33 @@ final class EntitySets {
 
   /** {@code policy.toml} with the members of the sets that its grants name. */
   static Policy policy(DaemonConfig config, Map<String, Set<String>> sets) throws RulesetException {
-    return Policy.load(config.policy()).withSets(sets);
+    Map<String, Set<String>> all = new java.util.HashMap<>(sets);
+    // a remote set is what its pin says, never what the remote offers now
+    all.putAll(new RemotePins(config.home()).sets());
+    return Policy.load(config.policy()).withSets(all);
+  }
+
+  /** A grant that names {@code <peer>/<set>} needs a pin for it. */
+  static List<it.uhde.praksis.ruleset.Problem> pinProblems(DaemonConfig config, Policy policy) {
+    Set<String> pinned = new RemotePins(config.home()).sets().keySet();
+    List<it.uhde.praksis.ruleset.Problem> out = new ArrayList<>();
+    for (var g : policy.grants()) {
+      for (var a : g.args().entrySet()) {
+        if (a.getValue() instanceof ArgMatcher.InSet in
+            && in.set().contains("/")
+            && !pinned.contains(in.set())) {
+          out.add(
+              new it.uhde.praksis.ruleset.Problem(
+                  "policy.toml: grant '" + g.id() + "'",
+                  "the remote set '"
+                      + in.set()
+                      + "' is not pinned (praksis peers pin "
+                      + in.set().replace('/', ' ')
+                      + ")"));
+        }
+      }
+    }
+    return out;
   }
 
   /**

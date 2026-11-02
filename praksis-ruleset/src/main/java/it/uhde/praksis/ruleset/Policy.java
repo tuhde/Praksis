@@ -408,14 +408,18 @@ public record Policy(
           && param.get().type() != ValueType.STRING) {
         problems.add(new Problem(where, "'prefix' only works on strings: '" + e.getKey() + "'"));
       } else if (e.getValue() instanceof ArgMatcher.InSet in) {
-        if (!capabilityName.startsWith("entity.") || !e.getKey().equals("type")) {
+        // a remote capability is named <peer>/entity.read
+        if (!(capabilityName.startsWith("entity.") || capabilityName.contains("/entity."))
+            || !e.getKey().equals("type")) {
           problems.add(
               new Problem(
                   where,
                   "'set' only works on the parameter 'type' of the entity capabilities: '"
                       + e.getKey()
                       + "'"));
-        } else if (entitySets != null && !entitySets.contains(in.set())) {
+        } else if (entitySets != null
+            && !in.set().contains("/") // a pinned remote set: the daemon checks the pin
+            && !entitySets.contains(in.set())) {
           problems.add(
               new Problem(
                   where,
