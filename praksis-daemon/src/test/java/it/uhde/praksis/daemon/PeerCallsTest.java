@@ -220,6 +220,48 @@ class PeerCallsTest {
   }
 
   @Test
+  void aDaemonIsNotARelay() throws Exception {
+    // even if this daemon knew a capability of a third daemon, and a grant named it
+    CapabilityDescriptor remote =
+        new CapabilityDescriptor(
+            "third/demo.echo", EffectClass.READ_ONLY, false, ECHO.params(), ECHO.results());
+    Path pf = dir.resolve("relay.toml");
+    Files.writeString(
+        pf,
+        "format_version = 1\n[[peer_grant]]\nid = \"g\"\npeer = \"me\"\ncapability = \"third/demo.echo\"\n");
+    Policy policy = Policy.load(pf);
+    PeerCalls calls =
+        new PeerCalls(
+            n -> Optional.of(remote),
+            Map.of("third/demo.echo", echo),
+            new PeerAccess(() -> policy, remoteAudit::add));
+    var me = new Peers.Peer("me", "k", Optional.empty(), false);
+    assertEquals(
+        new Response.Error("peer 'me' has no grant for third/demo.echo"),
+        calls.call(me, new Request.PeerCall("third/demo.echo", Map.of("text", "hi"), false)));
+    assertFalse(ran);
+    // and it is not offered in the catalog either
+    var catalog =
+        PeerCatalogs.build(
+            me,
+            policy,
+            new it.uhde.praksis.ruleset.ModuleCatalog(
+                List.of(
+                    new it.uhde.praksis.capability.ModuleDescriptor(
+                        "third",
+                        "remote",
+                        List.of(),
+                        List.of(remote),
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        List.of()))),
+            new Response.EntityTypeList(List.of()),
+            new Response.EntitySetList(List.of()));
+    assertTrue(catalog.capabilities().isEmpty());
+  }
+
+  @Test
   void aFunctionThatIsNotAcceptedIsNotCalled() {
     accepted = false;
     RemoteCalls allowAll = remote((r, c, a) -> AccessPolicy.Decision.allow());

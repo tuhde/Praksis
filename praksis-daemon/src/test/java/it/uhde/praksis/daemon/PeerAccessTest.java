@@ -89,4 +89,18 @@ class PeerAccessTest {
     org.junit.jupiter.api.Assertions.assertThrows(
         it.uhde.praksis.ruleset.RulesetException.class, () -> Policy.load(f));
   }
+
+  @Test
+  void aPeerGrantMayNotNameACapabilityOfAnotherDaemon() throws Exception {
+    Policy p =
+        policy("[[peer_grant]]\nid = \"g\"\npeer = \"me\"\ncapability = \"acme/entity.read\"\n");
+    var problems =
+        p.check(
+            new it.uhde.praksis.ruleset.ModuleCatalog(List.of()),
+            java.util.Set.of(),
+            java.util.Set.of(),
+            java.util.Set.of());
+    assertEquals(1, problems.size());
+    assertTrue(problems.get(0).message().contains("not a relay"), problems.get(0).message());
+  }
 }

@@ -50,7 +50,8 @@ final class PeerCatalogs {
     }
     List<Response.PeerCatalog.CapabilityInfo> capabilities = new ArrayList<>();
     for (CapabilityDescriptor c : modules.capabilities()) {
-      if (granted.contains(c.name())) {
+      // what this daemon has from another daemon is not offered on: it is not a relay
+      if (granted.contains(c.name()) && !c.name().contains("/")) {
         capabilities.add(capability(c));
       }
     }

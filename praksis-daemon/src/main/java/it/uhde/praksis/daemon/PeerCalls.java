@@ -22,7 +22,8 @@ import java.util.function.Function;
  * PeerAccess}, which also writes the audit line); the peer has already checked its own policy. A
  * capability that the peer may not call and one that does not exist get the same answer, so a peer
  * cannot find out what exists beyond its grants. The capabilities of the agent ({@code praksis.*})
- * are never reachable by a peer.
+ * and those that this daemon has from another daemon ({@code acme/entity.read}) are never reachable
+ * by a peer.
  */
 final class PeerCalls {
   private final Function<String, Optional<CapabilityDescriptor>> descriptors;
@@ -41,8 +42,12 @@ final class PeerCalls {
   /** Answers one call. */
   Response call(Peers.Peer peer, Request.PeerCall request) {
     String name = request.capability() == null ? "" : request.capability();
+    // the agent's capabilities and those of other daemons (acme/...) are never reachable by a peer:
+    // a daemon is not a relay
     Optional<CapabilityDescriptor> found =
-        name.startsWith("praksis.") ? Optional.empty() : descriptors.apply(name);
+        name.startsWith("praksis.") || name.contains("/")
+            ? Optional.empty()
+            : descriptors.apply(name);
     Capability implementation = capabilities.get(name);
     String refusal = "peer '" + peer.name() + "' has no grant for " + name;
     if (found.isEmpty() || implementation == null) {

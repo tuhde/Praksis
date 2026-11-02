@@ -40,7 +40,7 @@ note = "my private daemon may read the invoices"
 type = { one_of = ["invoice"] }
 ```
 
-Without a grant a peer can do nothing. This is the ceiling: your own policy can only narrow it. A
+Without a grant a peer can do nothing, and a grant can name only a function of this daemon itself: a daemon is not a relay, so what you have from `acme` is never offered on to your own peers. This is the ceiling: your own policy can only narrow it. A
 peer grant must name a listed peer, or the daemon does not start. Every call of a peer, allowed or
 denied, is in the audit log with the actor `peer:<name>`. A capability beyond the grants and one that
 does not exist get the same answer, so a peer cannot find out what exists beyond what it may use.

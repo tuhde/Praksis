@@ -368,6 +368,16 @@ public record Policy(
     }
     for (PeerGrant g : peerGrants) {
       String where = "policy.toml: peer_grant '" + g.id() + "'";
+      if (g.capability().contains("/")) {
+        problems.add(
+            new Problem(
+                where,
+                "a peer cannot be given '"
+                    + g.capability()
+                    + "', which is a capability of another daemon: a daemon is not a relay. Offer"
+                    + " it as a function of your own, or let the peer connect to that daemon"));
+        continue;
+      }
       checkArgs(where, g.capability(), g.args(), catalog, entitySets, problems);
     }
     for (CredentialBinding b : credentials) {
