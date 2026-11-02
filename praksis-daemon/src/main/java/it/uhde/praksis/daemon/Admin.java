@@ -87,6 +87,9 @@ final class Admin {
         }
         return update(layers, names, dryRun, acceptNewAccess, validator, access, out, err);
       }
+      if (!args.isEmpty() && args.get(0).equals("peers")) {
+        return peers(config, args.subList(1, args.size()), out, err);
+      }
       if (args.equals(List.of("effective"))) {
         return effective(config, layers, out, err);
       }
@@ -107,8 +110,79 @@ final class Admin {
       return 1;
     }
     err.println(
-        "usage: layers status | layers update [--dry-run] [--accept-new-access] [name...] | proposals [...] | agent [...] | effective | verify [--replay] [-n N] [--update] [--layer name=dir|@ref] | test");
+        "usage: peers [list|show-key|add <name> <key> [--socket path] [--standing-read]|remove <name>] | layers status | layers update [--dry-run] [--accept-new-access] [name...] | proposals [...] | agent [...] | effective | verify [--replay] [-n N] [--update] [--layer name=dir|@ref] | test");
     return 2;
+  }
+
+  private static int peers(DaemonConfig config, List<String> args, PrintWriter out, PrintWriter err) {
+    Peers peers = new Peers(config.home());
+    try {
+      String sub = args.isEmpty() ? "list" : args.get(0);
+      switch (sub) {
+        case "show-key" -> {
+          String key = peers.publicKey();
+          out.println(key);
+          out.println("fingerprint " + Peers.fingerprint(key));
+          return 0;
+        }
+        case "list" -> {
+          List<Peers.Peer> all = peers.list();
+          if (all.isEmpty()) {
+            out.println("no peers");
+          }
+          for (Peers.Peer p : all) {
+            out.println(
+                p.name()
+                    + "  "
+                    + p.fingerprint()
+                    + "  "
+                    + p.socket().orElse("(connects to us)")
+                    + (p.standingRead() ? "  standing read" : ""));
+          }
+          return 0;
+        }
+        case "add" -> {
+          if (args.size() < 3) {
+            err.println("usage: peers add <name> <key> [--socket path] [--standing-read]");
+            return 2;
+          }
+          java.util.Optional<String> socket = java.util.Optional.empty();
+          boolean standing = false;
+          for (int i = 3; i < args.size(); i++) {
+            if (args.get(i).equals("--standing-read")) {
+              standing = true;
+            } else if (args.get(i).equals("--socket") && i + 1 < args.size()) {
+              socket = java.util.Optional.of(args.get(++i));
+            } else {
+              err.println("unknown option " + args.get(i));
+              return 2;
+            }
+          }
+          peers.add(args.get(1), args.get(2), socket, standing);
+          out.println("added " + args.get(1) + "  " + Peers.fingerprint(args.get(2)));
+          return 0;
+        }
+        case "remove" -> {
+          if (args.size() != 2) {
+            err.println("usage: peers remove <name>");
+            return 2;
+          }
+          if (!peers.remove(args.get(1))) {
+            err.println("no peer named " + args.get(1));
+            return 1;
+          }
+          out.println("removed " + args.get(1));
+          return 0;
+        }
+        default -> {
+          err.println("usage: peers [list|show-key|add <name> <key> [--socket path] [--standing-read]|remove <name>]");
+          return 2;
+        }
+      }
+    } catch (java.io.IOException e) {
+      err.println(e.getMessage());
+      return 1;
+    }
   }
 
   private static int status(DaemonConfig config, Layers layers, PrintWriter out)

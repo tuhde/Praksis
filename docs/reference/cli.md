@@ -154,6 +154,40 @@ Options:
 - `--dry-run`: Only show what would change.
 - `--accept-new-access`: Move the pins although rules get access that no grant covers (their calls are denied until granted).
 
+### praksis peers
+
+Manages the other daemons this one knows, by their public keys.
+
+#### praksis peers list
+
+Lists the peers with the fingerprint of their keys.
+
+#### praksis peers show-key
+
+Shows the public key of this daemon, to give to the owner of a peer.
+
+#### praksis peers add
+
+Adds a peer by name and public key.
+
+Arguments:
+
+- `<name>`: Its prefix.
+- `<key>`: Its public key.
+
+Options:
+
+- `--socket` `<socket>`: Where to reach it.
+- `--standing-read`: Allow read access to what it offers.
+
+#### praksis peers remove
+
+Removes a peer.
+
+Arguments:
+
+- `<name>`: The peer.
+
 ### praksis effective
 
 Shows the ruleset that would run: every rule in the order it fires, which layer it comes from, what later layers did to it, and its hash for 'based_on'.

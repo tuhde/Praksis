@@ -34,6 +34,7 @@ import picocli.CommandLine.Spec;
       Praksis.Modules.class,
       Praksis.Agent.class,
       Praksis.Layers.class,
+      Praksis.Peers.class,
       Praksis.Effective.class,
       Praksis.Verify.class,
       Praksis.RunTests.class,
@@ -1709,6 +1710,74 @@ public final class Praksis {
       @Override
       public Integer call() throws InterruptedException {
         return runDaemonCommand("--list-modules");
+      }
+    }
+  }
+
+  @Command(
+      name = "peers",
+      description = "Manages the other daemons this one knows, by their public keys.",
+      subcommands = {
+        Praksis.Peers.ListCommand.class,
+        Praksis.Peers.ShowKeyCommand.class,
+        Praksis.Peers.AddCommand.class,
+        Praksis.Peers.RemoveCommand.class
+      })
+  static final class Peers {
+    @Command(name = "list", description = "Lists the peers with the fingerprint of their keys.")
+    static final class ListCommand extends Base {
+      @Override
+      public Integer call() throws InterruptedException {
+        return runDaemonCommand("--admin", "peers", "list");
+      }
+    }
+
+    @Command(
+        name = "show-key",
+        description = "Shows the public key of this daemon, to give to the owner of a peer.")
+    static final class ShowKeyCommand extends Base {
+      @Override
+      public Integer call() throws InterruptedException {
+        return runDaemonCommand("--admin", "peers", "show-key");
+      }
+    }
+
+    @Command(name = "add", description = "Adds a peer by name and public key.")
+    static final class AddCommand extends Base {
+      @CommandLine.Parameters(index = "0", paramLabel = "<name>", description = "Its prefix.")
+      String name;
+
+      @CommandLine.Parameters(index = "1", paramLabel = "<key>", description = "Its public key.")
+      String key;
+
+      @Option(names = "--socket", description = "Where to reach it.")
+      String socket;
+
+      @Option(names = "--standing-read", description = "Allow read access to what it offers.")
+      boolean standingRead;
+
+      @Override
+      public Integer call() throws InterruptedException {
+        java.util.List<String> args =
+            new java.util.ArrayList<>(java.util.List.of("--admin", "peers", "add", name, key));
+        if (socket != null) {
+          args.addAll(java.util.List.of("--socket", socket));
+        }
+        if (standingRead) {
+          args.add("--standing-read");
+        }
+        return runDaemonCommand(args.toArray(String[]::new));
+      }
+    }
+
+    @Command(name = "remove", description = "Removes a peer.")
+    static final class RemoveCommand extends Base {
+      @CommandLine.Parameters(paramLabel = "<name>", description = "The peer.")
+      String name;
+
+      @Override
+      public Integer call() throws InterruptedException {
+        return runDaemonCommand("--admin", "peers", "remove", name);
       }
     }
   }
