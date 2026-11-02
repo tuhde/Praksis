@@ -16,6 +16,7 @@ The documentation is licensed under
 - [Entities](user/entities.md)
 - [Where entities are kept](user/storage.md)
 - [Other daemons](user/peers.md)
+- [Using Praksis in a browser](user/web.md)
 - [Verification and trials](user/verification.md)
 - [The AI features](user/ai.md)
 - [Offline mode](user/offline.md)

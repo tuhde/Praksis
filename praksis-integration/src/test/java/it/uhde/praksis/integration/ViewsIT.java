@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 
 /** Views against the runtime image: data from a module, state set by the client, grants held. */
 class ViewsIT {
-  private static final String COMMAND =
+  static final String COMMAND =
       """
       id = "mail.file"
       effect = "local-write"
@@ -35,7 +35,7 @@ class ViewsIT {
       args = { message = { cel = "event.data.message" }, folder = { cel = "event.data.folder" } }
       """;
 
-  private static final String VIEW =
+  static final String VIEW =
       """
       title = "Mail"
       description = "The mail of a folder."
@@ -80,7 +80,7 @@ class ViewsIT {
       enabled = { cel = "view.message != ''" }
       """;
 
-  private static Path mail(Harness h, String name, String from, String subject) throws Exception {
+  static Path mail(Harness h, String name, String from, String subject) throws Exception {
     Path file = h.mail.resolve("cur").resolve(name);
     Files.writeString(file, "From: " + from + "\nSubject: " + subject + "\n\nbody\n");
     return file;

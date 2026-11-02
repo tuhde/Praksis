@@ -16,7 +16,9 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
@@ -77,7 +79,18 @@ final class WebTokens {
       return List.of();
     }
     try {
-      return JSON.readValue(file.toFile(), new TypeReference<List<Token>>() {});
+      // plain maps: the module system does not let Jackson reach into the record of this module
+      List<Token> tokens = new ArrayList<>();
+      for (Map<String, Object> m :
+          JSON.readValue(file.toFile(), new TypeReference<List<Map<String, Object>>>() {})) {
+        tokens.add(
+            new Token(
+                String.valueOf(m.get("name")),
+                String.valueOf(m.get("hash")),
+                Boolean.TRUE.equals(m.get("readOnly")),
+                String.valueOf(m.get("created"))));
+      }
+      return tokens;
     } catch (IOException e) {
       throw new DaemonException("cannot read " + file + ": " + e.getMessage());
     }
@@ -118,7 +131,16 @@ final class WebTokens {
       Files.deleteIfExists(tmp);
       Files.createFile(
           tmp, PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------")));
-      JSON.writerWithDefaultPrettyPrinter().writeValue(tmp.toFile(), all);
+      List<Map<String, Object>> plain = new ArrayList<>();
+      for (Token t : all) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("name", t.name());
+        m.put("hash", t.hash());
+        m.put("readOnly", t.readOnly());
+        m.put("created", t.created());
+        plain.add(m);
+      }
+      JSON.writerWithDefaultPrettyPrinter().writeValue(tmp.toFile(), plain);
       Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
     } catch (IOException e) {
       throw new DaemonException("cannot write " + file + ": " + e.getMessage());
