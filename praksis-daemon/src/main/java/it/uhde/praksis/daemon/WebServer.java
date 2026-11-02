@@ -39,12 +39,18 @@ final class WebServer implements AutoCloseable {
   static final int MAX_FAILED_LOGINS = 10;
   static final int MAX_REQUESTS_PER_MINUTE = 600;
 
+  /** Requests of one token that may wait at the same time (the long poll of the change feed). */
+  static final int MAX_CONCURRENT = 8;
+
   private final WebConfig.Listen listen;
   private final List<String> origins;
   private final WebTokens tokens;
   private final BiFunction<WebTokens.Token, Request, Response> gate;
   private final RateLimiter failedLogins;
   private final RateLimiter requests;
+  private final java.util.concurrent.ConcurrentHashMap<
+          String, java.util.concurrent.atomic.AtomicInteger>
+      running = new java.util.concurrent.ConcurrentHashMap<>();
   private HttpServer server;
 
   /**
@@ -132,6 +138,14 @@ final class WebServer implements AutoCloseable {
         send(ex, 413, origin, new Response.Error("the request is too large"));
         return;
       }
+      var count =
+          running.computeIfAbsent(
+              token.get().name(), k -> new java.util.concurrent.atomic.AtomicInteger());
+      if (count.incrementAndGet() > MAX_CONCURRENT) {
+        count.decrementAndGet();
+        send(ex, 429, origin, new Response.Error("too many requests at once for this token"));
+        return;
+      }
       Response response;
       try {
         response = gate.apply(token.get(), Wire.decodeRequest(body));
@@ -142,6 +156,8 @@ final class WebServer implements AutoCloseable {
         LOG.log(System.Logger.Level.ERROR, "web request failed", e);
         send(ex, 500, origin, new Response.Error("internal error"));
         return;
+      } finally {
+        count.decrementAndGet();
       }
       send(ex, 200, origin, response);
     }

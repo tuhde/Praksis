@@ -14,6 +14,7 @@ import java.net.http.HttpResponse;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
@@ -129,5 +130,48 @@ class WebServerTest {
     }
     // even the right token waits: the address is blocked, not the token
     assertEquals(429, post(secret, null, "application/json", status()).statusCode());
+  }
+
+  @Test
+  void aTokenCannotHoldMoreLongPollsThanTheLimit() throws Exception {
+    server.close();
+    var release = new java.util.concurrent.CountDownLatch(1);
+    var inside = new java.util.concurrent.CountDownLatch(WebServer.MAX_CONCURRENT);
+    server =
+        new WebServer(
+            new WebConfig.Listen("127.0.0.1", 0),
+            List.of(),
+            tokens,
+            (t, r) -> {
+              inside.countDown();
+              try {
+                release.await();
+              } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+              }
+              return new Response.Error("late");
+            },
+            Clock.systemUTC());
+    server.start();
+    var waiting = new ArrayList<java.util.concurrent.CompletableFuture<HttpResponse<String>>>();
+    for (int i = 0; i < WebServer.MAX_CONCURRENT; i++) {
+      waiting.add(
+          java.util.concurrent.CompletableFuture.supplyAsync(
+              () -> {
+                try {
+                  return post(secret, null, "application/json", status());
+                } catch (Exception e) {
+                  throw new IllegalStateException(e);
+                }
+              }));
+    }
+    assertTrue(inside.await(10, java.util.concurrent.TimeUnit.SECONDS));
+    assertEquals(429, post(secret, null, "application/json", status()).statusCode());
+    release.countDown();
+    for (var w : waiting) {
+      assertEquals(200, w.get().statusCode());
+    }
+    // the places are free again
+    assertEquals(200, post(secret, null, "application/json", status()).statusCode());
   }
 }
