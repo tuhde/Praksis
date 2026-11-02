@@ -666,15 +666,9 @@ public final class Daemon implements AutoCloseable {
     }
   }
 
-  /**
-   * A request of a web client. Until the filter of the next task decides what a token may ask for,
-   * only the status is answered.
-   */
+  /** A request of a web client: only what {@link WebGate} lets this token ask for. */
   private Response handleWeb(WebTokens.Token token, Request request) {
-    if (request instanceof Request.Status) {
-      return handle(request);
-    }
-    return new Response.Error("the web interface does not offer this yet");
+    return WebGate.decide(token, request, this::handle);
   }
 
   private Response handle(Request request) {
