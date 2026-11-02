@@ -66,6 +66,20 @@ public record AuditEntry(
         error);
   }
 
+  /** The prefix of the actor of a call that another daemon made: {@code peer:<name>}. */
+  public static final String PEER_ACTOR = "peer:";
+
+  /** The line for a capability call that a peer made; the peer is the actor. */
+  public static AuditEntry peerCall(
+      Instant time,
+      String peer,
+      String capability,
+      java.util.Map<String, Object> args,
+      boolean allowed,
+      Optional<String> error) {
+    return call(time, PEER_ACTOR + peer, capability, args, allowed, error);
+  }
+
   /** A line that is not a call, with what happened as JSON built from the map. */
   public static AuditEntry of(
       Instant time,

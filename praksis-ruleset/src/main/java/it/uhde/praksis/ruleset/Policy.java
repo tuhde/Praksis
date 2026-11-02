@@ -27,9 +27,14 @@ import java.util.regex.Pattern;
  * @param credentials the credential bindings
  * @param trust whose commits count as the user's own
  * @param approval which changes need the user
+ * @param peerGrants what other daemons may do here, see {@link PeerGrant}
  */
 public record Policy(
-    List<Grant> grants, List<CredentialBinding> credentials, Trust trust, ApprovalRules approval) {
+    List<Grant> grants,
+    List<CredentialBinding> credentials,
+    Trust trust,
+    ApprovalRules approval,
+    List<PeerGrant> peerGrants) {
   private static final Pattern ID = Pattern.compile("[a-z0-9][a-z0-9._-]*");
   private static final TomlMapper MAPPER = new TomlMapper();
 
@@ -37,9 +42,19 @@ public record Policy(
 
   public Policy {
     grants = List.copyOf(grants);
+    peerGrants = List.copyOf(peerGrants);
     credentials = List.copyOf(credentials);
     java.util.Objects.requireNonNull(trust, "trust");
     java.util.Objects.requireNonNull(approval, "approval");
+  }
+
+  /** A policy without grants for peers. */
+  public Policy(
+      List<Grant> grants,
+      List<CredentialBinding> credentials,
+      Trust trust,
+      ApprovalRules approval) {
+    this(grants, credentials, trust, approval, List.of());
   }
 
   /** A policy with grants and bindings, and the strict rules for approval. */
@@ -75,7 +90,7 @@ public record Policy(
     } catch (IOException e) {
       throw new RulesetException(List.of(new Problem(where, "cannot read: " + e.getMessage())));
     }
-    t.onlyKeys(Set.of("format_version", "grant", "credential", "trust", "approval"));
+    t.onlyKeys(Set.of("format_version", "grant", "peer_grant", "credential", "trust", "approval"));
     int version = RulesetLoader.formatVersion(t);
     if (version != 0 && version != 1) {
       t.problem("unsupported 'format_version' " + version);
@@ -84,6 +99,10 @@ public record Policy(
     Set<String> ids = new HashSet<>();
     for (Table g : t.tables("grant")) {
       grant(g, ids).ifPresent(grants::add);
+    }
+    List<PeerGrant> peerGrants = new ArrayList<>();
+    for (Table g : t.tables("peer_grant")) {
+      peerGrant(g, ids).ifPresent(peerGrants::add);
     }
     List<CredentialBinding> credentials = new ArrayList<>();
     t.table("credential", false)
@@ -125,7 +144,7 @@ public record Policy(
     if (!problems.isEmpty()) {
       throw new RulesetException(problems);
     }
-    return new Policy(grants, credentials, trust, approval);
+    return new Policy(grants, credentials, trust, approval, peerGrants);
   }
 
   private static Optional<Grant> grant(Table g, Set<String> ids) {
@@ -154,6 +173,34 @@ public record Policy(
       return Optional.empty();
     }
     return Optional.of(new Grant(id.get(), layer.get(), capability.get(), args, note));
+  }
+
+  private static Optional<PeerGrant> peerGrant(Table g, Set<String> ids) {
+    g.onlyKeys(Set.of("id", "peer", "capability", "note", "args"));
+    Optional<String> id = g.string("id", true);
+    Optional<String> peer = g.string("peer", true);
+    Optional<String> capability = g.string("capability", true);
+    Optional<String> note = g.string("note", false);
+    id.ifPresent(
+        i -> {
+          if (!ID.matcher(i).matches()) {
+            g.problem("'id' must be lower case letters, digits, '.', '_' or '-'");
+          } else if (!ids.add(i)) {
+            g.problem("grant id '" + i + "' is used twice");
+          }
+        });
+    Map<String, ArgMatcher> args = new LinkedHashMap<>();
+    g.table("args", false)
+        .ifPresent(
+            a -> {
+              for (var e : a.subTables().entrySet()) {
+                matcher(e.getValue()).ifPresent(m -> args.put(e.getKey(), m));
+              }
+            });
+    if (id.isEmpty() || peer.isEmpty() || capability.isEmpty()) {
+      return Optional.empty();
+    }
+    return Optional.of(new PeerGrant(id.get(), peer.get(), capability.get(), args, note));
   }
 
   private static Optional<CredentialBinding> credential(String name, Table c) {
@@ -240,7 +287,35 @@ public record Policy(
                           : m));
       resolved.add(new Grant(g.id(), g.layer(), g.capability(), args, g.note()));
     }
-    return new Policy(resolved, credentials, trust, approval);
+    List<PeerGrant> resolvedPeer = new ArrayList<>();
+    for (PeerGrant g : peerGrants) {
+      Map<String, ArgMatcher> args = new LinkedHashMap<>();
+      g.args()
+          .forEach(
+              (name, m) ->
+                  args.put(
+                      name,
+                      m instanceof ArgMatcher.InSet in
+                          ? new ArgMatcher.InSet(
+                              in.set(),
+                              new java.util.TreeSet<>(sets.getOrDefault(in.set(), Set.of()))
+                                  .stream().toList())
+                          : m));
+      resolvedPeer.add(new PeerGrant(g.id(), g.peer(), g.capability(), args, g.note()));
+    }
+    return new Policy(resolved, credentials, trust, approval, resolvedPeer);
+  }
+
+  /** The first grant that covers a call of this peer, if there is one. */
+  public Optional<PeerGrant> findForPeer(String peer, String capability, Map<String, Object> args) {
+    return peerGrants.stream().filter(g -> g.covers(peer, capability, args)).findFirst();
+  }
+
+  /** The names of the peers that grants name. */
+  public Set<String> peersWithGrants() {
+    Set<String> names = new java.util.TreeSet<>();
+    peerGrants.forEach(g -> names.add(g.peer()));
+    return names;
   }
 
   /** The first grant that covers a call of the rules of this layer, if there is one. */
@@ -289,43 +364,11 @@ public record Policy(
       if (!layers.contains(g.layer())) {
         problems.add(new Problem(where, "no layer named '" + g.layer() + "'"));
       }
-      Optional<CapabilityDescriptor> capability = catalog.capability(g.capability());
-      if (capability.isEmpty()) {
-        problems.add(new Problem(where, "no capability named '" + g.capability() + "'"));
-        continue;
-      }
-      for (var e : g.args().entrySet()) {
-        Optional<FieldDescriptor> param =
-            capability.get().params().stream().filter(p -> p.name().equals(e.getKey())).findFirst();
-        if (param.isEmpty()) {
-          problems.add(
-              new Problem(where, g.capability() + " has no parameter '" + e.getKey() + "'"));
-        } else if (!param.get().scopable()) {
-          problems.add(
-              new Problem(where, "parameter '" + e.getKey() + "' cannot be restricted by a grant"));
-        } else if (e.getValue() instanceof ArgMatcher.Prefix
-            && param.get().type() != ValueType.STRING) {
-          problems.add(new Problem(where, "'prefix' only works on strings: '" + e.getKey() + "'"));
-        } else if (e.getValue() instanceof ArgMatcher.InSet in) {
-          if (!g.capability().startsWith("entity.") || !e.getKey().equals("type")) {
-            problems.add(
-                new Problem(
-                    where,
-                    "'set' only works on the parameter 'type' of the entity capabilities: '"
-                        + e.getKey()
-                        + "'"));
-          } else if (entitySets != null && !entitySets.contains(in.set())) {
-            problems.add(
-                new Problem(
-                    where,
-                    "no entity set named '"
-                        + in.set()
-                        + "' (sets: "
-                        + new java.util.TreeSet<>(entitySets)
-                        + ")"));
-          }
-        }
-      }
+      checkArgs(where, g.capability(), g.args(), catalog, entitySets, problems);
+    }
+    for (PeerGrant g : peerGrants) {
+      String where = "policy.toml: peer_grant '" + g.id() + "'";
+      checkArgs(where, g.capability(), g.args(), catalog, entitySets, problems);
     }
     for (CredentialBinding b : credentials) {
       String where = "policy.toml: credential '" + b.name() + "'";
@@ -339,6 +382,51 @@ public record Policy(
       }
     }
     return problems;
+  }
+
+  private static void checkArgs(
+      String where,
+      String capabilityName,
+      Map<String, ArgMatcher> argMatchers,
+      ModuleCatalog catalog,
+      Set<String> entitySets,
+      List<Problem> problems) {
+    Optional<CapabilityDescriptor> capability = catalog.capability(capabilityName);
+    if (capability.isEmpty()) {
+      problems.add(new Problem(where, "no capability named '" + capabilityName + "'"));
+      return;
+    }
+    for (var e : argMatchers.entrySet()) {
+      Optional<FieldDescriptor> param =
+          capability.get().params().stream().filter(p -> p.name().equals(e.getKey())).findFirst();
+      if (param.isEmpty()) {
+        problems.add(new Problem(where, capabilityName + " has no parameter '" + e.getKey() + "'"));
+      } else if (!param.get().scopable()) {
+        problems.add(
+            new Problem(where, "parameter '" + e.getKey() + "' cannot be restricted by a grant"));
+      } else if (e.getValue() instanceof ArgMatcher.Prefix
+          && param.get().type() != ValueType.STRING) {
+        problems.add(new Problem(where, "'prefix' only works on strings: '" + e.getKey() + "'"));
+      } else if (e.getValue() instanceof ArgMatcher.InSet in) {
+        if (!capabilityName.startsWith("entity.") || !e.getKey().equals("type")) {
+          problems.add(
+              new Problem(
+                  where,
+                  "'set' only works on the parameter 'type' of the entity capabilities: '"
+                      + e.getKey()
+                      + "'"));
+        } else if (entitySets != null && !entitySets.contains(in.set())) {
+          problems.add(
+              new Problem(
+                  where,
+                  "no entity set named '"
+                      + in.set()
+                      + "' (sets: "
+                      + new java.util.TreeSet<>(entitySets)
+                      + ")"));
+        }
+      }
+    }
   }
 
   /** The binding with this name, if there is one. */

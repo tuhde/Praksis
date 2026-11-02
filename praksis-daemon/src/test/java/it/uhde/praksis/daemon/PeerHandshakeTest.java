@@ -37,7 +37,9 @@ class PeerHandshakeTest {
     socket = dir.resolve("s");
     server =
         new ApiServer(
-            socket, r -> new Response.StatusReport(1, "", "", 0, java.util.List.of(), 0), () -> {},
+            socket,
+            r -> new Response.StatusReport(1, "", "", 0, java.util.List.of(), 0),
+            () -> {},
             new PeerHandshake(acme));
     server.start();
   }
@@ -60,7 +62,8 @@ class PeerHandshakeTest {
   @Test
   void anUnlistedKeyIsRefused(@TempDir Path stranger) throws IOException {
     Peers other = new Peers(stranger);
-    Peers.Peer asAcme = new Peers.Peer("acme", acme.publicKey(), Optional.of(socket.toString()), false);
+    Peers.Peer asAcme =
+        new Peers.Peer("acme", acme.publicKey(), Optional.of(socket.toString()), false);
     IOException e = assertThrows(IOException.class, () -> PeerLink.connect(other, asAcme));
     assertTrue(e.getMessage().contains("not accepted"), e.getMessage());
   }
@@ -68,7 +71,8 @@ class PeerHandshakeTest {
   @Test
   void theOtherSideMustHoldTheKeyWeListed(@TempDir Path stranger) throws IOException {
     Peers other = new Peers(stranger);
-    Peers.Peer wrong = new Peers.Peer("acme", other.publicKey(), Optional.of(socket.toString()), false);
+    Peers.Peer wrong =
+        new Peers.Peer("acme", other.publicKey(), Optional.of(socket.toString()), false);
     IOException e = assertThrows(IOException.class, () -> PeerLink.connect(me, wrong));
     assertTrue(e.getMessage().contains("another key"), e.getMessage());
   }
@@ -77,7 +81,8 @@ class PeerHandshakeTest {
   void aWrongProofIsRefusedAndTheConnectionEnds() throws IOException {
     try (Client c = Client.connect(socket)) {
       Response r =
-          c.send(new Request.PeerHello(me.publicKey(), PeerHandshake.nonce(), PeerVersions.local()));
+          c.send(
+              new Request.PeerHello(me.publicKey(), PeerHandshake.nonce(), PeerVersions.local()));
       assertInstanceOf(Response.PeerChallenge.class, r);
       Response proof = c.send(new Request.PeerProve("AAAA"));
       assertEquals(new Response.Error("not accepted"), proof);

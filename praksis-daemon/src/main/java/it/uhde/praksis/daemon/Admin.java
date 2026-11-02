@@ -114,7 +114,8 @@ final class Admin {
     return 2;
   }
 
-  private static int peers(DaemonConfig config, List<String> args, PrintWriter out, PrintWriter err) {
+  private static int peers(
+      DaemonConfig config, List<String> args, PrintWriter out, PrintWriter err) {
     Peers peers = new Peers(config.home());
     try {
       String sub = args.isEmpty() ? "list" : args.get(0);
@@ -175,7 +176,8 @@ final class Admin {
           return 0;
         }
         default -> {
-          err.println("usage: peers [list|show-key|add <name> <key> [--socket path] [--standing-read]|remove <name>]");
+          err.println(
+              "usage: peers [list|show-key|add <name> <key> [--socket path] [--standing-read]|remove <name>]");
           return 2;
         }
       }

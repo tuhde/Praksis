@@ -75,8 +75,7 @@ final class PeerHandshake {
       }
       String nonce = nonce();
       byte[] transcript =
-          transcript(
-              hello.key(), peers.publicKey(), hello.nonce(), nonce, hello.versions(), mine);
+          transcript(hello.key(), peers.publicKey(), hello.nonce(), nonce, hello.versions(), mine);
       String signature =
           Base64.getEncoder().encodeToString(peers.sign(prefix("server", transcript)));
       s.state = Session.State.CHALLENGED;
@@ -90,7 +89,9 @@ final class PeerHandshake {
     }
   }
 
-  /** Answers a proof; on failure the session goes back to the start and the caller should hang up. */
+  /**
+   * Answers a proof; on failure the session goes back to the start and the caller should hang up.
+   */
   Response prove(Session s, Request.PeerProve prove) {
     if (s.state != Session.State.CHALLENGED) {
       return new Response.Error("no handshake is begun on this connection");

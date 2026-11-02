@@ -70,6 +70,7 @@ public final class Daemon implements AutoCloseable {
   private LoadedModules modules;
   private Ruleset ruleset;
   private Store store;
+  private volatile PeerAccess peerAccess;
   private Entities entities;
   private EntityStorages entityStorages;
   private final java.util.concurrent.atomic.AtomicReference<EntityService> entityService =
@@ -263,6 +264,7 @@ public final class Daemon implements AutoCloseable {
       EntityCatalog entityCatalog = EntitySets.catalog(layers.sources(layers.readLock()));
       GrantPolicy access = accessPolicy(config, modules.catalog(), effective, entityCatalog);
       store = Store.open(config.database());
+      peerAccess = new PeerAccess(access::policy, store::audit);
       openEntities(entityCatalog, store, access);
       entities = new Entities(entityService::get, store, clock);
       agent.bind(
@@ -390,6 +392,29 @@ public final class Daemon implements AutoCloseable {
     }
   }
 
+  /** A grant for a peer needs a peer of that name in {@code peers.toml}. */
+  static List<Problem> peerGrantProblems(DaemonConfig config, Policy policy) {
+    if (policy.peerGrants().isEmpty()) {
+      return List.of();
+    }
+    try {
+      java.util.Set<String> known = new java.util.HashSet<>();
+      new Peers(config.home()).list().forEach(p -> known.add(p.name()));
+      List<Problem> problems = new java.util.ArrayList<>();
+      for (var g : policy.peerGrants()) {
+        if (!known.contains(g.peer())) {
+          problems.add(
+              new Problem(
+                  "policy.toml: peer_grant '" + g.id() + "'",
+                  "no peer named '" + g.peer() + "' in peers.toml"));
+        }
+      }
+      return problems;
+    } catch (java.io.IOException e) {
+      return List.of(new Problem("peers.toml", e.getMessage()));
+    }
+  }
+
   /** The grants in {@code policy.toml}, checked against the modules and layers in use. */
   static GrantPolicy accessPolicy(
       DaemonConfig config,
@@ -402,6 +427,8 @@ public final class Daemon implements AutoCloseable {
       List<Problem> problems =
           policy.check(
               catalog, config.layerNames(), config.storageComponents(), entities.sets().keySet());
+      problems = new java.util.ArrayList<>(problems);
+      problems.addAll(peerGrantProblems(config, policy));
       if (!problems.isEmpty()) {
         throw new RulesetException(problems);
       }

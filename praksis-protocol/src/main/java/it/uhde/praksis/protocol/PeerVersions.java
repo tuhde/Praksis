@@ -32,7 +32,8 @@ public record PeerVersions(int protocol, int minProtocol, int catalog, int minCa
   public Optional<Agreed> agree(PeerVersions other) {
     int p = Math.min(protocol, other.protocol);
     int c = Math.min(catalog, other.catalog);
-    if (p < Math.max(minProtocol, other.minProtocol) || c < Math.max(minCatalog, other.minCatalog)) {
+    if (p < Math.max(minProtocol, other.minProtocol)
+        || c < Math.max(minCatalog, other.minCatalog)) {
       return Optional.empty();
     }
     return Optional.of(new Agreed(p, c));

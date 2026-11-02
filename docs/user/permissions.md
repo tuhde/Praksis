@@ -49,6 +49,27 @@ cleared). See [Entities](entities.md).
     praksis grants revoke <id>
     praksis grants reload     # after editing the file by hand
 
+## Other daemons
+
+A daemon that connects to this one (see `praksis peers`) can do nothing until you give it a grant. A
+peer grant is like a grant for a layer, but it names the peer as it is listed in `peers.toml`:
+
+```toml
+[[peer_grant]]
+id = "acme-read-invoices"
+peer = "acme"
+capability = "entity.read"
+note = "the company may read the invoices it sent me"
+
+[peer_grant.args]
+type = { one_of = ["invoice"] }
+```
+
+This is the ceiling: what the peer's own policy lets its rules do is decided there, and the effective
+permission is the narrower of the two. A peer grant must name a peer that is listed, or the daemon
+does not start. Every call of a peer, allowed or denied, is in the audit log with the actor
+`peer:<name>`.
+
 ## When a rule needs more
 
 If a rule calls something no grant covers, only that rule is disabled, the events it missed are

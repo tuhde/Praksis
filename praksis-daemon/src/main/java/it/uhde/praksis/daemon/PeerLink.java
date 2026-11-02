@@ -89,11 +89,9 @@ final class PeerLink implements AutoCloseable {
       PeerVersions.Agreed agreed =
           mine.agree(c.versions())
               .orElseThrow(
-                  () ->
-                      new IOException("no common version: " + mine.disagreement(c.versions())));
+                  () -> new IOException("no common version: " + mine.disagreement(c.versions())));
       String proof =
-          Base64.getEncoder()
-              .encodeToString(own.sign(PeerHandshake.prefix("client", transcript)));
+          Base64.getEncoder().encodeToString(own.sign(PeerHandshake.prefix("client", transcript)));
       Response w = client.send(new Request.PeerProve(proof));
       if (w instanceof Response.Error e) {
         throw new IOException("peer '" + peer.name() + "' refused the proof: " + e.message());
