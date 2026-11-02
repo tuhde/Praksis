@@ -320,4 +320,20 @@ class DaemonConfigTest {
     // any other directory may hold any identity, or none
     Daemon.checkIdentity(DaemonConfig.load(home));
   }
+
+  @Test
+  void theWebListenerIsOffUnlessSetAndOnlyOnLoopback() throws Exception {
+    assertThat(DaemonConfig.load(home).web().listen()).isEmpty();
+    Files.writeString(
+        home.resolve("praksis.toml"),
+        "format_version = 1\n[web]\nlisten = \"127.0.0.1:8484\"\norigins = [\"http://localhost:8080\"]\n");
+    DaemonConfig c = DaemonConfig.load(home);
+    assertThat(c.web().listen().get().port()).isEqualTo(8484);
+    assertThat(c.web().origins()).containsExactly("http://localhost:8080");
+    for (String bad : new String[] {"0.0.0.0:8484", "example.com:80", "127.0.0.1", "127.0.0.1:0"}) {
+      Files.writeString(
+          home.resolve("praksis.toml"), "format_version = 1\n[web]\nlisten = \"" + bad + "\"\n");
+      assertThatThrownBy(() -> DaemonConfig.load(home)).isInstanceOf(DaemonException.class);
+    }
+  }
 }

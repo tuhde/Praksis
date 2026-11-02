@@ -13,6 +13,7 @@ module it.uhde.praksis.daemon {
   // are loaded from disk (the AI module talks to model servers) find their JDK modules in. A JDK
   // module that nothing in the daemon needs or binds is not resolved otherwise.
   requires java.net.http;
+  requires jdk.httpserver;
 
   exports it.uhde.praksis.daemon;
 }

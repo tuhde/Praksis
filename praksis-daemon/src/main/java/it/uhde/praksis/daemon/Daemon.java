@@ -88,6 +88,7 @@ public final class Daemon implements AutoCloseable {
   private ViewResolver views;
   private final Topics topics = new Topics();
   private ApiServer api;
+  private WebServer web;
 
   private Daemon(DaemonConfig config) {
     this.config = config;
@@ -362,6 +363,16 @@ public final class Daemon implements AutoCloseable {
               new PeerHandshake(new Peers(config.home())),
               this::handlePeer);
       api.start();
+      if (config.web().listen().isPresent()) {
+        web =
+            new WebServer(
+                config.web().listen().get(),
+                config.web().origins(),
+                new WebTokens(config.home()),
+                this::handleWeb,
+                clock);
+        web.start();
+      }
       startFeeds();
       modules.startSources(engine);
     } catch (RulesetException e) {
@@ -655,6 +666,17 @@ public final class Daemon implements AutoCloseable {
     }
   }
 
+  /**
+   * A request of a web client. Until the filter of the next task decides what a token may ask for,
+   * only the status is answered.
+   */
+  private Response handleWeb(WebTokens.Token token, Request request) {
+    if (request instanceof Request.Status) {
+      return handle(request);
+    }
+    return new Response.Error("the web interface does not offer this yet");
+  }
+
   private Response handle(Request request) {
     try {
       return switch (request) {
@@ -883,6 +905,9 @@ public final class Daemon implements AutoCloseable {
     topics.close();
     if (modules != null) {
       modules.stopSources();
+    }
+    if (web != null) {
+      web.close();
     }
     if (api != null) {
       api.close();

@@ -39,6 +39,9 @@ import java.util.Set;
  * identity   = "private"        # the name of this daemon when a person runs one per role
  * shared_modules = "/opt/praksis-modules"  # modules that several identities use, read only
  *
+ * [web]                       # off unless set; see WebConfig
+ * listen = "127.0.0.1:8484"
+ *
  * [[layer]]                    # ruleset layers, bottom to top; without any, "ruleset" is used
  * name = "mail"
  * git  = "https://github.com/tuhde/Praksis-Mail"   # pinned in rulesets.lock
@@ -82,6 +85,7 @@ import java.util.Set;
  *     {@code private}), or empty for a daemon that is not one of several; a name is lower case
  *     letters, digits and '-', and the home directory of a named identity is {@code
  *     ~/.praksis-<name>} unless it was started with another
+ * @param web whether and where web clients may reach this daemon
  * @param enabledModules the modules to load; empty means every module in the directory. Unless
  *     {@code enabled_modules} says otherwise these are the modules that have a {@code [module.*]}
  *     section.
@@ -103,7 +107,8 @@ public record DaemonConfig(
     PlanConfig plan,
     EntitiesConfig entities,
     boolean offline,
-    Optional<String> identity) {
+    Optional<String> identity,
+    WebConfig web) {
   private static final String FILE = "praksis.toml";
   private static final Set<String> KEYS =
       Set.of(
@@ -123,7 +128,8 @@ public record DaemonConfig(
           "entities",
           "offline",
           "identity",
-          "shared_modules");
+          "shared_modules",
+          "web");
 
   /** The layers that an AI may propose changes to. */
   public List<LayerConfig> aiMaintainedLayers() {
@@ -305,6 +311,7 @@ public record DaemonConfig(
             .table("plan", false)
             .map(t -> PlanConfig.parse(t, layerNames))
             .orElse(new PlanConfig(Optional.empty(), 30));
+    WebConfig web = table.table("web", false).map(WebConfig::parse).orElse(WebConfig.none());
     EntitiesConfig entities = entitiesConfig;
     if (!problems.isEmpty()) {
       throw new DaemonException(
@@ -330,7 +337,8 @@ public record DaemonConfig(
         plan,
         entities,
         offline,
-        identity);
+        identity,
+        web);
   }
 
   /** The directory of what ships with the runtime image, if this is one: {@code lib/praksis}. */
