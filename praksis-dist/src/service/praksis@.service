@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# One Praksis daemon per identity, started by systemd for the user: praksis@private for the identity
+# "private" (home ~/.praksis-private), praksis@work for "work", and so on.
+#
+#   mkdir -p ~/.config/systemd/user
+#   cp praksis@.service ~/.config/systemd/user/
+#   praksis identity create private
+#   systemctl --user enable --now praksis@private
+#
+# The runtime image is expected in ~/.local/share/praksis (the directory that holds bin/praksis);
+# change the paths below if it is somewhere else. The identities do not depend on each other: a
+# peer that is not running yet is offline for a while, as for any peer, and is connected when it
+# comes up.
+
+[Unit]
+Description=Praksis daemon (identity %i)
+Documentation=https://github.com/tuhde/Praksis
+After=default.target
+
+[Service]
+Type=simple
+Environment=PRAKSIS_IDENTITY=%i
+ExecStart=%h/.local/share/praksis/bin/java --enable-native-access=org.xerial.sqlitejdbc --module it.uhde.praksis.daemon/it.uhde.praksis.daemon.Main --home %h/.praksis-%i
+ExecStop=%h/.local/share/praksis/bin/praksis --identity %i stop
+Restart=on-failure
+RestartSec=5
+# about 150 MB of memory when idle; the limit keeps one identity from starving the others
+MemoryMax=1G
+
+[Install]
+WantedBy=default.target

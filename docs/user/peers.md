@@ -33,6 +33,13 @@ other. `praksis identity create work` makes a home, `praksis --identity work sta
 introduces two identities to each other: each lists the key and socket of the other. That allows
 nothing; what one may do at the other is a peer grant on each side, as below.
 
+On Linux, systemd can start the identities for you. The runtime image contains the unit
+`lib/praksis/service/praksis@.service`; copy it to `~/.config/systemd/user/` (it expects the image in
+`~/.local/share/praksis`, change the paths if it is elsewhere), then `systemctl --user enable --now
+praksis@private` starts the daemon of the identity `private` and again at every login. Each identity
+needs about 150 MB when idle. They can start in any order: a peer that is not up yet is offline until
+it is, and is then connected by itself.
+
 An account belongs to exactly one identity: two daemons on the same mailbox would both act on it.
 `praksis identity check` warns when two identities use the same user, address or directory in their
 module settings. Credentials are never shared, and neither are settings; only layers (for example

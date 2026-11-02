@@ -162,6 +162,11 @@
                      module directory at the top level of a zip -->
                 <mkdir dir="${project.build.directory}/archives"/>
                 <zip destfile="${project.build.directory}/archives/maildir.praksis-module" basedir="${image.dir}/lib/praksis/modules/maildir"/>
+                <!-- a systemd user unit for one daemon per identity -->
+                <mkdir dir="${image.dir}/lib/praksis/service"/>
+                <copy todir="${image.dir}/lib/praksis/service">
+                  <fileset dir="${project.basedir}/src/service" includes="*.service"/>
+                </copy>
                 <copy file="${project.basedir}/../LICENSE" todir="${image.dir}"/>
                 <copy file="${project.basedir}/../NOTICE" todir="${image.dir}"/>
               </target>
