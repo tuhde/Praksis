@@ -47,6 +47,7 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Response.PlanDetail.class, name = "plan-detail"),
   @JsonSubTypes.Type(value = Response.StagedDetail.class, name = "staged-detail"),
   @JsonSubTypes.Type(value = Response.Done.class, name = "done"),
+  @JsonSubTypes.Type(value = Response.RemoteRequestList.class, name = "remote-request-list"),
   @JsonSubTypes.Type(value = Response.PeerChallenge.class, name = "peer-challenge"),
   @JsonSubTypes.Type(value = Response.PeerWelcome.class, name = "peer-welcome"),
   @JsonSubTypes.Type(value = Response.PeerCatalog.class, name = "peer-catalog"),
@@ -1087,6 +1088,33 @@ public sealed interface Response {
         this(name, type, required, label, value, null);
       }
     }
+  }
+
+  /**
+   * The requests that connected daemons caused.
+   *
+   * @param requests the requests, oldest first, with the answered ones
+   */
+  record RemoteRequestList(List<Item> requests) implements Response {
+    /**
+     * One request.
+     *
+     * @param id the number
+     * @param time when it was opened
+     * @param peer the daemon
+     * @param kind {@code capability} or {@code pin}
+     * @param subject what it is about
+     * @param state {@code PENDING}, {@code APPROVED}, {@code AUTO} or {@code REFUSED}
+     * @param detail what to decide on; text from the remote, untrusted
+     */
+    public record Item(
+        long id,
+        String time,
+        String peer,
+        String kind,
+        String subject,
+        String state,
+        Map<String, Object> detail) {}
   }
 
   /**

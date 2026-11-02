@@ -41,6 +41,7 @@ class PeerCallsTest {
   final List<AuditEntry> remoteAudit = new ArrayList<>();
   final List<String> localAudit = new ArrayList<>();
   boolean ran;
+  boolean accepted = true;
 
   static final CapabilityDescriptor ECHO =
       new CapabilityDescriptor(
@@ -133,7 +134,8 @@ class PeerCallsTest {
         local,
         (t, rule, cap, args, allowed, error) ->
             localAudit.add(rule + " " + cap + " " + allowed + error.map(e -> " " + e).orElse("")),
-        Clock.systemUTC());
+        Clock.systemUTC(),
+        (peer, capability) -> accepted);
   }
 
   @Test
@@ -177,6 +179,19 @@ class PeerCallsTest {
       assertEquals(new Response.Error("peer 'me' has no grant for demo.nothing"), missing);
       assertEquals(new Response.Error("peer 'me' has no grant for praksis.plan"), agent);
     }
+  }
+
+  @Test
+  void aFunctionThatIsNotAcceptedIsNotCalled() {
+    accepted = false;
+    RemoteCalls allowAll = remote((r, c, a) -> AccessPolicy.Decision.allow());
+    IOException e =
+        assertThrows(
+            IOException.class,
+            () -> allowAll.call("rule1", "acme", "demo.echo", Map.of("text", "hi"), false));
+    assertTrue(e.getMessage().contains("not accepted yet"), e.getMessage());
+    assertFalse(ran);
+    assertTrue(remoteAudit.isEmpty());
   }
 
   @Test

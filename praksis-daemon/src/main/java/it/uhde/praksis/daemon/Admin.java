@@ -309,7 +309,8 @@ final class Admin {
             new RemoteCatalogs(config.home()),
             (rule, capability, a) -> AccessPolicy.Decision.allow(),
             (time, rule, capability, a, allowed, error) -> {},
-            java.time.Clock.systemUTC());
+            java.time.Clock.systemUTC(),
+            (peer, capability) -> true); // a person at the socket accepts by calling
     try {
       var results = calls.call("user", args.get(0), args.get(1), given, dryRun);
       results.forEach((k, v) -> out.println(k + " = " + v));

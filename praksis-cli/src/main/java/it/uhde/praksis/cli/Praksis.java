@@ -1723,6 +1723,8 @@ public final class Praksis {
         Praksis.Peers.AddCommand.class,
         Praksis.Peers.CatalogCommand.class,
         Praksis.Peers.CallCommand.class,
+        Praksis.Peers.RequestsCommand.class,
+        Praksis.Peers.AnswerCommand.class,
         Praksis.Peers.PinsCommand.class,
         Praksis.Peers.PinCommand.class,
         Praksis.Peers.AcceptPinCommand.class,
@@ -1824,6 +1826,57 @@ public final class Praksis {
           args.add("--dry-run");
         }
         return runDaemonCommand(args.toArray(String[]::new));
+      }
+    }
+
+    @Command(
+        name = "requests",
+        description =
+            "Lists what connected daemons ask you to decide: new functions to accept and changes"
+                + " of pinned sets.")
+    static final class RequestsCommand extends Base {
+      @Override
+      public Integer call() {
+        Response response = send(new Request.RemoteRequests());
+        if (response instanceof Response.RemoteRequestList l) {
+          if (l.requests().isEmpty()) {
+            out().println("No requests.");
+          }
+          for (var r : l.requests()) {
+            out()
+                .printf(
+                    "#%d  %-8s %s  %s  %s  [%s]%n",
+                    r.id(), r.state(), r.peer(), r.subject(), r.detail(), r.time());
+          }
+          return 0;
+        }
+        return exitCodeFor(response);
+      }
+    }
+
+    @Command(
+        name = "answer",
+        description =
+            "Answers a request of a connected daemon: approve accepts a function or moves a pin,"
+                + " refuse keeps things as they are.")
+    static final class AnswerCommand extends Base {
+      @CommandLine.Parameters(index = "0", paramLabel = "<request>", description = "The number.")
+      long id;
+
+      @CommandLine.Parameters(
+          index = "1",
+          paramLabel = "<decision>",
+          description = "approve or refuse.")
+      String decision;
+
+      @Override
+      public Integer call() {
+        Response response = send(new Request.RemoteAnswer(id, decision));
+        if (response instanceof Response.Done d) {
+          out().println(d.message());
+          return 0;
+        }
+        return exitCodeFor(response);
       }
     }
 

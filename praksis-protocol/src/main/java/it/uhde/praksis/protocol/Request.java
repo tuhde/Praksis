@@ -58,6 +58,8 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.EntityCreate.class, name = "entity-create"),
   @JsonSubTypes.Type(value = Request.EntityUpdate.class, name = "entity-update"),
   @JsonSubTypes.Type(value = Request.EntityDelete.class, name = "entity-delete"),
+  @JsonSubTypes.Type(value = Request.RemoteRequests.class, name = "remote-requests"),
+  @JsonSubTypes.Type(value = Request.RemoteAnswer.class, name = "remote-answer"),
   @JsonSubTypes.Type(value = Request.PeerHello.class, name = "peer-hello"),
   @JsonSubTypes.Type(value = Request.PeerProve.class, name = "peer-prove"),
   @JsonSubTypes.Type(value = Request.PeerCatalog.class, name = "peer-catalog"),
@@ -66,6 +68,21 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.Stop.class, name = "stop")
 })
 public sealed interface Request {
+  /**
+   * Asks for the requests that connected daemons caused: new functions to accept and changes of
+   * pinned sets to approve. Answered with {@link Response.RemoteRequestList}. Like all approvals
+   * this is for a person at the local socket; a peer cannot send it.
+   */
+  record RemoteRequests() implements Request {}
+
+  /**
+   * Answers a remote request. Answered with {@link Response.Done}.
+   *
+   * @param id the number
+   * @param decision {@code approve} or {@code refuse}
+   */
+  record RemoteAnswer(long id, String decision) implements Request {}
+
   /**
    * The first message of another daemon that wants to connect (cascading daemons). Answered with
    * {@link Response.PeerChallenge}, or with an error if the key is not listed or the versions do

@@ -76,6 +76,13 @@ exactly those. If the company adds a type to its set, the pin does not move and 
 widen: `praksis peers pins` shows the difference, and `praksis peers accept-pin acme finance` is your
 approval. A grant that names a set that is not pinned stops the daemon from starting.
 
+A function that a peer offers anew is not used by rules until you accept it: `praksis peers requests`
+lists what waits (new functions, and changes of pinned sets), `praksis peers answer <number> approve`
+or `refuse` answers. Accepting does not grant anything by itself; your grants still decide who may
+use the function. For a peer you trust to read, set `standing_read = true` in `peers.toml`: the
+functions that only read are then accepted as they appear. Anything that writes, sends or deletes
+always asks. One peer can have 20 requests waiting; more are asked again when there is room.
+
 To call a capability of a peer yourself, run `praksis peers catalog <name>` once and then `praksis peers call <name> entity.read --arg type=invoice`. The peer's grants decide; you need no grant of your own.
 
 ## When a rule needs more

@@ -73,6 +73,7 @@ public final class Daemon implements AutoCloseable {
   private volatile PeerAccess peerAccess;
   private volatile GrantPolicy grants;
   private volatile PeerCalls peerCalls;
+  private volatile RemoteRequests remoteRequests;
   private final List<Thread> feeds = new java.util.concurrent.CopyOnWriteArrayList<>();
   private Entities entities;
   private EntityStorages entityStorages;
@@ -268,6 +269,19 @@ public final class Daemon implements AutoCloseable {
       GrantPolicy access = accessPolicy(config, modules.catalog(), effective, entityCatalog);
       store = Store.open(config.database());
       grants = access;
+      remoteRequests =
+          new RemoteRequests(
+              store,
+              new RemotePins(config.home()),
+              new RemoteCatalogs(config.home()),
+              clock,
+              () -> {
+                try {
+                  approvals.reload();
+                } catch (Exception e) {
+                  System.err.println("praksis: cannot read the policy again: " + e.getMessage());
+                }
+              });
       peerAccess = new PeerAccess(access::policy, store::audit);
       peerCalls = new PeerCalls(modules.catalog()::capability, modules.capabilities(), peerAccess);
       openEntities(entityCatalog, store, access);
@@ -407,6 +421,7 @@ public final class Daemon implements AutoCloseable {
         continue;
       }
       RemoteFeed feed = new RemoteFeed(config.home(), peer.name(), clock, topics::bump);
+      feed.onCatalog(c -> remoteRequests.onCatalog(peer, c));
       feeds.add(
           Thread.ofVirtual().name("praksis-feed-" + peer.name()).start(() -> feed.run(own, peer)));
     }
@@ -567,6 +582,9 @@ public final class Daemon implements AutoCloseable {
         case Request.Approvals a -> approvals.list();
         case Request.Answer a ->
             new Response.Done(approvals.answer(a.id(), a.decision(), a.missed()));
+        case Request.RemoteRequests r -> remoteRequests.list();
+        case Request.RemoteAnswer r ->
+            new Response.Done(remoteRequests.answer(r.id(), r.decision()));
         case Request.Missed m -> new Response.Done(approvals.missed(m.rule(), m.action()));
         case Request.Grants g -> approvals.grants();
         case Request.Revoke r -> new Response.Done(approvals.revoke(r.id()));

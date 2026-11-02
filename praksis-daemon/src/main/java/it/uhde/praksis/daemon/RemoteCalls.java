@@ -28,13 +28,28 @@ final class RemoteCalls {
   private final AccessPolicy local;
   private final AuditLog audit;
   private final Clock clock;
+  private final Accepted accepted;
+
+  /** Whether a function of a remote was accepted. */
+  @FunctionalInterface
+  interface Accepted {
+    boolean test(String peer, String capability) throws IOException;
+  }
 
   /**
+   * @param accepted whether a function was accepted by a person or a standing grant; a rule may use
+   *     only accepted functions
    * @param local the local policy; asked with the caller and the qualified name of the capability
    * @param audit where the local side of a call is recorded
    */
   RemoteCalls(
-      Peers peers, RemoteCatalogs catalogs, AccessPolicy local, AuditLog audit, Clock clock) {
+      Peers peers,
+      RemoteCatalogs catalogs,
+      AccessPolicy local,
+      AuditLog audit,
+      Clock clock,
+      Accepted accepted) {
+    this.accepted = accepted;
     this.peers = peers;
     this.catalogs = catalogs;
     this.local = local;
@@ -73,6 +88,10 @@ final class RemoteCalls {
                             + " (praksis peers catalog "
                             + peerName
                             + ")"));
+    if (!accepted.test(peerName, capability)) {
+      throw new IOException(
+          qualified + " is not accepted yet (praksis peers requests, then peers answer)");
+    }
     AccessPolicy.Decision decision = local.check(caller, descriptor(qualified, info), args);
     if (!decision.allowed()) {
       audit.record(clock.instant(), caller, qualified, args, false, Optional.of(decision.reason()));

@@ -207,6 +207,7 @@ class StoreTest {
       s.execute("DROP TABLE shadow_run");
       s.execute("DROP TABLE entity");
       s.execute("DROP TABLE entity_unique");
+      s.execute("DROP TABLE remote_request");
       s.execute("PRAGMA user_version = 1");
     }
     try (Store store = Store.open(file)) {
@@ -317,6 +318,7 @@ class StoreTest {
       s.execute("DROP TABLE shadow_run");
       s.execute("DROP TABLE entity");
       s.execute("DROP TABLE entity_unique");
+      s.execute("DROP TABLE remote_request");
       s.execute("PRAGMA user_version = 3");
     }
     try (Store store = Store.open(file)) {
@@ -335,6 +337,7 @@ class StoreTest {
         var s = c.createStatement()) {
       s.execute("DROP TABLE entity");
       s.execute("DROP TABLE entity_unique");
+      s.execute("DROP TABLE remote_request");
       s.execute("PRAGMA user_version = 4");
     }
     try (Store store = Store.open(file)) {
@@ -368,6 +371,7 @@ class StoreTest {
               + " ROWID");
       s.execute(
           "INSERT INTO entity (type, id, created, updated, json) VALUES ('t', 'a', 'x', 'x', '{}')");
+      s.execute("DROP TABLE remote_request");
       s.execute("PRAGMA user_version = 5");
     }
     try (Store store = Store.open(file)) {

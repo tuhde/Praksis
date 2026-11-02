@@ -51,6 +51,7 @@ final class RemoteFeed {
   private final Map<String, Instant> gone = new TreeMap<>();
   private Set<String> known;
   private Instant unreachableSince;
+  private volatile Consumer<Response.PeerCatalog> listener = c -> {};
 
   /**
    * @param changed told {@code remote} whenever the state of this feed changes (for the topic that
@@ -80,6 +81,11 @@ final class RemoteFeed {
               s.members().forEach(m -> out.add("member:" + s.id() + "/" + m));
             });
     return out;
+  }
+
+  /** Called with each catalog that was received, after the marks were updated. */
+  void onCatalog(Consumer<Response.PeerCatalog> listener) {
+    this.listener = listener;
   }
 
   /** What a new catalog changes; also marks and unmarks. */
@@ -172,6 +178,7 @@ final class RemoteFeed {
           if (!list.catalogHash().equals(hash)) {
             var fetched = catalogs.fetch(link);
             apply(fetched.catalog());
+            listener.accept(fetched.catalog());
             hash = list.catalogHash();
           }
         }

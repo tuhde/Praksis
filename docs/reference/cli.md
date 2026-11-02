@@ -202,6 +202,19 @@ Options:
 - `--arg` `<argument>`: An argument, name=value (repeatable).
 - `--dry-run`: Check and change nothing.
 
+#### praksis peers requests
+
+Lists what connected daemons ask you to decide: new functions to accept and changes of pinned sets.
+
+#### praksis peers answer
+
+Answers a request of a connected daemon: approve accepts a function or moves a pin, refuse keeps things as they are.
+
+Arguments:
+
+- `<request>`: The number.
+- `<decision>`: approve or refuse.
+
 #### praksis peers pins
 
 Lists the pinned remote sets and shows where the remote's set now differs from the pin.

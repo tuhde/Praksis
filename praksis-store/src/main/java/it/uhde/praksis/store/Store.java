@@ -26,7 +26,7 @@ import java.util.Optional;
  * <p>All methods are safe to call from several threads.
  */
 public final class Store implements AutoCloseable {
-  private static final int SCHEMA_VERSION = 6;
+  private static final int SCHEMA_VERSION = 7;
 
   private final Connection connection;
   private volatile java.util.function.Consumer<String> changes = topic -> {};
@@ -219,6 +219,163 @@ public final class Store implements AutoCloseable {
         s.execute("PRAGMA user_version = 6");
       }
     }
+    if (version < 7) {
+      try (Statement s = connection.createStatement()) {
+        s.execute(
+            """
+            CREATE TABLE remote_request (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              time TEXT NOT NULL,
+              peer TEXT NOT NULL,
+              kind TEXT NOT NULL,
+              subject TEXT NOT NULL,
+              detail TEXT NOT NULL,
+              state TEXT NOT NULL,
+              answered TEXT
+            )""");
+        s.execute("PRAGMA user_version = 7");
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------- remote requests
+
+  /** What {@link #openRemoteRequest} did. */
+  public enum Opened {
+    /** A new request was made. */
+    OPENED,
+    /** The same request exists already (pending, answered, or the same detail was refused). */
+    DUPLICATE,
+    /** The peer has too many open requests; nothing was made. */
+    LIMIT
+  }
+
+  /**
+   * Opens a request for a person to answer, unless it exists already or the peer has {@code
+   * maxPending} pending ones (so that a remote cannot flood the queue). A pending request about the
+   * same subject gets the new detail instead of a second request; a refused one is not asked again
+   * unless the detail changed.
+   *
+   * @param initial {@code PENDING}, or {@code AUTO} for a function that a standing grant accepts
+   */
+  public synchronized Opened openRemoteRequest(
+      Instant time,
+      String peer,
+      String kind,
+      String subject,
+      java.util.Map<String, Object> detail,
+      RemoteRequest.State initial,
+      int maxPending)
+      throws StoreException {
+    String encoded = EventCodec.encodeMap(detail);
+    int pending = 0;
+    for (RemoteRequest r : remoteRequests(java.util.EnumSet.allOf(RemoteRequest.State.class))) {
+      if (!r.peer().equals(peer)) {
+        continue;
+      }
+      if (r.state() == RemoteRequest.State.PENDING) {
+        pending++;
+      }
+      if (r.subject().equals(subject)) {
+        boolean same = r.detail().equals(EventCodec.decodeMap(encoded));
+        if (r.state() == RemoteRequest.State.PENDING && !same) {
+          try (PreparedStatement u =
+              connection.prepareStatement("UPDATE remote_request SET detail = ? WHERE id = ?")) {
+            u.setString(1, encoded);
+            u.setLong(2, r.id());
+            u.executeUpdate();
+          } catch (SQLException e) {
+            throw new StoreException("cannot update remote request " + r.id(), e);
+          }
+          changes.accept("approvals");
+          return Opened.DUPLICATE;
+        }
+        if (same || r.state() != RemoteRequest.State.REFUSED) {
+          return Opened.DUPLICATE;
+        }
+      }
+    }
+    if (initial == RemoteRequest.State.PENDING && pending >= maxPending) {
+      return Opened.LIMIT;
+    }
+    try (PreparedStatement s =
+        connection.prepareStatement(
+            "INSERT INTO remote_request (time, peer, kind, subject, detail, state, answered)"
+                + " VALUES (?, ?, ?, ?, ?, ?, ?)")) {
+      s.setString(1, time.toString());
+      s.setString(2, peer);
+      s.setString(3, kind);
+      s.setString(4, subject);
+      s.setString(5, encoded);
+      s.setString(6, initial.name());
+      s.setString(7, initial == RemoteRequest.State.PENDING ? null : time.toString());
+      s.executeUpdate();
+    } catch (SQLException e) {
+      throw new StoreException("cannot open a remote request for " + peer, e);
+    }
+    changes.accept("approvals");
+    return Opened.OPENED;
+  }
+
+  /** The requests in these states, oldest first. */
+  public synchronized List<RemoteRequest> remoteRequests(java.util.Set<RemoteRequest.State> states)
+      throws StoreException {
+    List<RemoteRequest> out = new ArrayList<>();
+    try (Statement s = connection.createStatement();
+        ResultSet r =
+            s.executeQuery(
+                "SELECT id, time, peer, kind, subject, detail, state, answered"
+                    + " FROM remote_request ORDER BY id")) {
+      while (r.next()) {
+        RemoteRequest.State state = RemoteRequest.State.valueOf(r.getString(7));
+        if (states.contains(state)) {
+          out.add(
+              new RemoteRequest(
+                  r.getLong(1),
+                  Instant.parse(r.getString(2)),
+                  r.getString(3),
+                  r.getString(4),
+                  r.getString(5),
+                  EventCodec.decodeMap(r.getString(6)),
+                  state,
+                  Optional.ofNullable(r.getString(8)).map(Instant::parse)));
+        }
+      }
+      return out;
+    } catch (SQLException e) {
+      throw new StoreException("cannot read the remote requests", e);
+    }
+  }
+
+  /** The request with this number. */
+  public synchronized Optional<RemoteRequest> remoteRequest(long id) throws StoreException {
+    return remoteRequests(java.util.EnumSet.allOf(RemoteRequest.State.class)).stream()
+        .filter(r -> r.id() == id)
+        .findFirst();
+  }
+
+  /** Records the answer to a remote request. */
+  public synchronized void answerRemoteRequest(long id, RemoteRequest.State state, Instant at)
+      throws StoreException {
+    try (PreparedStatement s =
+        connection.prepareStatement(
+            "UPDATE remote_request SET state = ?, answered = ? WHERE id = ?")) {
+      s.setString(1, state.name());
+      s.setString(2, at.toString());
+      s.setLong(3, id);
+      s.executeUpdate();
+    } catch (SQLException e) {
+      throw new StoreException("cannot answer remote request " + id, e);
+    }
+    changes.accept("approvals");
+  }
+
+  /** Whether a person (or a standing grant) accepted this subject of the peer. */
+  public synchronized boolean remoteAccepted(String peer, String subject) throws StoreException {
+    return remoteRequests(
+            java.util.EnumSet.of(RemoteRequest.State.APPROVED, RemoteRequest.State.AUTO))
+        .stream()
+        .anyMatch(r -> r.peer().equals(peer) && r.subject().equals(subject));
   }
 
   /** Work done on the database inside {@link #transaction}. */
