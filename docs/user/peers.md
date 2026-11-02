@@ -24,6 +24,22 @@ the key the other has listed; a daemon with an unknown key, or a wrong proof, on
 accepted". The two also agree on the version of the protocol and of the catalog, or refuse each
 other. For now daemons reach each other through the Unix socket on one machine.
 
+## Several identities on one machine
+
+If you run one daemon per role of yours (private, work, ...), each is an identity with its own home
+`~/.praksis-<name>`, store, grants, credentials and audit log, and the identities are peers of each
+other. `praksis identity create work` makes a home, `praksis --identity work start` runs it (or set
+`$PRAKSIS_IDENTITY`), `praksis identity list` shows which run. `praksis identity link private work`
+introduces two identities to each other: each lists the key and socket of the other. That allows
+nothing; what one may do at the other is a peer grant on each side, as below.
+
+An account belongs to exactly one identity: two daemons on the same mailbox would both act on it.
+`praksis identity check` warns when two identities use the same user, address or directory in their
+module settings. Credentials are never shared, and neither are settings; only layers (for example
+`Praksis-Mail`) and one directory of installed modules (`shared_modules` in `praksis.toml`) can be
+used by all. A company you are connected to as one identity is not visible to another identity unless
+the first offers it on as a function of its own.
+
 ## What the other side lets you do
 
 The daemon you connect to decides first, with `[[peer_grant]]` in its `policy.toml`, naming you as

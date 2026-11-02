@@ -138,9 +138,14 @@ public final class Praksis {
      * code.
      */
     int runDaemonCommand(String... args) throws InterruptedException {
+      return runDaemonCommandIn(parent().home(), args);
+    }
+
+    /** As above, in the home of another identity. */
+    int runDaemonCommandIn(Path home, String... args) throws InterruptedException {
       try {
         Process p =
-            new ProcessBuilder(DaemonCommand.buildWith(parent().home(), args))
+            new ProcessBuilder(DaemonCommand.buildWith(home, args))
                 .redirectErrorStream(true)
                 .start();
         p.getOutputStream().close();
@@ -1742,7 +1747,12 @@ public final class Praksis {
       description =
           "Manages identities: one daemon per role of yours (private, work, ...), each with its"
               + " own home. Use one with --identity NAME.",
-      subcommands = {Praksis.Identity.CreateCommand.class, Praksis.Identity.ListCommand.class})
+      subcommands = {
+        Praksis.Identity.CreateCommand.class,
+        Praksis.Identity.ListCommand.class,
+        Praksis.Identity.LinkCommand.class,
+        Praksis.Identity.CheckCommand.class
+      })
   static final class Identity {
     @Command(
         name = "create",
@@ -1769,6 +1779,62 @@ public final class Praksis {
           err().println(e.getMessage());
           return EXIT_FAILED;
         }
+      }
+    }
+
+    @Command(
+        name = "link",
+        description =
+            "Makes two identities of this machine peers of each other: each lists the key and the"
+                + " socket of the other. It allows nothing; grants are added to each policy.toml"
+                + " by hand.")
+    static final class LinkCommand extends Base {
+      @CommandLine.Parameters(index = "0", paramLabel = "<a>", description = "One identity.")
+      String a;
+
+      @CommandLine.Parameters(index = "1", paramLabel = "<b>", description = "The other one.")
+      String b;
+
+      @Override
+      public Integer call() throws InterruptedException {
+        try {
+          Path homeA = Identities.home(a);
+          Path homeB = Identities.home(b);
+          for (Path h : java.util.List.of(homeA, homeB)) {
+            if (!Files.isDirectory(h)) {
+              err().println("There is no identity at " + h + " (praksis identity create).");
+              return EXIT_FAILED;
+            }
+          }
+          return runDaemonCommandIn(
+              homeA, "--admin", "identity", "link", homeA.toString(), a, homeB.toString(), b);
+        } catch (IllegalArgumentException e) {
+          err().println(e.getMessage());
+          return EXIT_FAILED;
+        }
+      }
+    }
+
+    @Command(
+        name = "check",
+        description =
+            "Warns when two identities use the same account or place in their module settings: a"
+                + " mailbox belongs to exactly one identity.")
+    static final class CheckCommand extends Base {
+      @Override
+      public Integer call() throws InterruptedException {
+        var all = Identities.list();
+        if (all.size() < 2) {
+          out().println("Fewer than two identities; nothing to compare.");
+          return 0;
+        }
+        java.util.List<String> args =
+            new java.util.ArrayList<>(java.util.List.of("--admin", "identity", "check"));
+        for (Identities.Found f : all) {
+          args.add(f.name());
+          args.add(f.home().toString());
+        }
+        return runDaemonCommandIn(all.get(0).home(), args.toArray(String[]::new));
       }
     }
 

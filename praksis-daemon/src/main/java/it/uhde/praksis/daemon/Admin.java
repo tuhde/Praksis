@@ -88,6 +88,9 @@ final class Admin {
         }
         return update(layers, names, dryRun, acceptNewAccess, validator, access, out, err);
       }
+      if (!args.isEmpty() && args.get(0).equals("identity")) {
+        return identity(args.subList(1, args.size()), out, err);
+      }
       if (!args.isEmpty() && args.get(0).equals("peers")) {
         return peers(config, args.subList(1, args.size()), out, err);
       }
@@ -111,8 +114,51 @@ final class Admin {
       return 1;
     }
     err.println(
-        "usage: peers [list|show-key|add <name> <key> [--socket path] [--standing-read]|remove <name>|catalog <name>|call <name> <capability> [--arg k=v]... [--dry-run]|pins [name]|pin <name> <set>|accept-pin <name> <set>|unpin <name> <set>] | layers status | layers update [--dry-run] [--accept-new-access] [name...] | proposals [...] | agent [...] | effective | verify [--replay] [-n N] [--update] [--layer name=dir|@ref] | test");
+        "usage: identity link <homeA> <nameA> <homeB> <nameB> | identity check <name> <home>... | peers [list|show-key|add <name> <key> [--socket path] [--standing-read]|remove <name>|catalog <name>|call <name> <capability> [--arg k=v]... [--dry-run]|pins [name]|pin <name> <set>|accept-pin <name> <set>|unpin <name> <set>] | layers status | layers update [--dry-run] [--accept-new-access] [name...] | proposals [...] | agent [...] | effective | verify [--replay] [-n N] [--update] [--layer name=dir|@ref] | test");
     return 2;
+  }
+
+  /** Tools for people who run one daemon per role. */
+  private static int identity(List<String> args, PrintWriter out, PrintWriter err) {
+    try {
+      if (!args.isEmpty() && args.get(0).equals("link") && args.size() == 5) {
+        IdentityTools.link(
+                java.nio.file.Path.of(args.get(1)),
+                args.get(2),
+                java.nio.file.Path.of(args.get(3)),
+                args.get(4))
+            .forEach(out::println);
+        out.println(
+            "Nothing is allowed yet: add a [[peer_grant]] to the policy.toml of each side for what"
+                + " the other may do.");
+        return 0;
+      }
+      if (!args.isEmpty() && args.get(0).equals("check") && args.size() >= 3) {
+        java.util.Map<String, java.util.Map<String, java.util.Map<String, Object>>> settings =
+            new java.util.TreeMap<>();
+        for (int i = 1; i + 1 < args.size(); i += 2) {
+          settings.put(
+              args.get(i),
+              DaemonConfig.load(java.nio.file.Path.of(args.get(i + 1))).moduleSettings());
+        }
+        List<String> shared = IdentityTools.sharedAccounts(settings);
+        if (shared.isEmpty()) {
+          out.println("No account or place is used by two identities.");
+          return 0;
+        }
+        shared.forEach(line -> out.println("warning: " + line));
+        out.println(
+            "A mailbox belongs to exactly one identity: two daemons on the same one would both act"
+                + " on it.");
+        return 1;
+      }
+      err.println(
+          "usage: identity link <homeA> <nameA> <homeB> <nameB> | identity check <name> <home>...");
+      return 2;
+    } catch (java.io.IOException | DaemonException e) {
+      err.println(e.getMessage());
+      return 1;
+    }
   }
 
   private static int peers(

@@ -279,6 +279,19 @@ Options:
 
 Lists the identities of this machine and whether they run.
 
+#### praksis identity link
+
+Makes two identities of this machine peers of each other: each lists the key and the socket of the other. It allows nothing; grants are added to each policy.toml by hand.
+
+Arguments:
+
+- `<a>`: One identity.
+- `<b>`: The other one.
+
+#### praksis identity check
+
+Warns when two identities use the same account or place in their module settings: a mailbox belongs to exactly one identity.
+
 ### praksis effective
 
 Shows the ruleset that would run: every rule in the order it fires, which layer it comes from, what later layers did to it, and its hash for 'based_on'.
