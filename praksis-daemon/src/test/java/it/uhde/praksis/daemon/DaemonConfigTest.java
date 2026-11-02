@@ -304,4 +304,20 @@ class DaemonConfigTest {
     org.junit.jupiter.api.Assertions.assertThrows(
         DaemonException.class, () -> DaemonConfig.load(home));
   }
+
+  @Test
+  void aHomeNamedLikeAnIdentityMustBeThatIdentity() throws Exception {
+    Path private_ = Files.createDirectory(home.resolve(".praksis-private"));
+    Files.writeString(
+        private_.resolve("praksis.toml"), "format_version = 1\nidentity = \"private\"\n");
+    Daemon.checkIdentity(DaemonConfig.load(private_));
+    Files.writeString(
+        private_.resolve("praksis.toml"), "format_version = 1\nidentity = \"work\"\n");
+    assertThatThrownBy(() -> Daemon.checkIdentity(DaemonConfig.load(private_)))
+        .isInstanceOf(DaemonException.class)
+        .hasMessageContaining("identity 'private'")
+        .hasMessageContaining("identity = \"work\"");
+    // any other directory may hold any identity, or none
+    Daemon.checkIdentity(DaemonConfig.load(home));
+  }
 }

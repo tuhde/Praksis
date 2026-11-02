@@ -229,6 +229,7 @@ public final class Daemon implements AutoCloseable {
   }
 
   private void open() throws DaemonException {
+    checkIdentity(config);
     int socketBytes =
         config.socket().toString().getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
     if (socketBytes > MAX_SOCKET_PATH_BYTES) {
@@ -522,6 +523,27 @@ public final class Daemon implements AutoCloseable {
     return null;
   }
 
+  /**
+   * A home that is named like an identity ({@code ~/.praksis-private}) must be that identity, so
+   * that the daemon of one role is never started in the home of another.
+   */
+  static void checkIdentity(DaemonConfig config) throws DaemonException {
+    String dir = config.home().getFileName() == null ? "" : config.home().getFileName().toString();
+    if (dir.startsWith(".praksis-") && config.identity().isPresent()) {
+      String named = dir.substring(".praksis-".length());
+      if (!named.equals(config.identity().get())) {
+        throw new DaemonException(
+            "the home "
+                + config.home()
+                + " is the home of the identity '"
+                + named
+                + "', but praksis.toml says identity = \""
+                + config.identity().get()
+                + "\". One of them is wrong; nothing was started.");
+      }
+    }
+  }
+
   /** Answers a request of another daemon that has proven its key. */
   private Response handlePeer(Peers.Peer peer, Request request) {
     if (request instanceof Request.PeerCatalog) {
@@ -643,7 +665,9 @@ public final class Daemon implements AutoCloseable {
                 ruleset.name(),
                 ruleset.rules().size(),
                 modules.descriptors().stream().map(ModuleDescriptor::name).toList(),
-                store.pending().size());
+                store.pending().size(),
+                it.uhde.praksis.protocol.Wire.PROTOCOL_VERSION,
+                config.identity().orElse(null));
         case Request.Inject i -> {
           Event event = Injection.event(i, modules.catalog(), clock);
           yield new Response.Injected(event.id(), engine.submit(event));

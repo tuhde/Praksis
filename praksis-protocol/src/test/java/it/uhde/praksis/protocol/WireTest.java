@@ -45,6 +45,8 @@ class WireTest {
     for (Response r :
         List.of(
             new Response.StatusReport(1, "2026-01-01T00:00:00Z", "mail", 2, List.of("maildir"), 0),
+            new Response.StatusReport(
+                1, "2026-01-01T00:00:00Z", "mail", 2, List.of("maildir"), 0, 1, "private"),
             new Response.Injected("id", true),
             new Response.Stopped(),
             new Response.Error("bad\nthing"),

@@ -166,6 +166,8 @@ public sealed interface Response {
    * @param pending the number of events stored but not yet handled
    * @param protocol the version of the protocol that the daemon speaks, see {@link
    *     Wire#PROTOCOL_VERSION}; 0 if the daemon is too old to say
+   * @param identity the name of the identity this daemon is (the role of the person it serves), or
+   *     null if it is not one of several
    */
   record StatusReport(
       long pid,
@@ -174,8 +176,21 @@ public sealed interface Response {
       int rules,
       List<String> modules,
       int pending,
-      int protocol)
+      int protocol,
+      String identity)
       implements Response {
+    /** A report of a daemon that is not named. */
+    public StatusReport(
+        long pid,
+        String startedAt,
+        String ruleset,
+        int rules,
+        List<String> modules,
+        int pending,
+        int protocol) {
+      this(pid, startedAt, ruleset, rules, modules, pending, protocol, null);
+    }
+
     /** A report of the protocol of this version. */
     public StatusReport(
         long pid, String startedAt, String ruleset, int rules, List<String> modules, int pending) {

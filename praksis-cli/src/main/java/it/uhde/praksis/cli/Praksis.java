@@ -183,7 +183,14 @@ public final class Praksis {
     public Integer call() {
       Response response = send(new Request.Status());
       if (response instanceof Response.StatusReport s) {
-        out().println("running, pid " + s.pid() + ", since " + s.startedAt());
+        out()
+            .println(
+                "running"
+                    + (s.identity() == null ? "" : " as the identity " + s.identity())
+                    + ", pid "
+                    + s.pid()
+                    + ", since "
+                    + s.startedAt());
         out().println("ruleset: " + s.ruleset() + " (" + s.rules() + " rules)");
         out()
             .println(
