@@ -67,6 +67,7 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.PeerCatalog.class, name = "peer-catalog"),
   @JsonSubTypes.Type(value = Request.PeerCall.class, name = "peer-call"),
   @JsonSubTypes.Type(value = Request.PeerChanges.class, name = "peer-changes"),
+  @JsonSubTypes.Type(value = Request.Inspect.class, name = "inspect"),
   @JsonSubTypes.Type(value = Request.Stop.class, name = "stop")
 })
 public sealed interface Request {
@@ -173,6 +174,18 @@ public sealed interface Request {
       data = data == null ? Map.of() : data;
     }
   }
+
+  /**
+   * Asks one of a fixed set of read-only questions about the ruleset and what happened to events:
+   * {@code history.find}, {@code history.trace}, {@code history.summary}, {@code rules.list} or
+   * {@code rules.read}. They are the capabilities of the same names in the module {@code praksis},
+   * without the grant check, because they only read what the daemon shows to its owner anyway.
+   * Answered with {@link Response.Inspection}, or with an error for any other name.
+   *
+   * @param what the question
+   * @param args its arguments, as the capability takes them
+   */
+  record Inspect(String what, java.util.Map<String, Object> args) implements Request {}
 
   /**
    * Asks for the latest lines of the run log. Answered with {@link Response.LogLines}.

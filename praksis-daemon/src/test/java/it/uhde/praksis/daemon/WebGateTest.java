@@ -37,10 +37,12 @@ class WebGateTest {
             new Request.Commands(),
             new Request.EntityTypes(),
             new Request.Changes(0, 0),
-            new Request.EntityRead("invoice", "1", List.of()))) {
+            new Request.EntityRead("invoice", "1", List.of()),
+            new Request.Inspect("history.find", Map.of("text", "x")),
+            new Request.Verify(true, 50, false, Map.of("mail", "@feature")))) {
       assertInstanceOf(Response.Done.class, ask(LOOK, r), r.toString());
     }
-    assertEquals(7, handled.size());
+    assertEquals(9, handled.size());
   }
 
   @Test
@@ -70,7 +72,7 @@ class WebGateTest {
             new Request.AgentPlanDrop("1"),
             new Request.StagedDrop("1"),
             new Request.Inject("t", "x", "k", Map.of()),
-            new Request.Verify(false, 0, false, Map.of()),
+            new Request.Verify(false, 0, true, Map.of()),
             new Request.PinSet("acme", "finance", "pin"),
             new Request.RemoteAnswer(1, "approve"),
             new Request.EntityCreate("invoice", Map.of()),

@@ -125,6 +125,28 @@ final class Agent {
         });
   }
 
+  /**
+   * Answers one of the read-only questions of the module for a client that has no grant to give:
+   * only these names, nothing that writes.
+   */
+  Map<String, Object> inspect(String what, Map<String, Object> args) throws Exception {
+    Map<String, Object> a = args == null ? Map.of() : args;
+    return switch (what == null ? "" : what) {
+      case "history.find" -> historyOf().find(a);
+      case "history.trace" -> historyOf().trace(a);
+      case "history.summary" -> historyOf().summary(a);
+      case "rules.list" -> list(null, a);
+      case "rules.read" -> read(null, a);
+      default ->
+          throw new CapabilityException(
+              "unknown question '"
+                  + what
+                  + "'; ask history.find, history.trace, history.summary, rules.list or"
+                  + " rules.read",
+              false);
+    };
+  }
+
   Plans plansOf() throws CapabilityException {
     ready();
     return plans;

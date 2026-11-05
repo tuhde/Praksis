@@ -56,6 +56,9 @@ final class WebGate {
       case Request.EntityQuery s -> true;
       case Request.EntityRead s -> s.reveal() == null || s.reveal().isEmpty();
       case Request.EntityExport s -> true;
+      case Request.Inspect s -> true;
+      // a candidate may be checked, but moving its layers to their latest commits fetches
+      case Request.Verify s -> !s.update();
       case Request.Peers s -> true;
       case Request.RemoteRequests s -> true;
       default -> false;

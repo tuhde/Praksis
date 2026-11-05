@@ -43,6 +43,7 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Response.StagedList.class, name = "staged-list"),
   @JsonSubTypes.Type(value = Response.UntestedRules.class, name = "untested-rules"),
   @JsonSubTypes.Type(value = Response.NoteList.class, name = "note-list"),
+  @JsonSubTypes.Type(value = Response.Inspection.class, name = "inspection"),
   @JsonSubTypes.Type(value = Response.PlanList.class, name = "plan-list"),
   @JsonSubTypes.Type(value = Response.PlanDetail.class, name = "plan-detail"),
   @JsonSubTypes.Type(value = Response.StagedDetail.class, name = "staged-detail"),
@@ -635,6 +636,13 @@ public sealed interface Response {
    * @param why what stands in the way, if something does
    */
   record PlanDetail(Plan plan, boolean runnable, String why) implements Response {}
+
+  /**
+   * The answer to {@link Request.Inspect}: what the capability of that name answers, as it is.
+   *
+   * @param data the result fields
+   */
+  record Inspection(java.util.Map<String, Object> data) implements Response {}
 
   /**
    * The notes of the maintenance agent, newest first.

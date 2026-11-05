@@ -37,7 +37,10 @@ client its own token so that you can revoke one without the others.
 ## What a web client may do
 
 A client with any token can look: the status, the views and screens, the entities, the logs, the
-help, and the lists of approvals, grants, proposals and plans. A client with a token that is not
+help, and the lists of approvals, grants, proposals and plans. It can also ask what happened to an
+event (the history of events and the rules that handled them), read a rule with its test, and check
+a candidate ruleset (`verify`, with a directory or `@ref` for a layer, but not with the option that
+moves layers to their latest commits, because that fetches from the network). A client with a token that is not
 read-only can also start the commands that the ruleset offers to a person; the audit log names the
 client as `web:laptop`.
 

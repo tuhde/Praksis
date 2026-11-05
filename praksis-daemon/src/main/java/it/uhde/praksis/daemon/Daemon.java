@@ -85,6 +85,7 @@ public final class Daemon implements AutoCloseable {
   private Approvals approvals;
   private Shadows shadows;
   private Screens screens;
+  private volatile Agent agentModule;
   private ViewResolver views;
   private final Topics topics = new Topics();
   private ApiServer api;
@@ -252,6 +253,7 @@ public final class Daemon implements AutoCloseable {
               config.moduleSettings(),
               config.enabledModules());
       Agent agent = new Agent();
+      agentModule = agent;
       modules = Builtins.add(modules, agent, entityService::get);
       modules =
           Remotes.add(
@@ -667,6 +669,18 @@ public final class Daemon implements AutoCloseable {
   }
 
   /** A request of a web client: only what {@link WebGate} lets this token ask for. */
+  private Response inspect(Request.Inspect i) {
+    Agent a = agentModule;
+    if (a == null) {
+      return new Response.Error("the daemon is not ready");
+    }
+    try {
+      return new Response.Inspection(a.inspect(i.what(), i.args()));
+    } catch (Exception e) {
+      return new Response.Error(e.getMessage());
+    }
+  }
+
   private Response handleWeb(WebTokens.Token token, Request request) {
     return WebGate.decide(token, request, this::handle);
   }
@@ -744,6 +758,7 @@ public final class Daemon implements AutoCloseable {
         case Request.AgentPlanRun p -> screens.planRun(p.id());
         case Request.AgentPlanDrop p -> screens.planDrop(p.id());
         case Request.Notes n -> screens.notes(n.limit());
+        case Request.Inspect i -> inspect(i);
         case Request.StagedShow s -> screens.stagedDetail(s.id());
         case Request.StagedDrop s -> screens.stagedDrop(s.id());
         case Request.ProposalApprove a -> {
