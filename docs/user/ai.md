@@ -42,3 +42,9 @@ model, where it ran, and a hash of the exact request.
 The module `speech` can turn speech into text with a local engine (Vosk), so no audio leaves the
 machine. In Praksis Desktop a view can show a microphone button on a text input; nothing listens
 until you press it, and every use is an audit line.
+
+## An agent of your own
+
+Any AI agent that speaks MCP can work with Praksis through the server described in
+[Letting an agent use Praksis](mcp.md): it looks at rules and history, checks a branch of a layer
+and hands you proposals, and it has no rights of its own.

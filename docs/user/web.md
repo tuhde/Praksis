@@ -50,6 +50,9 @@ to run it, and each step is checked against the grants as they are), and a note.
 of the audit log under the name of the token. They are the same functions that the maintenance agent
 uses, and nothing they make is applied, run or granted.
 
+An AI agent can use this door too, through the MCP server described in
+[Letting an agent use Praksis](mcp.md).
+
 Everything that gives, widens or answers a permission stays at the daemon itself, where only you
 can reach it: answering approvals, changing grants, deciding trials of rules and proposals, updating
 layers, running plans, reloading, stopping, writing entities, and the requests of other daemons.
