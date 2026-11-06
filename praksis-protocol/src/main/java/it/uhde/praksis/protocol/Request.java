@@ -68,6 +68,7 @@ import java.util.Map;
   @JsonSubTypes.Type(value = Request.PeerCall.class, name = "peer-call"),
   @JsonSubTypes.Type(value = Request.PeerChanges.class, name = "peer-changes"),
   @JsonSubTypes.Type(value = Request.Inspect.class, name = "inspect"),
+  @JsonSubTypes.Type(value = Request.Stage.class, name = "stage"),
   @JsonSubTypes.Type(value = Request.Stop.class, name = "stop")
 })
 public sealed interface Request {
@@ -186,6 +187,20 @@ public sealed interface Request {
    * @param args its arguments, as the capability takes them
    */
   record Inspect(String what, java.util.Map<String, Object> args) implements Request {}
+
+  /**
+   * Hands the daemon something for a person to look at, one of a fixed set: {@code agent.propose}
+   * (test files for a rule of an AI-maintained layer, staged and not applied), {@code plan.propose}
+   * (a plan that waits for the person to run it) or {@code notes.save} (a note for the person).
+   * They are the capabilities of the same names in the module {@code praksis}. Nothing is applied,
+   * run or granted by this request; each use is a line in the audit log under {@code client}.
+   * Answered with {@link Response.Inspection}, or with an error for any other name.
+   *
+   * @param what the kind
+   * @param args its arguments, as the capability takes them
+   * @param client who asks, for the audit log (the web gate sets it to {@code web:<token name>})
+   */
+  record Stage(String what, java.util.Map<String, Object> args, String client) implements Request {}
 
   /**
    * Asks for the latest lines of the run log. Answered with {@link Response.LogLines}.

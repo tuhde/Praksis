@@ -681,6 +681,18 @@ public final class Daemon implements AutoCloseable {
     }
   }
 
+  private Response stage(Request.Stage s) {
+    Agent a = agentModule;
+    if (a == null) {
+      return new Response.Error("the daemon is not ready");
+    }
+    try {
+      return new Response.Inspection(a.stage(s.what(), s.args(), s.client()));
+    } catch (Exception e) {
+      return new Response.Error(e.getMessage());
+    }
+  }
+
   private Response handleWeb(WebTokens.Token token, Request request) {
     return WebGate.decide(token, request, this::handle);
   }
@@ -759,6 +771,7 @@ public final class Daemon implements AutoCloseable {
         case Request.AgentPlanDrop p -> screens.planDrop(p.id());
         case Request.Notes n -> screens.notes(n.limit());
         case Request.Inspect i -> inspect(i);
+        case Request.Stage s -> stage(s);
         case Request.StagedShow s -> screens.stagedDetail(s.id());
         case Request.StagedDrop s -> screens.stagedDrop(s.id());
         case Request.ProposalApprove a -> {

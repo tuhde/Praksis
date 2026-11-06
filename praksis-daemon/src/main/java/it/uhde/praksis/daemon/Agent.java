@@ -55,6 +55,7 @@ final class Agent {
   private volatile LoadedModules modules;
   private volatile AgentStore store;
   private volatile History history;
+  private volatile it.uhde.praksis.engine.AuditLog audit;
   private volatile Plans plans;
 
   /** Gives the capabilities what they need; called when the daemon has put itself together. */
@@ -72,6 +73,7 @@ final class Agent {
     this.modules = modules;
     this.store = new AgentStore(config.dataDirectory().resolve(Builtins.MODULE));
     this.history = new History(log, effective);
+    this.audit = audit;
     this.plans =
         new Plans(
             config, access, modules.catalog(), modules.capabilities(), audit, clock, () -> store);
@@ -137,14 +139,92 @@ final class Agent {
       case "history.summary" -> historyOf().summary(a);
       case "rules.list" -> list(null, a);
       case "rules.read" -> read(null, a);
+      case "plan.catalog" -> plansOf().catalogOfGranted();
       default ->
           throw new CapabilityException(
               "unknown question '"
                   + what
-                  + "'; ask history.find, history.trace, history.summary, rules.list or"
-                  + " rules.read",
+                  + "'; ask history.find, history.trace, history.summary, rules.list,"
+                  + " rules.read or plan.catalog",
               false);
     };
+  }
+
+  /**
+   * Takes something that a person will look at: test files for a rule, a plan, a note. Only these
+   * three, none of which applies, runs or grants anything. The use is an audit line under {@code
+   * client}.
+   */
+  Map<String, Object> stage(String what, Map<String, Object> args, String client) throws Exception {
+    Map<String, Object> a = args == null ? Map.of() : args;
+    String who = client == null || client.isBlank() ? "local" : client;
+    String capability = "praksis." + (what == null ? "" : what);
+    CapabilityContext context =
+        new CapabilityContext() {
+          @Override
+          public boolean dryRun() {
+            return false;
+          }
+
+          @Override
+          public String idempotencyKey() {
+            return "";
+          }
+
+          @Override
+          public java.util.Optional<it.uhde.praksis.capability.Event> event() {
+            return java.util.Optional.empty();
+          }
+        };
+    Map<String, Object> result;
+    try {
+      result =
+          switch (what == null ? "" : what) {
+            case "agent.propose" -> propose(context, a);
+            case "plan.propose" -> plansOf().propose(context, a);
+            case "notes.save" -> saveNote(context, a);
+            default ->
+                throw new CapabilityException(
+                    "unknown kind '" + what + "'; use agent.propose, plan.propose or notes.save",
+                    false);
+          };
+    } catch (Exception e) {
+      auditStage(who, capability, a, false, e.getMessage());
+      throw e;
+    }
+    auditStage(who, capability, a, true, null);
+    return result;
+  }
+
+  private void auditStage(
+      String who, String capability, Map<String, Object> args, boolean allowed, String error) {
+    if (audit == null) {
+      return;
+    }
+    // what a person needs to see in the log, not the contents of files or of a note
+    Map<String, Object> shown = new LinkedHashMap<>();
+    for (String key : new String[] {"layer", "rule", "title", "request"}) {
+      if (args.get(key) instanceof String s) {
+        shown.put(key, s.length() > 200 ? s.substring(0, 200) : s);
+      }
+    }
+    if (args.get("files") instanceof List<?> files) {
+      shown.put(
+          "files",
+          files.stream()
+              .map(f -> f instanceof Map<?, ?> m ? String.valueOf(m.get("path")) : "?")
+              .toList());
+    }
+    if (args.get("steps") instanceof List<?> steps) {
+      shown.put("steps", (long) steps.size());
+    }
+    audit.record(
+        java.time.Instant.now(),
+        who,
+        capability,
+        shown,
+        allowed,
+        java.util.Optional.ofNullable(error));
   }
 
   Plans plansOf() throws CapabilityException {

@@ -81,6 +81,13 @@ final class WebGate {
       return handler.apply(
           new Request.RunCommand(run.command(), run.args(), "web:" + token.name()));
     }
+    if (request instanceof Request.Stage stage) {
+      if (token.readOnly()) {
+        return refuse(token, request, "this token is read only");
+      }
+      // a proposal is for a person to look at; the audit line names the web client
+      return handler.apply(new Request.Stage(stage.what(), stage.args(), "web:" + token.name()));
+    }
     if (request instanceof Request.EntityRead) {
       return refuse(token, request, "revealing protected fields is not offered over the web");
     }

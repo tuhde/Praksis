@@ -44,6 +44,12 @@ moves layers to their latest commits, because that fetches from the network). A 
 read-only can also start the commands that the ruleset offers to a person; the audit log names the
 client as `web:laptop`.
 
+A token that is not read-only can also hand the daemon three kinds of proposals, for you to look at:
+test files for a rule of a layer that takes proposals (staged, not applied), a plan (it waits for you
+to run it, and each step is checked against the grants as they are), and a note. Each use is a line
+of the audit log under the name of the token. They are the same functions that the maintenance agent
+uses, and nothing they make is applied, run or granted.
+
 Everything that gives, widens or answers a permission stays at the daemon itself, where only you
 can reach it: answering approvals, changing grants, deciding trials of rules and proposals, updating
 layers, running plans, reloading, stopping, writing entities, and the requests of other daemons.

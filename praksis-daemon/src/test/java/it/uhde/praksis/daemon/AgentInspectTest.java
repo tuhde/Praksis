@@ -20,4 +20,17 @@ class AgentInspectTest {
       assertTrue(e.getMessage().contains("unknown question"), e.getMessage());
     }
   }
+
+  @Test
+  void onlyThreeKindsOfProposalAreTaken() {
+    for (String what :
+        new String[] {
+          "rules.read", "plan.read", "plan.run", "layers.update", "entity.create", "", null
+        }) {
+      CapabilityException e =
+          assertThrows(
+              CapabilityException.class, () -> new Agent().stage(what, Map.of(), "web:x"), what);
+      assertTrue(e.getMessage().contains("unknown kind"), e.getMessage());
+    }
+  }
 }

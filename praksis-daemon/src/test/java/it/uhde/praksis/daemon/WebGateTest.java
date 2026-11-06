@@ -92,6 +92,16 @@ class WebGateTest {
   }
 
   @Test
+  void aProposalNeedsATokenThatMayDoMoreThanLookAndIsAuditedUnderItsName() {
+    var note = new Request.Stage("notes.save", Map.of("title", "t", "text", "x"), "forged");
+    assertInstanceOf(Response.Error.class, ask(LOOK, note));
+    assertTrue(handled.isEmpty());
+    assertInstanceOf(Response.Done.class, ask(FULL, note));
+    assertEquals("web:laptop", ((Request.Stage) handled.get(0)).client());
+    assertEquals("notes.save", ((Request.Stage) handled.get(0)).what());
+  }
+
+  @Test
   void revealingProtectedFieldsIsRefused() {
     assertInstanceOf(
         Response.Error.class, ask(FULL, new Request.EntityRead("person", "1", List.of("iban"))));

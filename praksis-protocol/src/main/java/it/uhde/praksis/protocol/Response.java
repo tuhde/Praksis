@@ -638,7 +638,8 @@ public sealed interface Response {
   record PlanDetail(Plan plan, boolean runnable, String why) implements Response {}
 
   /**
-   * The answer to {@link Request.Inspect}: what the capability of that name answers, as it is.
+   * The answer to {@link Request.Inspect} or {@link Request.Stage}: what the capability of that
+   * name answers, as it is.
    *
    * @param data the result fields
    */
