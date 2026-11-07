@@ -47,4 +47,6 @@ until you press it, and every use is an audit line.
 
 Any AI agent that speaks MCP can work with Praksis through the server described in
 [Letting an agent use Praksis](mcp.md): it looks at rules and history, checks a branch of a layer
-and hands you proposals, and it has no rights of its own.
+and hands you proposals, and it has no rights of its own. The Claude Shell, described in [Talking
+to Claude in the terminal](shell.md), is a program for the terminal that does this with a model on
+your machine or with Claude, and gives you commands to decide what it proposes.

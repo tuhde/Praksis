@@ -57,6 +57,10 @@ them.
 | `propose` | those, and the tools that hand you a proposal |
 | `commands` | those, and tools that start the commands your rules offer to a person |
 
+Claude Code and Claude Desktop need nothing but this server. If you want a program of Praksis for
+the conversation, with commands of your own to approve and run plans, see [Talking to Claude in the
+terminal](shell.md).
+
 ## What the agent can look at
 
 The tools that look are `praksis_status`, `praksis_effective` (the rules in use and where each comes

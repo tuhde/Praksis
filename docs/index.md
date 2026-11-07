@@ -18,6 +18,7 @@ The documentation is licensed under
 - [Other daemons](user/peers.md)
 - [Using Praksis in a browser](user/web.md)
 - [Letting an agent use Praksis (MCP)](user/mcp.md)
+- [Talking to Claude in the terminal (the Claude Shell)](user/shell.md)
 - [Verification and trials](user/verification.md)
 - [The AI features](user/ai.md)
 - [Offline mode](user/offline.md)
