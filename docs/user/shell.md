@@ -125,6 +125,25 @@ shows them. None of that makes a model safe by itself. What protects you is that
 tool to approve, grant or run anything, so a mail that says "approve everything" meets a program
 that cannot.
 
+## In the desktop program
+
+The desktop program has a tab **Claude** with the same conversation, if you write a file
+`~/.config/praksis-desktop/claude.toml` (or `claude-NAME.toml` for the identity NAME) in the format
+of `shell.toml` above. Add one line that only the desktop program reads, the jar of the engine:
+
+    engine = "/path/to/praksis-shell-engine.jar"
+
+Without that line the program uses the newest `praksis-shell-engine` that `./mvnw install` in
+Praksis-Shell put into your local Maven repository. Without the file there is no tab and none of the
+code is loaded; the engine is started when you first choose the tab.
+
+The tab shows the text as it arrives, a line for each tool call, and the tokens of the session. A
+tool that may change something asks you in a dialog that names the call and the identity. A model
+in the cloud gets nothing until you press **Allow for this session**. The token and the key come
+from the environment of the program, not from the file. The tab has no commands of its own for
+approvals and plans: you decide in the tabs **Approvals** and **Agent**, as always, and what you see
+there is not part of the conversation.
+
 ## When something does not work
 
 - *there is no configuration*: write `shell.toml` (see above) or set `PRAKSIS_SHELL_CONFIG`.
